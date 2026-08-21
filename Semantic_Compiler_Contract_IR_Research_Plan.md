@@ -339,19 +339,37 @@ Future domains:
 
 Goal:
 
-Validate the core hypothesis.
+Decide whether the Contract IR idea is worth further engineering work. Phase 0 is
+a finite engineering exploration, not a publication-grade evaluation.
 
 Tasks:
 
--   define minimal Contract IR;
--   generate synthetic IR;
--   generate NL descriptions;
--   train small models;
--   measure semantic recovery.
+-   implement a minimal A/B/C topology that converges on shared canonical
+    semantics, deterministic elaboration, typed OPEN handling, and a closed
+    `EXECUTE | ASK | REJECT` runtime;
+-   keep OPEN to finite enum domains with at most two unresolved slots per
+    scenario while testing joint USER/USER and USER/EXECUTOR behavior;
+-   exercise hand-authored blocking fixtures, executor coverage, authority, and
+    bounded per-scenario traces;
+-   run exactly one real non-gold C bridge path plus separate Gold C and Gold
+    canonical debug paths;
+-   use an optional frozen-LM interface smoke test only after the deterministic
+    path closes.
 
-Success criterion:
+Engineering exit:
 
-IR representation reduces variance compared with direct NL processing.
+All blocking fixtures and gold typed paths close; ASK/executor behavior is
+correct; failures are inspectable; the real C bridge has at least one plausible
+success; and no invalid state can execute silently. Stop and revise if the IR is
+unexpressive, the two-slot semantics are already excessively complex, or the
+bridge/traces are unusable.
+
+The authoritative scope, topology, fixtures, debug paths, exit checklist, and
+provenance rules are defined in
+`IR_Design_Memo_v0_Phase0_Engineering_Exploration_Plan.md`. Repository
+grounding, real patches, Lean/SWE-bench, dynamic C/K/P, RL, model scaling,
+complex multi-agent work, mutation/data studies, training campaigns, and
+publication claims are deferred.
 
 ------------------------------------------------------------------------
 
