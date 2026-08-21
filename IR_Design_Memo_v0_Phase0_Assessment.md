@@ -131,11 +131,12 @@ Decision:
     - kind: REJECT
       reason: HARD_UNSAT | NO_AUTHORIZED_ACTION
       witness: HardUnsatWitness | NoAuthorizedActionWitness
+      executor_resolutions: [ResolutionTrace, ...]
 ```
 
 `ClauseSemanticLink` 冻结为 elaborated canonical `(modality, predicate, typed_args, proposition_support)`；`SlotSemanticLink` 冻结为 `(type, owner=USER|EXECUTOR, referenced_clause_link, argument_position, proposition_support)`。`ASK.semantic_slot_links` 中每个 link 必须 `owner=USER`；`ResolutionTrace` 冻结为 `(slot_semantic_link(owner=EXECUTOR), selected_value, resolver=EXECUTOR)`。REJECT 的 reason 与 witness variant 必须匹配，EXECUTE 的每个 executor resolution 必须在 action 前记录且覆盖实际选择。所有 decision links 使用 canonical semantic links，不输出 arm-local clause/slot IDs。
 
-`ASK([])` 非法；不需要询问时必须进入 EXECUTE 或 REJECT。syntax/schema/type/linking failure 在 runtime 前记为 `SYSTEM_FAILURE(ELABORATION_ERROR)`，不是第三种 REJECT reason。候选动作、动作 effect 和转移均由 \(W\) 冻结。`ASK` 只用于尚需用户决定且会影响安全动作，或会影响 ADT 强制要求的正确 REJECT reason/witness 的 slot；`REJECT` 不能用作提高条件可靠率的捷径。
+`ASK([])` 非法；不需要询问时必须进入 EXECUTE 或 REJECT。syntax/schema/type/linking failure 在 runtime 前记为 `SYSTEM_FAILURE(ELABORATION_ERROR)`，不是第三种 REJECT reason。候选动作、动作 effect 和转移均由 \(W\) 冻结。`ASK` 只用于尚需用户决定且会影响安全动作，或会影响 ADT 强制要求的正确 REJECT reason/witness 的 slot；`REJECT` 不能用作提高条件可靠率的捷径。REJECT 若依赖 EXECUTOR-owned completion，必须记录覆盖该 joint completion 的 `executor_resolutions`；没有 EXECUTOR-owned slot 时该列表为空。
 
 ---
 
@@ -503,19 +504,26 @@ a\in A_{valid}(\mathcal C[\omega_U,\omega_E],W)
 \end{aligned}
 \]
 
-没有 EXECUTOR-owned slot 时，\(\omega_E\) 是唯一空 assignment。定义 `ValidGoldWitness(r,w,ω)` 为 witness \(w\) 的 canonical semantic links 对 completion \(\omega\) 构成 reason \(r\) 的有效 Gold witness；多个 byte-different witness 只有在 Gold oracle 明确置于同一 acceptable semantic equivalence class 时才等价：
+没有 EXECUTOR-owned slot 时，\(\omega_E\) 是唯一空 assignment。定义 `ValidGoldWitness(r,w,ω)` 为 witness \(w\) 的 canonical semantic links 对 completion \(\omega\) 构成 reason \(r\) 的有效 Gold witness；多个 byte-different witness 只有在 Gold oracle 明确置于同一 acceptable semantic equivalence class 时才等价。executor 可以为形成 REJECT 选择一个 coverage-preserving joint assignment，但只有不存在 coverage-preserving EXECUTE 时才允许这样做：
 
 \[
 \begin{aligned}
 Rejectable_{gold}(\Omega_q)\iff
-\exists r\exists w\quad
-\forall \omega\in\Omega_q:\quad&
-GoldRejectReason(\omega)=r\\
-&\land ValidGoldWitness(r,w,\omega)
+&\neg Executable_{gold}(q)\\
+&\land
+\exists\omega_E\exists r\exists w:\quad
+F_U^q(\omega_E)=P_U(q)\neq\varnothing\\
+&\land
+\forall \omega_U\in P_U(q):\quad
+\left[
+GoldRejectReason(\omega_U,\omega_E)=r
+\land
+ValidGoldWitness(r,w,(\omega_U,\omega_E))
+\right]
 \end{aligned}
 \]
 
-因此只有一个共同的 \((reason,witness\ equivalence\ class)\) 对全部兼容 completions 有效，才可直接 REJECT；reason 相同但没有共同 witness 时也必须继续询问 USER slot。sufficiency 的括号与量词冻结为：
+因此只有一个 coverage-preserving executor assignment 和共同 \((reason,witness\ equivalence\ class)\) 对全部兼容 USER completions 有效，才可直接 REJECT；reason 相同但没有共同 witness 时也必须继续询问 USER slot。runtime 输出该 \(\omega_E\) 的 resolution traces。尤其当 \(U_U=\varnothing\) 时，只要某个 executor assignment 可形成有效 EXECUTE 或 REJECT，closed Decision ADT 就有结果；若两者都不存在，scenario 在 0B oracle generation 时拒收。sufficiency 的括号与量词冻结为：
 
 \[
 Q\text{ sufficient}
@@ -844,7 +852,7 @@ LMExecutorInput_R:
 
 两个 arms 中只有 `structured_semantics` 的 serialization 和语义等价的 format instruction 可以变化；support view、dialect、world view、顺序与 output schema 必须逐项相同。Oracle A/B 具有相同 canonical semantics，因而该对比隔离 serialization/interface consumption。LM 必须从输入语义推导 conflict/rejection 并生成 canonical-linked witness；输入不得包含 precomputed active contract、conflict class、valid action set 或 witness。Predicted A/B 和 Raw NL/C 的 frozen-LM run 只作为包含 compiler/bridge error 的次级端到端分析。
 
-0A/0F 必须对有限 world 穷举验证 decision sufficiency：对每个 Oracle canonical state，full-\(W\) runtime 与只读取 `LMExecutorWorldView` 的 reference runtime 返回相同的 allowed Decision set，以及相同的 acceptable canonical witness-equivalence classes。该 property 失败则 RQ1c harness 不得运行。
+进入 0F 前必须对有限 world 穷举验证 decision sufficiency：对每个 Oracle canonical state，full-\(W\) runtime 与只读取 `LMExecutorWorldView` 的 reference runtime 返回相同的 allowed Decision set，以及相同的 acceptable canonical witness-equivalence classes。该 RQ1c-specific property 失败只阻断 0F/Gate 5 与当前 LM harness，不阻断已经独立通过的 0D/0E deterministic experiments。
 
 固定 executor checkpoint、task information、candidate action set 与顺序、display format、maximum token、retry、wall-clock/tool budget 和 decoding parameters。格式说明使用第 9.1 节的等价 adapter instructions。schema-valid task-directed corruption 用于检查 LM 是否读取相关字段；LM 未按预期响应时报告 `LM interface: No-Go`，不自动回溯否定 deterministic representation/runtime。
 
@@ -912,7 +920,7 @@ u_R=
 
 ### 10.5 Confirmatory contrasts 与 guardrails
 
-RQ1a 的唯一 confirmatory primary contrast 是 B 对 C；RQ1b 的 primary contrast 是 A 对 B；A 对 C 是支持性对比：
+RQ1a 的唯一 confirmatory primary contrast 是 B 对 C；RQ1b 的 primary contrast 是 A 对 B。A 对 C 不得替代 B/C 来裁决 RQ1a，但必须作为预注册、multiplicity-controlled 的 encoding-selection contrast：只有 A/C 完整裁决通过，A 才能凭自己的 RQ2 被选入 Phase 1。
 
 \[
 \Delta_{X-Y}
@@ -953,7 +961,7 @@ field renaming 单独报告原标签与置换标签的 effect heterogeneity，�
 
 使用 paired base-scenario comparison；置信区间按 base scenario 做 cluster bootstrap。正式样本量由独立 pilot 的 baseline violation、paired discordance 和预注册最小效应计算，不能用更多 paraphrase 替代独立 scenario。
 
-采用冻结的层级检验顺序：Gate 0 formal validity → RQ1a 的 B/C primary → RQ1b 的 A/B primary；A/C、field renaming 与各 strata secondary 按预注册的 family-wise 规则报告，不能事后选择最有利对比。RQ2、RQ3a、RQ3b 和 RQ1c 各自形成独立 hypothesis family。
+采用冻结的层级检验顺序：Gate 0 formal validity → RQ1a 的 B/C primary → RQ1b 的 A/B primary；A/C selection contrast、field renaming 与各 strata secondary 按预注册的 family-wise 规则报告，不能事后选择最有利对比。A/C 不能挽救失败的 B/C RQ1a，只决定 A 是否具备后续采用资格。RQ2、RQ3a、RQ3b 和 RQ1c 各自形成独立 hypothesis family。
 
 预注册时冻结：
 
@@ -1004,7 +1012,6 @@ prompted compiler 只用于早期可学性和 schema pilot。支持 RQ2/RQ3 的 
 - C extractive-channel constraints、out-of-fold bridge protocol 与 semantic-smuggling audit；
 - compiler/elaborator/runtime information boundary；
 - closed Decision ADT、REJECT precedence 与 witness schemas；
-- full-\(W\) runtime 与 LMExecutorWorldView reference runtime 的 exhaustive decision/witness parity；
 - OPEN joint completion、executor coverage 与 non-vacuous ASK oracle；
 - Gold evaluator 对 EXECUTE/ASK/REJECT、HARD_UNSAT、NO_AUTHORIZED_ACTION 与 witnesses 的唯一结果或显式等价答案集合；
 - USER-only authority gate 与多 support-set evaluation；
@@ -1024,7 +1031,7 @@ prompted compiler 只用于早期可学性和 schema pilot。支持 RQ2/RQ3 的 
 
 ### Gate 3：Compilation stability，RQ2
 
-learned compiler 必须在 independent human set、unseen template 与 unseen verbalizer 上满足预注册的 surface recovery、common projection、OPEN owner/type、USER authority/support、minimal-pair sensitivity、role counterfactual 与 system-failure thresholds。prompted compiler 不能用于最终 RQ2 Go。项目 continuation 要求至少一个 full-semantic encoding（A 或 B）的 learned compiler 通过。
+learned compiler 必须在 independent human set、unseen template 与 unseen verbalizer 上满足预注册的 surface recovery、common projection、OPEN owner/type、USER authority/support、minimal-pair sensitivity、role counterfactual 与 system-failure thresholds。prompted compiler 不能用于最终 RQ2 Go。一个 encoding 只有同时满足自己的 RQ2 Go 与相对 C 的完整行为裁决 \(E\succ C\)，才具备 Phase 1 selection eligibility。
 
 ### Gate 4：Data，RQ3a/RQ3b
 
@@ -1032,7 +1039,7 @@ RQ3a 独立裁决 mutation-enriched semantic coverage；RQ3b 独立裁决 certif
 
 ### Gate 5：LM interface，RQ1c
 
-以第 10.2 节的 Oracle A/B input tuple 为主分析，判断 frozen LM 是否读取 modality、OPEN owner、authority/support，并能推导 conflict/rejection、生成 witness；报告 A/B 的正确率、corruption sensitivity 和成本。Predicted A/B 只作次级。失败时报告 `Representation/runtime: Go; LM interface: No-Go`（若 Gate 1 已通过），而不是否定 semantic pipeline。
+Gate 5 的先决条件是第 10.2 节 full-\(W\)/LMExecutorWorldView exhaustive decision/witness parity；失败则只停止 RQ1c/0F。通过后，以 Oracle A/B input tuple 为主分析，判断 frozen LM 是否读取 modality、OPEN owner、authority/support，并能推导 conflict/rejection、生成 witness；报告 A/B 的正确率、corruption sensitivity 和成本。Predicted A/B 只作次级。失败时报告 `Representation/runtime: Go; LM interface: No-Go`（若 Gate 1 已通过），而不是否定 semantic pipeline。
 
 ### 结果组合与项目 continuation
 
@@ -1040,9 +1047,9 @@ RQ3a 独立裁决 mutation-enriched semantic coverage；RQ3b 独立裁决 certif
 
 | B/C 完整裁决 | A/B 完整裁决 | RQ1a | RQ1b / encoding 解释 | continuation 影响 |
 |---|---|---|---|---|
-| \(B\succ C\) | \(A\succ B\) | Go | Go；A 有额外 encoding value | 若 A 或 B 的 RQ2 Go，可继续 |
-| \(B\succ C\) | \(B\succ A\) | Go | A No-Go；B 是更优 full-semantic encoding | 若 A 或 B 的 RQ2 Go，可继续；B Go 时优先采用 B，仅 A Go 时采用 A 并保留 A 的 RQ1b No-Go |
-| \(B\succ C\) | \(A\nsucc B\land B\nsucc A\) | Go | No-Go/Inconclusive；未证实某个 serialization 独优 | 若 A 或 B 的 RQ2 Go，可继续 |
+| \(B\succ C\) | \(A\succ B\) | Go | Go；A 有额外 encoding value | B 的 RQ2 Go，或 A 的 RQ2 Go 且 \(A\succ C\) 时可继续 |
+| \(B\succ C\) | \(B\succ A\) | Go | A No-Go；B 是更优 full-semantic encoding | B 的 RQ2 Go 时可继续；仅 A 的 RQ2 Go 还必须 \(A\succ C\)，采用 A 但保留其 RQ1b No-Go |
+| \(B\succ C\) | \(A\nsucc B\land B\nsucc A\) | Go | No-Go/Inconclusive；未证实某个 serialization 独优 | B 的 RQ2 Go，或 A 的 RQ2 Go 且 \(A\succ C\) 时可继续 |
 | \(B\nsucc C\) | 任意 A/B 结果 | No-Go/Inconclusive | 单独报告 RQ1b；即使 \(A\succ C\)，也只能作 encoding-specific/supportive 诊断，不能挽救 RQ1a | 不满足核心 continuation |
 
 核心 continuation 冻结为：
@@ -1053,7 +1060,10 @@ Phase\ 1\ continuation
 \iff
 RQ1a\ Go
 \land
-RQ2\ Go\text{ for at least one full-semantic encoding}
+\exists E\in\{A,B\}:\quad
+RQ2(E)\ Go
+\land
+E\succ C
 }
 \]
 
