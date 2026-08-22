@@ -2,7 +2,7 @@
 > **STATUS: HISTORICAL INPUT / SUPERSEDED / NON-AUTHORITATIVE**
 >
 > 本文件仅保留为历史输入，不是当前实现指令。当前唯一权威入口是
-> [`IR_Design_Memo_v0_Phase0_Engineering_Exploration_Plan.md`](IR_Design_Memo_v0_Phase0_Engineering_Exploration_Plan.md)。
+> [`IR_Design_Memo_v0_Phase0_Engineering_Exploration_Plan.md`](../../../Phase0/IR_Design_Memo_v0_Phase0_Engineering_Exploration_Plan.md)。
 > 与该计划冲突的 Perfect Bridge、禁止 cross-slot constraints、RQ3 或 Gate
 > 指导均不得实现。加入本状态块之前，最初收到的正文 SHA-256 为
 > `e97b4c33247747251b5470e46b48ec8f36094da5575ff6e1840b56abb662c1d0`；原始正文仍完整保存在 Git 历史 commit `d6bd56e` 中。

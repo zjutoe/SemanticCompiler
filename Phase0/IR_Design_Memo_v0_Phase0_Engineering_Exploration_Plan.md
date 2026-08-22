@@ -1,5 +1,7 @@
 # Contract IR v0 Phase 0 工程探索计划
 
+执行导航见 [Phase 0 过程契约](README.md) 与[阶段 handoff 索引](handoffs/README.md)；本文仍是 Phase 0 唯一的语义与工程权威。具体 handoff 必须在前一阶段独立验收后按实际发现逐个生成，不得预写全部后续阶段。
+
 ## 1. 定位与待做决策
 
 Phase 0 是一次有限、可穷举、以实现反馈为目标的工程探索。它只回答：

@@ -1,3 +1,10 @@
+> [!CAUTION]
+> **REVIEW INPUT / NON-AUTHORITATIVE**
+>
+> 本文件仅为历史评审输入，不是当前执行授权。已接受的计划与状态头优先；上游计划见
+> [`IR_Design_Memo_v0.md`](../../plans/IR_Design_Memo_v0.md) 与
+> [`Semantic_Compiler_Contract_IR_Research_Plan.md`](../../plans/Semantic_Compiler_Contract_IR_Research_Plan.md)。
+
 # `IR_Design_Memo_v0_Phase1_Assessment.md` 修改建议
 
 ## 文档用途
@@ -11,8 +18,8 @@ IR_Design_Memo_v0_Phase1_Assessment.md
 修改应以以下两份上游文档为依据：
 
 ```text
-IR_Design_Memo_v0.md
-Semantic_Compiler_Contract_IR_Research_Plan.md
+../../plans/IR_Design_Memo_v0.md
+../../plans/Semantic_Compiler_Contract_IR_Research_Plan.md
 ```
 
 当前评估文件的总体方向是正确的：它成功将一个较大的长期研究计划，压缩成了一个有限、可证伪、可归因的实验流程。建议保留其主要实验框架，但在开始实现之前，必须补足若干关键形式语义，并修正可能导致循环论证、baseline 不公平或实验结论过度外推的问题。

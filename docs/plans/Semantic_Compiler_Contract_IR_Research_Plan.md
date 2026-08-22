@@ -372,7 +372,7 @@ excessively complex, or the exact C fixture/trace contract cannot be met.
 
 The authoritative scope, topology, fixtures, debug paths, exit checklist, and
 provenance rules are defined in
-`IR_Design_Memo_v0_Phase0_Engineering_Exploration_Plan.md`. Repository
+[`IR_Design_Memo_v0_Phase0_Engineering_Exploration_Plan.md`](../../Phase0/IR_Design_Memo_v0_Phase0_Engineering_Exploration_Plan.md). Repository
 grounding, real patches, Lean/SWE-bench, dynamic C/K/P, RL, model scaling,
 complex multi-agent work, mutation/data studies, training campaigns, and
 publication claims are deferred.

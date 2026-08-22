@@ -2,7 +2,7 @@
 > **STATUS: HISTORICAL INPUT / SUPERSEDED / NON-AUTHORITATIVE**
 >
 > 本文件针对现已删除的历史 assessment，仅作为历史输入保留，绝不能驱动当前工作。当前唯一权威入口是
-> [`IR_Design_Memo_v0_Phase0_Engineering_Exploration_Plan.md`](IR_Design_Memo_v0_Phase0_Engineering_Exploration_Plan.md)。本状态块之前的原始 bytes 仍完整保存在 Git 历史 commit `af1833e` 中。
+> [`IR_Design_Memo_v0_Phase0_Engineering_Exploration_Plan.md`](../../../Phase0/IR_Design_Memo_v0_Phase0_Engineering_Exploration_Plan.md)。本状态块之前的原始 bytes 仍完整保存在 Git 历史 commit `af1833e` 中。
 
 # Contract IR v0 Phase 0 实验协议第二轮修订意见
 

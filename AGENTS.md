@@ -22,6 +22,15 @@
 - Preserve manifests, fixed splits, seed provenance, and checksums for evidence outside Git.
 - Return failed or scientifically suspicious runs to `main`; `operator` must not patch code or silently alter protocol.
 
+## Progressive Stage Handoffs
+
+- Generate concrete stage handoffs just in time. Only the next executable stage may have a checked-in handoff; do not batch-generate handoff documents for downstream stages.
+- A roadmap may name later stages, dependencies, and coarse objectives, but it must not pre-freeze their mutation paths, acceptance details, or executable instructions before predecessor work is accepted.
+- Create the successor handoff only after the predecessor's exact commit or range is independently reviewed and accepted, all review repairs are committed, and unexpected implementation findings have been incorporated into the governing plan or fixtures.
+- If execution reveals an unanticipated contract, interface, or scope issue, stop the stage and return it to `main`. Repair and review the governing contract first; do not continue from a stale handoff or draft future handoffs around the issue.
+- Bind each newly generated handoff to the then-current accepted source commit and actual predecessor artifacts. A previously drafted or superseded handoff grants no mutation authority.
+- Generate an optional-stage handoff only after its prerequisites are accepted and the user has explicitly authorized the optional scope, external access, cost, and side effects that it requires.
+
 ## Research Review and Acceptance
 
 - High-risk changes include simulators, observation semantics, task distributions, train/calibration/evaluation splits, metrics, statistical aggregation, acceptance logic, and result interpretation.
