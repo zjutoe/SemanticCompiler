@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import unittest
 from dataclasses import asdict, is_dataclass
 from itertools import product
@@ -52,6 +53,17 @@ INPUT_KEYS = ("source_envelope", "entry_payload", "visible_world_context", "slot
 EXPECTED_KEYS = ("canonical_state", "elaboration", "legal_joint_completions", "decision", "result", "failure", "dependency_assertions")
 S0 = "slot:clause:000:arg0"
 S1 = "slot:clause:000:arg1"
+EXPECTED_FIXTURE_SHA256S = {
+    "F1_OPEN_UU_COUPLED_MIN_ASK.json": "fb4c6e49c76645cbd4b91735207a98986aa983c4a86a85c08a4a8e23f44d92f3",
+    "F2_OPEN_UE_OWNER_BOUNDARY.json": "7864518319a776b256413e8507798a64888bd4efa136c9f1bde1b470ad1e9f81",
+    "F3_EXECUTOR_COVERAGE_NONVACUOUS.json": "645e801041a5f8c95f697cf11cb9f7ac729c3cfdef7085fd144f703327ddd8c6",
+    "F4_EXECUTOR_JOINT_TRACE.json": "3c8edea79e912af00ea3f073fc2b49e28de30ff1344ccd68dccf3a2946183959",
+    "F5_AUTHORITY_ROLE_COUNTERFACTUAL.json": "41a35d35fb991b3ae9634cf005303c22f2d0358361a345c1c81adcc72ac3e9dc",
+    "F6_HARD_UNSAT_WITNESS.json": "dc6ccceca0a4eb2a4d9f78a25487d92e0b668726a44ae521b5138ea21433d627",
+    "F7_NO_AUTHORIZED_ACTION_WITNESS.json": "78c244fb3e8830c8bc46591826b859e72d773f3ccdbecba6373669d61338f9df",
+    "F8_NO_SILENT_INVALID_EXECUTION.json": "8c13656f690e92bd2541b0821c8222d95dc2a391716fb68e5f1c2f4b07d5aedb",
+    "F9_C_NORMAL_END_TO_END_EXACT.json": "82204b6ce26d829917d43b88f071864d9b5a21e11e66bef173897f53f39a54fa",
+}
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -80,6 +92,28 @@ def _assignment(*items: tuple[str, dict[str, str]]) -> list[dict[str, Any]]:
     return [{"semantic_slot_link": link, "value": value} for link, value in items]
 
 
+def _obs(name: str, value: dict[str, str]) -> dict[str, Any]:
+    return {"name": name, "value": value}
+
+
+def _value_term(type_id: str, value_id: str) -> dict[str, Any]:
+    return {"kind": "VALUE", "value": _tv(type_id, value_id)}
+
+
+def _candidate(modality: str, predicate: str, args: list[dict[str, Any]], support: list[str]) -> dict[str, Any]:
+    return {
+        "modality": modality,
+        "predicate": predicate,
+        "args": args,
+        "proposition_support": support,
+        "claimed_authority_support": support,
+    }
+
+
+def _canonical(*candidates: dict[str, Any]) -> dict[str, Any]:
+    return {"normative_candidates": list(candidates), "knowledge_assertions": [], "open_slot_mentions": []}
+
+
 def _validate_typed_value(value: Any) -> None:
     assert tuple(value.keys()) == ("type", "value")
     assert value["type"] in TYPE_VALUE_ORDER
@@ -94,35 +128,115 @@ def _validate_assignment(value: Any) -> None:
         _validate_typed_value(item["value"])
 
 
+def _validate_source_span_shape(value: Any) -> None:
+    assert tuple(value.keys()) == ("ref", "role", "text")
+    assert isinstance(value["ref"], str)
+    assert value["role"] in ("USER", "ASSISTANT", "TOOL")
+    assert isinstance(value["text"], str)
+
+
+def _validate_elaboration_shape(value: Any) -> None:
+    assert tuple(value.keys()) == ("candidates", "active_clause_links", "knowledge_assertions", "open_slots", "slot_domains", "constraint_links")
+    for candidate in value["candidates"]:
+        assert tuple(candidate.keys()) == ("clause_link", "authority", "active")
+        assert isinstance(candidate["clause_link"], str)
+        assert candidate["authority"] in ("USER", "NONE")
+        assert isinstance(candidate["active"], bool)
+    assert all(isinstance(item, str) for item in value["active_clause_links"])
+    assert value["knowledge_assertions"] == []
+    for slot in value["open_slots"]:
+        assert tuple(slot.keys()) == ("semantic_slot_link", "type", "owner", "resolved_value")
+        assert isinstance(slot["semantic_slot_link"], str)
+        assert slot["type"] in TYPE_VALUE_ORDER
+        assert slot["owner"] in ("USER", "EXECUTOR")
+        if slot["resolved_value"] is not None:
+            _validate_typed_value(slot["resolved_value"])
+    for domain in value["slot_domains"]:
+        assert tuple(domain.keys()) == ("semantic_slot_link", "values")
+        assert isinstance(domain["semantic_slot_link"], str)
+        assert isinstance(domain["values"], list)
+        for item in domain["values"]:
+            _validate_typed_value(item)
+    assert all(isinstance(item, str) for item in value["constraint_links"])
+
+
+def _validate_witness_shape(value: Any) -> None:
+    kind = value["kind"]
+    if kind == "ClauseConflictWitness":
+        assert tuple(value.keys()) == ("kind", "clause_links")
+        assert all(isinstance(item, str) for item in value["clause_links"])
+    elif kind == "EmptyDomainWitness":
+        assert tuple(value.keys()) == ("kind", "semantic_slot_link", "excluding_constraint_links")
+        assert isinstance(value["semantic_slot_link"], str)
+        assert all(isinstance(item, str) for item in value["excluding_constraint_links"])
+    elif kind == "CrossConstraintWitness":
+        assert tuple(value.keys()) == ("kind", "cross_constraint_links")
+        assert all(isinstance(item, str) for item in value["cross_constraint_links"])
+    elif kind == "NoAuthorizedActionWitness":
+        assert tuple(value.keys()) == ("kind", "excluded_actions")
+        for action in value["excluded_actions"]:
+            assert tuple(action.keys()) == ("action_id", "unauthorized_managed_effects")
+            assert isinstance(action["action_id"], str)
+            assert all(effect in dialect.MANAGED_EFFECTS for effect in action["unauthorized_managed_effects"])
+    else:
+        raise AssertionError(value)
+
+
+def _validate_decision_shape(value: Any) -> None:
+    if value["kind"] == "ASK":
+        assert tuple(value.keys()) == ("kind", "semantic_slot_links")
+        assert all(isinstance(item, str) for item in value["semantic_slot_links"])
+    elif value["kind"] == "EXECUTE":
+        assert tuple(value.keys()) == ("kind", "action_id", "executor_resolutions")
+        assert isinstance(value["action_id"], str)
+        _validate_assignment(value["executor_resolutions"])
+    elif value["kind"] == "REJECT":
+        assert tuple(value.keys()) == ("kind", "reason", "witness", "executor_resolutions")
+        assert value["reason"] in ("HARD_UNSAT", "NO_AUTHORIZED_ACTION")
+        _validate_witness_shape(value["witness"])
+        _validate_assignment(value["executor_resolutions"])
+    else:
+        raise AssertionError(value)
+
+
+def _validate_result_shape(value: Any) -> None:
+    assert tuple(value.keys()) == ("kind", "action_id", "final_observables", "ordered_effects")
+    assert value["kind"] == "EXECUTED"
+    assert isinstance(value["action_id"], str)
+    assert tuple(value["final_observables"].keys()) == ("format",)
+    _validate_typed_value(value["final_observables"]["format"])
+    assert all(effect in dialect.MANAGED_EFFECTS for effect in value["ordered_effects"])
+
+
+def _validate_dependency_assertions_shape(value: Any) -> None:
+    assert tuple(value.keys()) == ("normal_content_refs", "referenced_support_view", "canonical_equals_case")
+    assert all(isinstance(item, str) for item in value["normal_content_refs"])
+    for span in value["referenced_support_view"]:
+        _validate_source_span_shape(span)
+    assert value["canonical_equals_case"] is None or isinstance(value["canonical_equals_case"], str)
+
+
 def _validate_expected_shape(expected: dict[str, Any]) -> None:
     assert tuple(expected.keys()) == EXPECTED_KEYS
     if expected["canonical_state"] is not None:
         _validate_canonical_state_shape(expected["canonical_state"])
     if expected["elaboration"] is not None:
-        assert tuple(expected["elaboration"].keys()) == ("candidates", "active_clause_links", "knowledge_assertions", "open_slots", "slot_domains", "constraint_links")
+        _validate_elaboration_shape(expected["elaboration"])
     if expected["legal_joint_completions"] is not None:
         assert isinstance(expected["legal_joint_completions"], list)
         for assignment in expected["legal_joint_completions"]:
             _validate_assignment(assignment)
     decision = expected["decision"]
     if decision is not None:
-        if decision["kind"] == "ASK":
-            assert tuple(decision.keys()) == ("kind", "semantic_slot_links")
-        elif decision["kind"] == "EXECUTE":
-            assert tuple(decision.keys()) == ("kind", "action_id", "executor_resolutions")
-            _validate_assignment(decision["executor_resolutions"])
-        elif decision["kind"] == "REJECT":
-            assert tuple(decision.keys()) == ("kind", "reason", "witness", "executor_resolutions")
-            assert decision["reason"] in ("HARD_UNSAT", "NO_AUTHORIZED_ACTION")
-            _validate_assignment(decision["executor_resolutions"])
-        else:
-            raise AssertionError(decision)
+        _validate_decision_shape(decision)
     if expected["result"] is not None:
-        assert tuple(expected["result"].keys()) == ("kind", "action_id", "final_observables", "ordered_effects")
+        _validate_result_shape(expected["result"])
     if expected["failure"] is not None:
         assert tuple(expected["failure"].keys()) == ("stage", "reason")
+        assert isinstance(expected["failure"]["stage"], str)
+        assert isinstance(expected["failure"]["reason"], str)
     if expected["dependency_assertions"] is not None:
-        assert tuple(expected["dependency_assertions"].keys()) == ("normal_content_refs", "referenced_support_view", "canonical_equals_case")
+        _validate_dependency_assertions_shape(expected["dependency_assertions"])
 
 
 def _validate_canonical_state_shape(state: dict[str, Any]) -> None:
@@ -139,6 +253,11 @@ def _validate_canonical_state_shape(state: dict[str, Any]) -> None:
                 raise AssertionError(term)
     for mention in state["open_slot_mentions"]:
         assert tuple(mention.keys()) == ("type", "owner", "proposition_link", "argument_position", "proposition_support")
+        assert mention["type"] in TYPE_VALUE_ORDER
+        assert mention["owner"] in ("USER", "EXECUTOR")
+        assert isinstance(mention["proposition_link"], str)
+        assert isinstance(mention["argument_position"], int)
+        assert all(isinstance(item, str) for item in mention["proposition_support"])
 
 
 def _slot_domains(case_input) -> dict[str, list[dict[str, str]]]:
@@ -182,6 +301,96 @@ def _oracle_legal_completions(case_input) -> list[list[dict[str, Any]]]:
     return completions
 
 
+EXPECTED_TRAJECTORIES = [
+    {"trajectory_id": "tau:f1:json_strict", "action_id": "f1_render_json_strict", "assignment": _assignment((S0, _tv("OutputFormat", "JSON")), (S1, _tv("Strictness", "STRICT"))), "initial_observables": [_obs("format", _tv("OutputFormat", "UNSET"))], "final_observables": [_obs("format", _tv("OutputFormat", "JSON")), _obs("strictness", _tv("Strictness", "STRICT"))], "ordered_effects": []},
+    {"trajectory_id": "tau:f1:yaml_lenient", "action_id": "f1_render_yaml_lenient", "assignment": _assignment((S0, _tv("OutputFormat", "YAML")), (S1, _tv("Strictness", "LENIENT"))), "initial_observables": [_obs("format", _tv("OutputFormat", "UNSET"))], "final_observables": [_obs("format", _tv("OutputFormat", "YAML")), _obs("strictness", _tv("Strictness", "LENIENT"))], "ordered_effects": []},
+    {"trajectory_id": "tau:f2:return_none_quiet", "action_id": "f2_return_none_quiet", "assignment": _assignment((S0, _tv("ErrorPolicy", "RETURN_NONE")), (S1, _tv("LogMode", "QUIET"))), "initial_observables": [], "final_observables": [_obs("error_policy", _tv("ErrorPolicy", "RETURN_NONE")), _obs("log_mode", _tv("LogMode", "QUIET"))], "ordered_effects": []},
+    {"trajectory_id": "tau:f2:raise_verbose", "action_id": "f2_raise_verbose", "assignment": _assignment((S0, _tv("ErrorPolicy", "RAISE")), (S1, _tv("LogMode", "VERBOSE"))), "initial_observables": [], "final_observables": [_obs("error_policy", _tv("ErrorPolicy", "RAISE")), _obs("log_mode", _tv("LogMode", "VERBOSE"))], "ordered_effects": []},
+    {"trajectory_id": "tau:f3:safe_local", "action_id": "f3_use_local", "assignment": _assignment((S0, _tv("ServiceMode", "SAFE")), (S1, _tv("Backend", "LOCAL"))), "initial_observables": [], "final_observables": [_obs("service_mode", _tv("ServiceMode", "SAFE")), _obs("backend", _tv("Backend", "LOCAL"))], "ordered_effects": []},
+    {"trajectory_id": "tau:f3:fast_local", "action_id": "f3_use_local", "assignment": _assignment((S0, _tv("ServiceMode", "FAST")), (S1, _tv("Backend", "LOCAL"))), "initial_observables": [], "final_observables": [_obs("service_mode", _tv("ServiceMode", "FAST")), _obs("backend", _tv("Backend", "LOCAL"))], "ordered_effects": []},
+    {"trajectory_id": "tau:f3:fast_remote", "action_id": "f3_use_remote", "assignment": _assignment((S0, _tv("ServiceMode", "FAST")), (S1, _tv("Backend", "REMOTE"))), "initial_observables": [], "final_observables": [_obs("service_mode", _tv("ServiceMode", "FAST")), _obs("backend", _tv("Backend", "REMOTE"))], "ordered_effects": []},
+    {"trajectory_id": "tau:f4:yaml_lenient", "action_id": "f4_a_yaml_lenient", "assignment": _assignment((S0, _tv("OutputFormat", "YAML")), (S1, _tv("Strictness", "LENIENT"))), "initial_observables": [_obs("format", _tv("OutputFormat", "UNSET"))], "final_observables": [_obs("format", _tv("OutputFormat", "YAML")), _obs("strictness", _tv("Strictness", "LENIENT"))], "ordered_effects": []},
+    {"trajectory_id": "tau:f4:json_strict", "action_id": "f4_b_json_strict", "assignment": _assignment((S0, _tv("OutputFormat", "JSON")), (S1, _tv("Strictness", "STRICT"))), "initial_observables": [_obs("format", _tv("OutputFormat", "UNSET"))], "final_observables": [_obs("format", _tv("OutputFormat", "JSON")), _obs("strictness", _tv("Strictness", "STRICT"))], "ordered_effects": []},
+    {"trajectory_id": "tau:f5:fixed_yaml", "action_id": "f5_a_yaml", "assignment": [], "initial_observables": [_obs("format", _tv("OutputFormat", "UNSET"))], "final_observables": [_obs("format", _tv("OutputFormat", "YAML"))], "ordered_effects": []},
+    {"trajectory_id": "tau:f5:fixed_json", "action_id": "f5_b_json", "assignment": [], "initial_observables": [_obs("format", _tv("OutputFormat", "UNSET"))], "final_observables": [_obs("format", _tv("OutputFormat", "JSON"))], "ordered_effects": []},
+    {"trajectory_id": "tau:f5:open_yaml", "action_id": "f5_a_yaml", "assignment": _assignment((S0, _tv("OutputFormat", "YAML"))), "initial_observables": [_obs("format", _tv("OutputFormat", "UNSET"))], "final_observables": [_obs("format", _tv("OutputFormat", "YAML"))], "ordered_effects": []},
+    {"trajectory_id": "tau:f5:open_json", "action_id": "f5_b_json", "assignment": _assignment((S0, _tv("OutputFormat", "JSON"))), "initial_observables": [_obs("format", _tv("OutputFormat", "UNSET"))], "final_observables": [_obs("format", _tv("OutputFormat", "JSON"))], "ordered_effects": []},
+    {"trajectory_id": "tau:f6:json", "action_id": "f6_render_json", "assignment": [], "initial_observables": [_obs("format", _tv("OutputFormat", "UNSET"))], "final_observables": [_obs("format", _tv("OutputFormat", "JSON"))], "ordered_effects": []},
+    {"trajectory_id": "tau:f6:yaml", "action_id": "f6_render_yaml", "assignment": [], "initial_observables": [_obs("format", _tv("OutputFormat", "UNSET"))], "final_observables": [_obs("format", _tv("OutputFormat", "YAML"))], "ordered_effects": []},
+    {"trajectory_id": "tau:f7:write_json", "action_id": "f7_write_json", "assignment": [], "initial_observables": [_obs("format", _tv("OutputFormat", "UNSET"))], "final_observables": [_obs("format", _tv("OutputFormat", "JSON"))], "ordered_effects": ["WRITE_OUTPUT"]},
+    {"trajectory_id": "tau:f9:write_json", "action_id": "write_json", "assignment": [], "initial_observables": [_obs("format", _tv("OutputFormat", "UNSET"))], "final_observables": [_obs("format", _tv("OutputFormat", "JSON"))], "ordered_effects": ["WRITE_OUTPUT"]},
+]
+EXPECTED_DECISIONS = {
+    ("F1_OPEN_UU_COUPLED_MIN_ASK", "unresolved"): {"kind": "ASK", "semantic_slot_links": [S0]},
+    ("F2_OPEN_UE_OWNER_BOUNDARY", "unresolved"): {"kind": "ASK", "semantic_slot_links": [S0]},
+    ("F2_OPEN_UE_OWNER_BOUNDARY", "resolved_return_none"): {"kind": "EXECUTE", "action_id": "f2_return_none_quiet", "executor_resolutions": _assignment((S1, _tv("LogMode", "QUIET")))},
+    ("F3_EXECUTOR_COVERAGE_NONVACUOUS", "unresolved"): {"kind": "EXECUTE", "action_id": "f3_use_local", "executor_resolutions": _assignment((S1, _tv("Backend", "LOCAL")))},
+    ("F4_EXECUTOR_JOINT_TRACE", "unresolved"): {"kind": "EXECUTE", "action_id": "f4_b_json_strict", "executor_resolutions": _assignment((S0, _tv("OutputFormat", "JSON")), (S1, _tv("Strictness", "STRICT")))},
+    ("F5_AUTHORITY_ROLE_COUNTERFACTUAL", "user_fixed"): {"kind": "EXECUTE", "action_id": "f5_b_json", "executor_resolutions": []},
+    ("F5_AUTHORITY_ROLE_COUNTERFACTUAL", "assistant_fixed"): {"kind": "EXECUTE", "action_id": "f5_a_yaml", "executor_resolutions": []},
+    ("F5_AUTHORITY_ROLE_COUNTERFACTUAL", "tool_fixed"): {"kind": "EXECUTE", "action_id": "f5_a_yaml", "executor_resolutions": []},
+    ("F5_AUTHORITY_ROLE_COUNTERFACTUAL", "user_executor_open"): {"kind": "EXECUTE", "action_id": "f5_a_yaml", "executor_resolutions": _assignment((S0, _tv("OutputFormat", "YAML")))},
+    ("F6_HARD_UNSAT_WITNESS", "clause_conflict"): {"kind": "REJECT", "reason": "HARD_UNSAT", "witness": {"kind": "ClauseConflictWitness", "clause_links": ["clause:000", "clause:001"]}, "executor_resolutions": []},
+    ("F6_HARD_UNSAT_WITNESS", "static_empty"): {"kind": "REJECT", "reason": "HARD_UNSAT", "witness": {"kind": "EmptyDomainWitness", "semantic_slot_link": S0, "excluding_constraint_links": ["constraint:f6:format_not_json", "constraint:f6:format_not_yaml"]}, "executor_resolutions": []},
+    ("F6_HARD_UNSAT_WITNESS", "cross_empty"): {"kind": "REJECT", "reason": "HARD_UNSAT", "witness": {"kind": "CrossConstraintWitness", "cross_constraint_links": ["constraint:f6:no_output_policy_pair"]}, "executor_resolutions": []},
+    ("F7_NO_AUTHORIZED_ACTION_WITNESS", "missing_allow"): {"kind": "REJECT", "reason": "NO_AUTHORIZED_ACTION", "witness": {"kind": "NoAuthorizedActionWitness", "excluded_actions": [{"action_id": "f7_write_json", "unauthorized_managed_effects": ["WRITE_OUTPUT"]}]}, "executor_resolutions": []},
+    ("F8_NO_SILENT_INVALID_EXECUTION", "dangling_support"): None,
+    ("F8_NO_SILENT_INVALID_EXECUTION", "wrong_enum_type"): None,
+    ("F8_NO_SILENT_INVALID_EXECUTION", "missing_adapter_link"): None,
+    ("F8_NO_SILENT_INVALID_EXECUTION", "malformed_domain"): None,
+    ("F8_NO_SILENT_INVALID_EXECUTION", "declared_empty_domain"): None,
+    ("F9_C_NORMAL_END_TO_END_EXACT", "normal"): {"kind": "EXECUTE", "action_id": "write_json", "executor_resolutions": []},
+    ("F9_C_NORMAL_END_TO_END_EXACT", "gold_c_original"): {"kind": "EXECUTE", "action_id": "write_json", "executor_resolutions": []},
+    ("F9_C_NORMAL_END_TO_END_EXACT", "gold_c_distractor_variant"): {"kind": "EXECUTE", "action_id": "write_json", "executor_resolutions": []},
+}
+EXPECTED_FAILURES = {
+    ("F8_NO_SILENT_INVALID_EXECUTION", "dangling_support"): {"stage": "elaboration", "reason": "DANGLING_SUPPORT_REF"},
+    ("F8_NO_SILENT_INVALID_EXECUTION", "wrong_enum_type"): {"stage": "elaboration", "reason": "TYPE_MISMATCH"},
+    ("F8_NO_SILENT_INVALID_EXECUTION", "missing_adapter_link"): {"stage": "adapter_or_bridge", "reason": "MISSING_ADAPTER_LINK"},
+    ("F8_NO_SILENT_INVALID_EXECUTION", "malformed_domain"): {"stage": "elaboration", "reason": "MALFORMED_DOMAIN_DECLARATION"},
+    ("F8_NO_SILENT_INVALID_EXECUTION", "declared_empty_domain"): {"stage": "elaboration", "reason": "DECLARED_EMPTY_DOMAIN"},
+}
+EXPECTED_WRITE_JSON_RESULT = {"kind": "EXECUTED", "action_id": "write_json", "final_observables": {"format": _tv("OutputFormat", "JSON")}, "ordered_effects": ["WRITE_OUTPUT"]}
+EXPECTED_F9_DEPENDENCIES = {
+    "normal": {"normal_content_refs": ["u1", "u2", "a1"], "referenced_support_view": [{"ref": "u1", "role": "USER", "text": "Require final format JSON."}, {"ref": "u2", "role": "USER", "text": "Allow managed effect WRITE_OUTPUT."}, {"ref": "a1", "role": "ASSISTANT", "text": "Use YAML."}], "canonical_equals_case": None},
+    "gold_c_original": {"normal_content_refs": [], "referenced_support_view": [{"ref": "u1", "role": "USER", "text": "Require final format JSON."}, {"ref": "u2", "role": "USER", "text": "Allow managed effect WRITE_OUTPUT."}], "canonical_equals_case": None},
+    "gold_c_distractor_variant": {"normal_content_refs": [], "referenced_support_view": [{"ref": "u1", "role": "USER", "text": "Require final format JSON."}, {"ref": "u2", "role": "USER", "text": "Allow managed effect WRITE_OUTPUT."}], "canonical_equals_case": "gold_c_original"},
+}
+EXPECTED_F9_CANONICAL = {
+    "normal": _canonical(
+        _candidate("REQUIRE", "world.final_format_is", [_value_term("OutputFormat", "JSON")], ["u1"]),
+        _candidate("ALLOW", "effect.WRITE_OUTPUT", [], ["u2"]),
+        _candidate("REQUIRE", "world.final_format_is", [_value_term("OutputFormat", "YAML")], ["a1"]),
+    ),
+    "gold_c_original": _canonical(
+        _candidate("REQUIRE", "world.final_format_is", [_value_term("OutputFormat", "JSON")], ["u1"]),
+        _candidate("ALLOW", "effect.WRITE_OUTPUT", [], ["u2"]),
+    ),
+    "gold_c_distractor_variant": _canonical(
+        _candidate("REQUIRE", "world.final_format_is", [_value_term("OutputFormat", "JSON")], ["u1"]),
+        _candidate("ALLOW", "effect.WRITE_OUTPUT", [], ["u2"]),
+    ),
+}
+EXPECTED_ELABORATION_CANDIDATES = {
+    ("F1_OPEN_UU_COUPLED_MIN_ASK", "unresolved"): [("clause:000", "USER", True)],
+    ("F2_OPEN_UE_OWNER_BOUNDARY", "unresolved"): [("clause:000", "USER", True)],
+    ("F2_OPEN_UE_OWNER_BOUNDARY", "resolved_return_none"): [("clause:000", "USER", True)],
+    ("F3_EXECUTOR_COVERAGE_NONVACUOUS", "unresolved"): [("clause:000", "USER", True)],
+    ("F4_EXECUTOR_JOINT_TRACE", "unresolved"): [("clause:000", "USER", True), ("clause:001", "USER", True)],
+    ("F5_AUTHORITY_ROLE_COUNTERFACTUAL", "user_fixed"): [("clause:000", "USER", True)],
+    ("F5_AUTHORITY_ROLE_COUNTERFACTUAL", "assistant_fixed"): [("clause:000", "NONE", False)],
+    ("F5_AUTHORITY_ROLE_COUNTERFACTUAL", "tool_fixed"): [("clause:000", "NONE", False)],
+    ("F5_AUTHORITY_ROLE_COUNTERFACTUAL", "user_executor_open"): [("clause:000", "USER", True)],
+    ("F6_HARD_UNSAT_WITNESS", "clause_conflict"): [("clause:000", "USER", True), ("clause:001", "USER", True)],
+    ("F6_HARD_UNSAT_WITNESS", "static_empty"): [("clause:000", "USER", True)],
+    ("F6_HARD_UNSAT_WITNESS", "cross_empty"): [("clause:000", "USER", True)],
+    ("F7_NO_AUTHORIZED_ACTION_WITNESS", "missing_allow"): [("clause:000", "USER", True)],
+    ("F9_C_NORMAL_END_TO_END_EXACT", "normal"): [("clause:000", "USER", True), ("clause:001", "USER", True), ("clause:002", "NONE", False)],
+    ("F9_C_NORMAL_END_TO_END_EXACT", "gold_c_original"): [("clause:000", "USER", True), ("clause:001", "USER", True)],
+    ("F9_C_NORMAL_END_TO_END_EXACT", "gold_c_distractor_variant"): [("clause:000", "USER", True), ("clause:001", "USER", True)],
+}
+
+
 class E0DialectAndFixturesTest(unittest.TestCase):
     maxDiff = None
 
@@ -209,32 +418,10 @@ class E0DialectAndFixturesTest(unittest.TestCase):
         self.assertEqual(TYPE_VALUE_ORDER["Backend"], ("LOCAL", "REMOTE"))
 
     def test_trajectory_catalog_is_exact_and_only_f7_f9_emit_write_output(self) -> None:
-        self.assertEqual(
-            tuple(dialect.TRAJECTORIES_BY_ID),
-            (
-                "tau:f1:json_strict",
-                "tau:f1:yaml_lenient",
-                "tau:f2:return_none_quiet",
-                "tau:f2:raise_verbose",
-                "tau:f3:safe_local",
-                "tau:f3:fast_local",
-                "tau:f3:fast_remote",
-                "tau:f4:yaml_lenient",
-                "tau:f4:json_strict",
-                "tau:f5:fixed_yaml",
-                "tau:f5:fixed_json",
-                "tau:f5:open_yaml",
-                "tau:f5:open_json",
-                "tau:f6:json",
-                "tau:f6:yaml",
-                "tau:f7:write_json",
-                "tau:f9:write_json",
-            ),
-        )
+        self.assertEqual([_freeze(item) for item in dialect.TRAJECTORIES], EXPECTED_TRAJECTORIES)
+        self.assertEqual(tuple(dialect.TRAJECTORIES_BY_ID), tuple(item["trajectory_id"] for item in EXPECTED_TRAJECTORIES))
         effectful = [item.trajectory_id for item in dialect.TRAJECTORIES if item.ordered_effects]
         self.assertEqual(effectful, ["tau:f7:write_json", "tau:f9:write_json"])
-        self.assertEqual(dialect.TRAJECTORIES_BY_ID["tau:f4:json_strict"].action_id, "f4_b_json_strict")
-        self.assertEqual(_freeze(dialect.TRAJECTORIES_BY_ID["tau:f2:return_none_quiet"].initial_observables), [])
 
     def test_fixture_documents_have_exact_catalog_and_strict_envelope(self) -> None:
         found_fixture_ids = []
@@ -251,6 +438,12 @@ class E0DialectAndFixturesTest(unittest.TestCase):
                 self.assertEqual(tuple(case["input"].keys()), INPUT_KEYS)
                 _validate_expected_shape(case["expected"])
         self.assertEqual(tuple(found_fixture_ids), tuple(EXPECTED_CASE_IDS))
+
+    def test_fixture_files_are_byte_exact(self) -> None:
+        self.assertEqual(tuple(EXPECTED_FIXTURE_SHA256S), FIXTURE_FILES)
+        for file_name in FIXTURE_FILES:
+            data = (FIXTURE_DIR / file_name).read_bytes()
+            self.assertEqual(hashlib.sha256(data).hexdigest(), EXPECTED_FIXTURE_SHA256S[file_name])
 
     def test_loader_is_expected_blind_and_loads_all_cases_losslessly(self) -> None:
         total = 0
@@ -306,22 +499,33 @@ class E0DialectAndFixturesTest(unittest.TestCase):
                     continue
                 self.assertEqual(expected["legal_joint_completions"], _oracle_legal_completions(case), (case.fixture_id, case.case_id))
 
-    def test_exact_decisions_and_witness_routes_are_frozen(self) -> None:
-        expected = _read_expected(FIXTURE_DIR / "F1_OPEN_UU_COUPLED_MIN_ASK.json")["unresolved"]
-        self.assertEqual(expected["decision"], {"kind": "ASK", "semantic_slot_links": [S0]})
-        expected = _read_expected(FIXTURE_DIR / "F2_OPEN_UE_OWNER_BOUNDARY.json")
-        self.assertEqual(expected["resolved_return_none"]["decision"], {"kind": "EXECUTE", "action_id": "f2_return_none_quiet", "executor_resolutions": _assignment((S1, _tv("LogMode", "QUIET")))})
-        expected = _read_expected(FIXTURE_DIR / "F3_EXECUTOR_COVERAGE_NONVACUOUS.json")["unresolved"]
-        self.assertEqual(expected["decision"], {"kind": "EXECUTE", "action_id": "f3_use_local", "executor_resolutions": _assignment((S1, _tv("Backend", "LOCAL")))})
-        expected = _read_expected(FIXTURE_DIR / "F4_EXECUTOR_JOINT_TRACE.json")["unresolved"]
-        self.assertEqual(expected["decision"], {"kind": "EXECUTE", "action_id": "f4_b_json_strict", "executor_resolutions": _assignment((S0, _tv("OutputFormat", "JSON")), (S1, _tv("Strictness", "STRICT")))})
-        expected = _read_expected(FIXTURE_DIR / "F6_HARD_UNSAT_WITNESS.json")
-        self.assertEqual(expected["clause_conflict"]["decision"]["witness"]["kind"], "ClauseConflictWitness")
-        self.assertEqual(expected["static_empty"]["decision"]["witness"]["kind"], "EmptyDomainWitness")
-        self.assertEqual(expected["cross_empty"]["decision"]["witness"]["kind"], "CrossConstraintWitness")
-        expected = _read_expected(FIXTURE_DIR / "F7_NO_AUTHORIZED_ACTION_WITNESS.json")["missing_allow"]
-        self.assertEqual(expected["decision"]["reason"], "NO_AUTHORIZED_ACTION")
-        self.assertEqual(expected["decision"]["witness"], {"kind": "NoAuthorizedActionWitness", "excluded_actions": [{"action_id": "f7_write_json", "unauthorized_managed_effects": ["WRITE_OUTPUT"]}]})
+    def test_exact_expected_case_contracts_are_frozen(self) -> None:
+        seen_keys = []
+        for file_name in FIXTURE_FILES:
+            document = _read_json(FIXTURE_DIR / file_name)
+            for case in document["cases"]:
+                key = (document["fixture_id"], case["case_id"])
+                expected = case["expected"]
+                seen_keys.append(key)
+                self.assertEqual(expected["decision"], EXPECTED_DECISIONS[key], key)
+                self.assertEqual(expected["failure"], EXPECTED_FAILURES.get(key), key)
+                self.assertEqual(expected["result"], EXPECTED_WRITE_JSON_RESULT if key[0] == "F9_C_NORMAL_END_TO_END_EXACT" else None, key)
+                self.assertEqual(expected["dependency_assertions"], EXPECTED_F9_DEPENDENCIES.get(key[1]) if key[0] == "F9_C_NORMAL_END_TO_END_EXACT" else None, key)
+                if key[0] == "F9_C_NORMAL_END_TO_END_EXACT":
+                    self.assertEqual(expected["canonical_state"], EXPECTED_F9_CANONICAL[key[1]], key)
+                else:
+                    self.assertIsNone(expected["canonical_state"], key)
+                if key[0] == "F8_NO_SILENT_INVALID_EXECUTION":
+                    self.assertIsNone(expected["elaboration"], key)
+                    self.assertIsNone(expected["legal_joint_completions"], key)
+                else:
+                    actual_candidates = [
+                        (item["clause_link"], item["authority"], item["active"])
+                        for item in expected["elaboration"]["candidates"]
+                    ]
+                    self.assertEqual(actual_candidates, EXPECTED_ELABORATION_CANDIDATES[key], key)
+        self.assertEqual(tuple(seen_keys), tuple(EXPECTED_DECISIONS))
+        self.assertEqual(set(EXPECTED_FAILURES), {key for key in seen_keys if key[0] == "F8_NO_SILENT_INVALID_EXECUTION"})
 
     def test_f8_invalid_inputs_are_preserved_without_execution_or_expected_exposure(self) -> None:
         path = FIXTURE_DIR / "F8_NO_SILENT_INVALID_EXECUTION.json"
