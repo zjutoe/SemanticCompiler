@@ -1,0 +1,47 @@
+{
+  "fixture_id": "F5_AUTHORITY_ROLE_COUNTERFACTUAL",
+  "schema_version": "phase0.e0.v1",
+  "dialect_version": "contract-ir.phase0.v0",
+  "cases": [
+    {
+      "case_id": "user_fixed",
+      "entry_stage": "CANONICAL",
+      "input": {"source_envelope": {"spans": [{"ref": "u1", "role": "USER", "text": "Require final format JSON."}]}, "entry_payload": {"kind": "CANONICAL", "canonical_state": {"normative_candidates": [{"modality": "REQUIRE", "predicate": "world.final_format_is", "args": [{"kind": "VALUE", "value": {"type": "OutputFormat", "value": "JSON"}}], "proposition_support": ["u1"], "claimed_authority_support": ["u1"]}], "knowledge_assertions": [], "open_slot_mentions": []}}, "visible_world_context": {"entities": [], "observable_values": []}, "slot_declarations": [], "static_constraints": [], "cross_constraints": [], "candidate_trajectory_ids": ["tau:f5:fixed_yaml", "tau:f5:fixed_json"]},
+      "expected": {"canonical_state": null, "elaboration": {"candidates": [{"clause_link": "clause:000", "authority": "USER", "active": true}], "active_clause_links": ["clause:000"], "knowledge_assertions": [], "open_slots": [], "slot_domains": [], "constraint_links": []}, "legal_joint_completions": [[]], "decision": {"kind": "EXECUTE", "action_id": "f5_b_json", "executor_resolutions": []}, "result": null, "failure": null, "dependency_assertions": null}
+    },
+    {
+      "case_id": "assistant_fixed",
+      "entry_stage": "CANONICAL",
+      "input": {"source_envelope": {"spans": [{"ref": "a1", "role": "ASSISTANT", "text": "Require final format JSON."}]}, "entry_payload": {"kind": "CANONICAL", "canonical_state": {"normative_candidates": [{"modality": "REQUIRE", "predicate": "world.final_format_is", "args": [{"kind": "VALUE", "value": {"type": "OutputFormat", "value": "JSON"}}], "proposition_support": ["a1"], "claimed_authority_support": ["a1"]}], "knowledge_assertions": [], "open_slot_mentions": []}}, "visible_world_context": {"entities": [], "observable_values": []}, "slot_declarations": [], "static_constraints": [], "cross_constraints": [], "candidate_trajectory_ids": ["tau:f5:fixed_yaml", "tau:f5:fixed_json"]},
+      "expected": {"canonical_state": null, "elaboration": {"candidates": [{"clause_link": "clause:000", "authority": "NONE", "active": false}], "active_clause_links": [], "knowledge_assertions": [], "open_slots": [], "slot_domains": [], "constraint_links": []}, "legal_joint_completions": [[]], "decision": {"kind": "EXECUTE", "action_id": "f5_a_yaml", "executor_resolutions": []}, "result": null, "failure": null, "dependency_assertions": null}
+    },
+    {
+      "case_id": "tool_fixed",
+      "entry_stage": "CANONICAL",
+      "input": {"source_envelope": {"spans": [{"ref": "t1", "role": "TOOL", "text": "Require final format JSON."}]}, "entry_payload": {"kind": "CANONICAL", "canonical_state": {"normative_candidates": [{"modality": "REQUIRE", "predicate": "world.final_format_is", "args": [{"kind": "VALUE", "value": {"type": "OutputFormat", "value": "JSON"}}], "proposition_support": ["t1"], "claimed_authority_support": ["t1"]}], "knowledge_assertions": [], "open_slot_mentions": []}}, "visible_world_context": {"entities": [], "observable_values": []}, "slot_declarations": [], "static_constraints": [], "cross_constraints": [], "candidate_trajectory_ids": ["tau:f5:fixed_yaml", "tau:f5:fixed_json"]},
+      "expected": {"canonical_state": null, "elaboration": {"candidates": [{"clause_link": "clause:000", "authority": "NONE", "active": false}], "active_clause_links": [], "knowledge_assertions": [], "open_slots": [], "slot_domains": [], "constraint_links": []}, "legal_joint_completions": [[]], "decision": {"kind": "EXECUTE", "action_id": "f5_a_yaml", "executor_resolutions": []}, "result": null, "failure": null, "dependency_assertions": null}
+    },
+    {
+      "case_id": "user_executor_open",
+      "entry_stage": "CANONICAL",
+      "input": {
+        "source_envelope": {"spans": [{"ref": "u1", "role": "USER", "text": "Require an executor-selected final format."}]},
+        "entry_payload": {"kind": "CANONICAL", "canonical_state": {"normative_candidates": [{"modality": "REQUIRE", "predicate": "world.final_format_is", "args": [{"kind": "OPEN", "type": "OutputFormat", "semantic_slot_link": "slot:clause:000:arg0"}], "proposition_support": ["u1"], "claimed_authority_support": ["u1"]}], "knowledge_assertions": [], "open_slot_mentions": [{"type": "OutputFormat", "owner": "EXECUTOR", "proposition_link": "clause:000", "argument_position": 0, "proposition_support": ["u1"]}]}},
+        "visible_world_context": {"entities": [], "observable_values": []},
+        "slot_declarations": [{"semantic_slot_link": "slot:clause:000:arg0", "type": "OutputFormat", "owner": "EXECUTOR", "schema_domain": [{"type": "OutputFormat", "value": "JSON"}, {"type": "OutputFormat", "value": "YAML"}], "resolved_value": null}],
+        "static_constraints": [],
+        "cross_constraints": [],
+        "candidate_trajectory_ids": ["tau:f5:open_yaml", "tau:f5:open_json"]
+      },
+      "expected": {
+        "canonical_state": null,
+        "elaboration": {"candidates": [{"clause_link": "clause:000", "authority": "USER", "active": true}], "active_clause_links": ["clause:000"], "knowledge_assertions": [], "open_slots": [{"semantic_slot_link": "slot:clause:000:arg0", "type": "OutputFormat", "owner": "EXECUTOR", "resolved_value": null}], "slot_domains": [{"semantic_slot_link": "slot:clause:000:arg0", "values": [{"type": "OutputFormat", "value": "JSON"}, {"type": "OutputFormat", "value": "YAML"}]}], "constraint_links": []},
+        "legal_joint_completions": [[{"semantic_slot_link": "slot:clause:000:arg0", "value": {"type": "OutputFormat", "value": "JSON"}}], [{"semantic_slot_link": "slot:clause:000:arg0", "value": {"type": "OutputFormat", "value": "YAML"}}]],
+        "decision": {"kind": "EXECUTE", "action_id": "f5_a_yaml", "executor_resolutions": [{"semantic_slot_link": "slot:clause:000:arg0", "value": {"type": "OutputFormat", "value": "YAML"}}]},
+        "result": null,
+        "failure": null,
+        "dependency_assertions": null
+      }
+    }
+  ]
+}

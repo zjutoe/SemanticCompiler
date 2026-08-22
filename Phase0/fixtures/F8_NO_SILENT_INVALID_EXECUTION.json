@@ -1,0 +1,37 @@
+{
+  "fixture_id": "F8_NO_SILENT_INVALID_EXECUTION",
+  "schema_version": "phase0.e0.v1",
+  "dialect_version": "contract-ir.phase0.v0",
+  "cases": [
+    {
+      "case_id": "dangling_support",
+      "entry_stage": "CANONICAL",
+      "input": {"source_envelope": {"spans": [{"ref": "u1", "role": "USER", "text": "Require final format JSON."}]}, "entry_payload": {"kind": "CANONICAL", "canonical_state": {"normative_candidates": [{"modality": "REQUIRE", "predicate": "world.final_format_is", "args": [{"kind": "VALUE", "value": {"type": "OutputFormat", "value": "JSON"}}], "proposition_support": ["missing_ref"], "claimed_authority_support": ["missing_ref"]}], "knowledge_assertions": [], "open_slot_mentions": []}}, "visible_world_context": {"entities": [], "observable_values": []}, "slot_declarations": [], "static_constraints": [], "cross_constraints": [], "candidate_trajectory_ids": []},
+      "expected": {"canonical_state": null, "elaboration": null, "legal_joint_completions": null, "decision": null, "result": null, "failure": {"stage": "elaboration", "reason": "DANGLING_SUPPORT_REF"}, "dependency_assertions": null}
+    },
+    {
+      "case_id": "wrong_enum_type",
+      "entry_stage": "CANONICAL",
+      "input": {"source_envelope": {"spans": [{"ref": "u1", "role": "USER", "text": "Require final format JSON."}]}, "entry_payload": {"kind": "CANONICAL", "canonical_state": {"normative_candidates": [{"modality": "REQUIRE", "predicate": "world.final_format_is", "args": [{"kind": "VALUE", "value": {"type": "Strictness", "value": "STRICT"}}], "proposition_support": ["u1"], "claimed_authority_support": ["u1"]}], "knowledge_assertions": [], "open_slot_mentions": []}}, "visible_world_context": {"entities": [], "observable_values": []}, "slot_declarations": [], "static_constraints": [], "cross_constraints": [], "candidate_trajectory_ids": []},
+      "expected": {"canonical_state": null, "elaboration": null, "legal_joint_completions": null, "decision": null, "result": null, "failure": {"stage": "elaboration", "reason": "TYPE_MISMATCH"}, "dependency_assertions": null}
+    },
+    {
+      "case_id": "missing_adapter_link",
+      "entry_stage": "ADAPTER",
+      "input": {"source_envelope": null, "entry_payload": {"kind": "ADAPTER", "adapter_link": null, "surface": {"normative_candidates": []}}, "visible_world_context": {"entities": [], "observable_values": []}, "slot_declarations": [], "static_constraints": [], "cross_constraints": [], "candidate_trajectory_ids": []},
+      "expected": {"canonical_state": null, "elaboration": null, "legal_joint_completions": null, "decision": null, "result": null, "failure": {"stage": "adapter_or_bridge", "reason": "MISSING_ADAPTER_LINK"}, "dependency_assertions": null}
+    },
+    {
+      "case_id": "malformed_domain",
+      "entry_stage": "CANONICAL",
+      "input": {"source_envelope": {"spans": [{"ref": "u1", "role": "USER", "text": "Require a supported final format."}]}, "entry_payload": {"kind": "CANONICAL", "canonical_state": {"normative_candidates": [{"modality": "REQUIRE", "predicate": "world.final_format_is", "args": [{"kind": "OPEN", "type": "OutputFormat", "semantic_slot_link": "slot:clause:000:arg0"}], "proposition_support": ["u1"], "claimed_authority_support": ["u1"]}], "knowledge_assertions": [], "open_slot_mentions": [{"type": "OutputFormat", "owner": "USER", "proposition_link": "clause:000", "argument_position": 0, "proposition_support": ["u1"]}]}}, "visible_world_context": {"entities": [], "observable_values": []}, "slot_declarations": [{"semantic_slot_link": "slot:clause:000:arg0", "type": "OutputFormat", "owner": "USER", "schema_domain": "JSON,YAML", "resolved_value": null}], "static_constraints": [], "cross_constraints": [], "candidate_trajectory_ids": []},
+      "expected": {"canonical_state": null, "elaboration": null, "legal_joint_completions": null, "decision": null, "result": null, "failure": {"stage": "elaboration", "reason": "MALFORMED_DOMAIN_DECLARATION"}, "dependency_assertions": null}
+    },
+    {
+      "case_id": "declared_empty_domain",
+      "entry_stage": "CANONICAL",
+      "input": {"source_envelope": {"spans": [{"ref": "u1", "role": "USER", "text": "Require a supported final format."}]}, "entry_payload": {"kind": "CANONICAL", "canonical_state": {"normative_candidates": [{"modality": "REQUIRE", "predicate": "world.final_format_is", "args": [{"kind": "OPEN", "type": "OutputFormat", "semantic_slot_link": "slot:clause:000:arg0"}], "proposition_support": ["u1"], "claimed_authority_support": ["u1"]}], "knowledge_assertions": [], "open_slot_mentions": [{"type": "OutputFormat", "owner": "USER", "proposition_link": "clause:000", "argument_position": 0, "proposition_support": ["u1"]}]}}, "visible_world_context": {"entities": [], "observable_values": []}, "slot_declarations": [{"semantic_slot_link": "slot:clause:000:arg0", "type": "OutputFormat", "owner": "USER", "schema_domain": [], "resolved_value": null}], "static_constraints": [], "cross_constraints": [], "candidate_trajectory_ids": []},
+      "expected": {"canonical_state": null, "elaboration": null, "legal_joint_completions": null, "decision": null, "result": null, "failure": {"stage": "elaboration", "reason": "DECLARED_EMPTY_DOMAIN"}, "dependency_assertions": null}
+    }
+  ]
+}

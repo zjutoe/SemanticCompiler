@@ -1,0 +1,29 @@
+{
+  "fixture_id": "F4_EXECUTOR_JOINT_TRACE",
+  "schema_version": "phase0.e0.v1",
+  "dialect_version": "contract-ir.phase0.v0",
+  "cases": [
+    {
+      "case_id": "unresolved",
+      "entry_stage": "CANONICAL",
+      "input": {
+        "source_envelope": {"spans": [{"ref": "u1", "role": "USER", "text": "Require an executor-selected output policy."}, {"ref": "u2", "role": "USER", "text": "Require final format JSON."}]},
+        "entry_payload": {"kind": "CANONICAL", "canonical_state": {"normative_candidates": [{"modality": "REQUIRE", "predicate": "world.output_policy_is", "args": [{"kind": "OPEN", "type": "OutputFormat", "semantic_slot_link": "slot:clause:000:arg0"}, {"kind": "OPEN", "type": "Strictness", "semantic_slot_link": "slot:clause:000:arg1"}], "proposition_support": ["u1"], "claimed_authority_support": ["u1"]}, {"modality": "REQUIRE", "predicate": "world.final_format_is", "args": [{"kind": "VALUE", "value": {"type": "OutputFormat", "value": "JSON"}}], "proposition_support": ["u2"], "claimed_authority_support": ["u2"]}], "knowledge_assertions": [], "open_slot_mentions": [{"type": "OutputFormat", "owner": "EXECUTOR", "proposition_link": "clause:000", "argument_position": 0, "proposition_support": ["u1"]}, {"type": "Strictness", "owner": "EXECUTOR", "proposition_link": "clause:000", "argument_position": 1, "proposition_support": ["u1"]}]}},
+        "visible_world_context": {"entities": [], "observable_values": []},
+        "slot_declarations": [{"semantic_slot_link": "slot:clause:000:arg0", "type": "OutputFormat", "owner": "EXECUTOR", "schema_domain": [{"type": "OutputFormat", "value": "JSON"}, {"type": "OutputFormat", "value": "YAML"}], "resolved_value": null}, {"semantic_slot_link": "slot:clause:000:arg1", "type": "Strictness", "owner": "EXECUTOR", "schema_domain": [{"type": "Strictness", "value": "STRICT"}, {"type": "Strictness", "value": "LENIENT"}], "resolved_value": null}],
+        "static_constraints": [],
+        "cross_constraints": [{"constraint_link": "constraint:f4:output_policy_pairs", "semantic_slot_links": ["slot:clause:000:arg0", "slot:clause:000:arg1"], "allowed_tuples": [[{"type": "OutputFormat", "value": "JSON"}, {"type": "Strictness", "value": "STRICT"}], [{"type": "OutputFormat", "value": "YAML"}, {"type": "Strictness", "value": "LENIENT"}]]}],
+        "candidate_trajectory_ids": ["tau:f4:yaml_lenient", "tau:f4:json_strict"]
+      },
+      "expected": {
+        "canonical_state": null,
+        "elaboration": {"candidates": [{"clause_link": "clause:000", "authority": "USER", "active": true}, {"clause_link": "clause:001", "authority": "USER", "active": true}], "active_clause_links": ["clause:000", "clause:001"], "knowledge_assertions": [], "open_slots": [{"semantic_slot_link": "slot:clause:000:arg0", "type": "OutputFormat", "owner": "EXECUTOR", "resolved_value": null}, {"semantic_slot_link": "slot:clause:000:arg1", "type": "Strictness", "owner": "EXECUTOR", "resolved_value": null}], "slot_domains": [{"semantic_slot_link": "slot:clause:000:arg0", "values": [{"type": "OutputFormat", "value": "JSON"}, {"type": "OutputFormat", "value": "YAML"}]}, {"semantic_slot_link": "slot:clause:000:arg1", "values": [{"type": "Strictness", "value": "STRICT"}, {"type": "Strictness", "value": "LENIENT"}]}], "constraint_links": ["constraint:f4:output_policy_pairs"]},
+        "legal_joint_completions": [[{"semantic_slot_link": "slot:clause:000:arg0", "value": {"type": "OutputFormat", "value": "JSON"}}, {"semantic_slot_link": "slot:clause:000:arg1", "value": {"type": "Strictness", "value": "STRICT"}}], [{"semantic_slot_link": "slot:clause:000:arg0", "value": {"type": "OutputFormat", "value": "YAML"}}, {"semantic_slot_link": "slot:clause:000:arg1", "value": {"type": "Strictness", "value": "LENIENT"}}]],
+        "decision": {"kind": "EXECUTE", "action_id": "f4_b_json_strict", "executor_resolutions": [{"semantic_slot_link": "slot:clause:000:arg0", "value": {"type": "OutputFormat", "value": "JSON"}}, {"semantic_slot_link": "slot:clause:000:arg1", "value": {"type": "Strictness", "value": "STRICT"}}]},
+        "result": null,
+        "failure": null,
+        "dependency_assertions": null
+      }
+    }
+  ]
+}
