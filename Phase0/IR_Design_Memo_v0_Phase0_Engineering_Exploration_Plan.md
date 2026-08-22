@@ -10,6 +10,8 @@ Phase 0 是一次有限、可穷举、以实现反馈为目标的工程探索。
 
 Phase 0 不判断该想法是否已经支持 publication-grade claims，也不试图证明某个表示具有普遍优势。成功表示最小语义内核、运行时和一条真实内容桥接路径已经足够清楚，可以进入后续研究；失败应尽早暴露表示能力、复杂度或可调试性问题。
 
+Phase 0 验证的是 learned semantic compiler 所需的表示 substrate、语义不变量、运行时机制和一条最小真实 bridge 路径；它不评价 learned 或 prompted 的自然语言到 typed semantics 编译能力，也不据此判断这类模型的效果。
+
 本阶段分别记录两类工程判断：
 
 - A 对 B：在语义完全相同且 adapter 都是确定性的前提下，Contract IR encoding 是否比薄的语义同构 control 更清晰、更容易保持不变量；
@@ -85,7 +87,7 @@ B 保持便宜：
 - 与 A 一样由 fixture 直接构造 surface，不单独实现 NL compiler；
 - 不建立独立数据集、统计 gate、报告体系或实验基础设施。
 
-若 gold A 与 gold B 表达相同语义，它们必须投影到相同 canonical value，并产生相同 decision 和 result。A/B 的差别只能来自 encoding 和 adapter ergonomics，不能来自额外信息。
+若 gold A 与 gold B 表达相同语义，它们必须投影到相同 canonical value，并产生相同 decision 和 result。A/B 只记录 encoding 在 invariant preservation 与 adapter ergonomics 上的工程差异，不能使用额外信息，也不得解释为一般性的 encoding superiority。
 
 ### 3.3 C：extractive content path
 
@@ -120,7 +122,7 @@ VisibleWorldContext:
 
 `beta_C` 是 C 路径中恰好一个真实、非 gold bridge。其完整且排他的输入依赖是 `ExtractiveContentState`、仅由其 refs 构造的 `ReferencedSupportView`、`DialectManifest` 和 `VisibleWorldContext`，输出为 `CanonicalSemanticState`。它必须实际解释内容，不能调用 expected mapping、gold canonical state、candidate action catalog、candidate trajectory、实际 emitted effects 或 expected decision。依赖测试必须固定 refs 和其余三个输入，只修改未引用 distractor，并断言 `beta_C` 输出逐值不变。
 
-Phase 0 将 `beta_C` 冻结为针对 controlled language 的确定性 parser；parser 不得按 scenario ID 分支。该实现必须版本化；本阶段不为 bridge 启动训练 campaign，也不增加第二个 bridge 或上界 condition。
+Phase 0 将 `beta_C` 冻结为针对 controlled language 的确定性语义 bridge，而不是只做表面字符串匹配的简单 parser。它必须在冻结 dialect 内解释被引用的 atomic content，完成 predicate/argument linking、modality recognition、必要的 typed OPEN extraction，以及 support/authority refs 映射；不得按 scenario ID 分支。该实现必须版本化；本阶段不为 bridge 启动训练 campaign，也不增加第二个 bridge 或上界 condition。
 
 ### 3.4 共同边界
 
@@ -256,6 +258,8 @@ one-shot batch ASK only
 每个 slot 都有起初有效且非空的 `schema_domain`、由静态可见约束筛出的 `context_admissible_values`、`owner` 和 canonical semantic link。declared-empty 或 malformed schema/domain 唯一路由到 elaboration stage failure；valid nonempty schema domain 被 valid static constraints 缩减为空则唯一路由到 runtime `REJECT(HARD_UNSAT, EmptyDomainWitness)`；各 slot domain 非空但 cross-slot constraints 使 `Omega` 为空则唯一路由到 runtime `REJECT(HARD_UNSAT, CrossConstraintWitness)`。三类不得互相替代，也不得被默认值修复。
 
 ### 5.1 Joint completion
+
+Phase 0 的 cross-slot constraints 只允许由 blocking fixtures 明示的、有限且 fixture-local 的关系。不得把它们扩展成任意 constraint DSL、动态约束域或通用 planning/solver 基础设施；也不得以简化实现为由删除这些关系，或把 joint completion 退化为独立的 per-slot choices。
 
 即使最多只有两个 unresolved slots，runtime 也必须枚举满足类型和跨 slot constraints 的 joint completions `Omega`。核心语义不得退化为两个独立 per-slot choices。
 
