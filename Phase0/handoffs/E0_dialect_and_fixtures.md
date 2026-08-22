@@ -50,7 +50,7 @@ Phase0/tests/__init__.py
 Phase0/tests/test_e0_dialect_and_fixtures.py
 ```
 
-Every other path is forbidden. In particular, the executor may not edit plans, handoffs, reviews, predecessors, or add files; implement production elaboration/runtime/adapter/bridge behavior; add hidden fallback/default/retry logic; generate experiment output; or expose test-only expected values through normal schema, dialect, or loader interfaces.
+Every other path is forbidden. In particular, the executor may not edit plans, handoffs, reviews, predecessors, or add unlisted files; implement production elaboration/runtime/adapter/bridge behavior; add hidden fallback/default/retry logic; generate experiment output; or expose test-only expected values through normal schema, dialect, or loader interfaces.
 
 ## Frozen representation and isolation contract
 
