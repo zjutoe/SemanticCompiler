@@ -12,8 +12,8 @@ Any conflict blocks execution and returns to main. An executor may not repair, r
 
 | Stage | Classification | Predecessor | Handoff availability | Blocks Phase 0 exit |
 |---|---|---|---|---|
-| E0 | Blocking | None | Current `READY_TO_BIND` handoff | Yes |
-| E1 | Blocking | E0 | Generate only after exact E0 acceptance | Yes |
+| E0 | Blocking | None | `ACCEPTED` at `70de224`; see `reviews/E0_70de224_review.md` | Yes |
+| E1 | Blocking | E0 | Current `READY_TO_BIND` handoff; independent contract acceptance required before dispatch | Yes |
 | E2 | Blocking | E1 | Generate only after exact E1 acceptance | Yes |
 | E3 | Blocking | E2 | Generate only after exact E2 acceptance | Yes |
 | E4 | Blocking | E3 | Generate only after exact E3 acceptance | Yes |
@@ -23,7 +23,7 @@ The blocking sequence is `E0 -> E1 -> E2 -> E3 -> E4`. E5 may start only after a
 
 ## Just-in-time handoff rule
 
-Only the next executable stage has a concrete handoff document. Downstream handoffs are deliberately absent because implementation and review may discover constraints that must shape the next stage. After a stage is independently accepted, main first incorporates any accepted interface, fixture, or contract changes, then writes and reviews the successor handoff against that exact state.
+Only the next unaccepted executable stage has a current concrete handoff document. Historical accepted handoffs remain committed for provenance but grant no new mutation authority. Downstream handoffs are deliberately absent because implementation and review may discover constraints that must shape the next stage. After a stage is independently accepted, main first incorporates any accepted interface, fixture, or contract changes, then writes and reviews the successor handoff against that exact state.
 
 A dependency roadmap may retain later stage names and coarse objectives, but it is not executable authority. No agent may infer missing downstream instructions from an old plan, a temporary draft, or a predecessor handoff. Unexpected findings stop the current stage and return to main for contract repair before any successor handoff is generated.
 
