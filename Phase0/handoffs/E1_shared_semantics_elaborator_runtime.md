@@ -142,7 +142,7 @@ decide(elaborated, candidate_trajectory_ids) -> RuntimeEvaluation
 
 `RuntimeEvaluation` contains exactly the ordered `legal_joint_completions`, the closed `decision`, and only private or explicitly named derived support needed by `backend.py` to determine whether an exact execution result exists. It may not contain expected values, fixture IDs, retries, fallback decisions, or a second decision channel.
 
-Unexpected runtime contract violations fail loudly through one explicit runtime exception type carrying `stage="runtime"` and a stable reason. They do not become `ASK`, an empty Contract, a default value, or a fabricated witness. At minimum, unknown trajectory IDs, a trajectory assignment outside `Omega`, an impossible empty clause-conflict witness, and failure to find a sufficient USER query use distinct stable reasons.
+Unexpected runtime contract violations fail loudly through one explicit runtime exception type carrying `stage="runtime"` and a stable reason. They do not become `ASK`, an empty Contract, a default value, or a fabricated witness. At minimum, unknown trajectory IDs, structurally incompatible trajectory assignments, an impossible empty clause-conflict witness, and failure to find a sufficient USER query use distinct stable reasons. A structurally valid listed trajectory is not incompatible merely because resolved values, context-admissible domains, or cross constraints exclude its assignment from the current `Omega`; it is ignored for that invocation.
 
 ### `backend.py`
 
@@ -252,7 +252,9 @@ Do not enumerate actions or ASK. If individual domains are nonempty but cross co
 
 ### Hard validity and authorization
 
-For each `Omega` completion, consider only listed frozen trajectories whose complete ordered assignment equals that completion. Substitute the completion into every active candidate.
+After the empty-domain and cross-empty early routes above, validate listed trajectory assignments against the declared slot schema. A structurally compatible assignment contains every declared slot exactly once in canonical slot-link order, uses the declared types, and uses values from the declared schema domains. Missing, extra, duplicated, wrongly ordered, wrong-type, or outside-schema assignment items are runtime contract violations. This structural check does not require the assignment to survive the current resolved-value, context-admissibility, or cross-constraint filters.
+
+For each `Omega` completion, consider only structurally valid listed frozen trajectories whose complete ordered assignment equals that completion. A structurally valid trajectory outside the current `Omega` is ignored; in particular, F2 `resolved_return_none` ignores `tau:f2:raise_verbose` and executes the matching `tau:f2:return_none_quiet`. Substitute each considered completion into every active candidate.
 
 - `GOAL` and `REQUIRE` are hard-valid exactly when their frozen predicate interpretation is true.
 - `PRESERVE` is hard-valid exactly when its frozen trace interpretation reports preservation.
