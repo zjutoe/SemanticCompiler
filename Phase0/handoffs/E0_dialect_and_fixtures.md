@@ -147,6 +147,8 @@ FixtureInput = {
 
 For a valid declaration, `resolved_value` is either `null` or a member of `schema_domain` with the same enum type. Resolution never rewrites the declared or context-admissible domain; it filters legal joint completions as a separate fact.
 
+Every E0 `SlotDeclaration.resolved_value` is exactly `null` unless a case explicitly overrides it. The sole override in the complete F1-F9 catalog is F2 `resolved_return_none` slot `S0=ErrorPolicy.RETURN_NONE`; its EXECUTOR slot `S1` remains exactly `null`.
+
 `entry_payload` is one exact tagged union:
 
 ```text
@@ -265,11 +267,13 @@ The managed-effect universe is exactly `[WRITE_OUTPUT]`. All other fixture traje
 
 The short names `C0`, `C1`, `C2`, `S0`, and `S1` below denote `clause:000`, `clause:001`, `clause:002`, `slot:clause:000:arg0`, and `slot:clause:000:arg1` unless a case explicitly locates a slot on another candidate. JSON values must store the full links, not the aliases. Link derivation must not read or encode a fixture ID, case ID, source filename, expected value, scenario ID, or candidate trajectory.
 
+`open_slot_mentions` is mechanically exhaustive: for every `OpenTerm` at canonical candidate index `i` and argument position `j`, it contains exactly one record and no extras. That record has the matching `SlotDeclaration` type and owner, `proposition_link=clause:<i as three digits>`, `argument_position=j`, and `proposition_support` exactly equal to the containing candidate. The matching `SlotDeclaration.semantic_slot_link` and `OpenTerm.semantic_slot_link` both equal `slot:clause:<i as three digits>:arg<j>`. A canonical state with no `OpenTerm` has `open_slot_mentions=[]` and `slot_declarations=[]`. Tests must assert this one-to-one consistency.
+
 Fixture prose also uses compact typed notation only for readability. `(S0=JSON,S1=STRICT)` means an exact ordered `Assignment` with full slot links and `TypedValue` records. `{format:JSON,strictness:STRICT}` means exact ordered observable records with the types declared above. `ASK`, `EXECUTE`, and `REJECT` shorthand means the exact tagged decision records already frozen. Implementation and JSON must use the full records, never parse the prose shorthand.
 
 ## Frozen fixture manifest
 
-Unless a case says otherwise, both support fields of each normative candidate equal the listed source ref, all listed sources are present, `visible_world_context={"entities":[],"observable_values":[]}`, trajectory `initial_observables=[]`, ordered effects are `[]`, and no result is frozen before E4. A canonical input candidate never stores derived `authority` or `active`; wording such as USER-supported below means its support is expected to derive those values only during later elaboration. Each trajectory record contains exact `trajectory_id`, `action_id`, slot assignment, initial observables, final observables, and ordered effects.
+Unless a case says otherwise, both support fields of each normative candidate equal the listed source ref, `visible_world_context={"entities":[],"observable_values":[]}`, trajectory `initial_observables=[]`, ordered effects are `[]`, and no result is frozen before E4. For every F1-F8 case, `SourceEnvelope.spans` contains exactly the spans listed by that case in their listed order and no others; F8 `missing_adapter_link` is the sole F1-F8 case with `source_envelope=null`. A canonical input candidate never stores derived `authority` or `active`; wording such as USER-supported below means its support is expected to derive those values only during later elaboration. Each trajectory record contains exact `trajectory_id`, `action_id`, slot assignment, initial observables, final observables, and ordered effects.
 
 For F1-F8, expected `canonical_state=null` because valid canonical state is input rather than predicted output, and `dependency_assertions=null`. For every non-F8 valid case, `failure=null`; each USER-supported candidate mechanically yields an elaborated candidate with `authority=USER,active=true`, while ASSISTANT/TOOL support yields `authority=NONE,active=false`. Expected open-slot/domain/constraint records are the input records after canonical ordering and the stated static filtering. Expected `result=null` except for F9. These rules leave no expected field to writer discretion.
 
@@ -292,8 +296,8 @@ Trajectories are `tau:f2:return_none_quiet` / action `f2_return_none_quiet` with
 
 Cases:
 
-- `unresolved`: `S0.resolved_value=null`; expected completions are both pairs and decision is `ASK([S0])`; neither executor value has USER coverage.
-- `resolved_return_none`: `S0.resolved_value={"type":"ErrorPolicy","value":"RETURN_NONE"}`; expected legal completions contain only `(S0=RETURN_NONE,S1=QUIET)` and expected decision is `EXECUTE(f2_return_none_quiet)` with exactly one preceding executor resolution `(S1,QUIET)`.
+- `unresolved`: `S0.resolved_value=null` and `S1.resolved_value=null`; expected completions are both pairs and decision is `ASK([S0])`; neither executor value has USER coverage.
+- `resolved_return_none`: `S0.resolved_value={"type":"ErrorPolicy","value":"RETURN_NONE"}` and `S1.resolved_value=null`; expected legal completions contain only `(S0=RETURN_NONE,S1=QUIET)` and expected decision is `EXECUTE(f2_return_none_quiet)` with exactly one preceding executor resolution `(S1,QUIET)`.
 
 ### F3 `EXECUTOR_COVERAGE_NONVACUOUS`
 
