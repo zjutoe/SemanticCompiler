@@ -352,7 +352,7 @@ The sole legal completion is `[[]]`; the trajectory is hard-valid but unauthoriz
 
 Cases and stable expected failures:
 
-`dangling_support` has source `u1 = "Require final format JSON."` but both support lists on `REQUIRE world.final_format_is(JSON)` are `[missing_ref]`. `wrong_enum_type` has the same USER source and support but uses `ValueTerm(Strictness.STRICT)`. `malformed_domain` and `declared_empty_domain` use USER `u1 = "Require a supported final format."`, one `REQUIRE world.final_format_is(S0)` candidate, and the exact defective `S0` declaration shown below. All CANONICAL cases use the exact canonical input tagged record; unused context/constraint fields are empty.
+`dangling_support` has source `u1 = "Require final format JSON."` but both support lists on `REQUIRE world.final_format_is(JSON)` are `[missing_ref]`. `wrong_enum_type` has the same USER source, both support lists exactly `[u1]`, and `ValueTerm(Strictness.STRICT)`; its sole semantic defect is the argument type mismatch. `malformed_domain` and `declared_empty_domain` use USER `u1 = "Require a supported final format."`, one `REQUIRE world.final_format_is(S0)` candidate with both support lists exactly `[u1]`, and `S0` declared as `OutputFormat`/USER with `resolved_value=null`. Their sole defects are respectively the malformed and empty `schema_domain` values shown below. All CANONICAL cases use the exact canonical input tagged record; unused context/constraint fields are empty.
 
 | Case | Entry stage | Frozen defect | Expected future stage/code | E0 check |
 |---|---|---|---|---|
