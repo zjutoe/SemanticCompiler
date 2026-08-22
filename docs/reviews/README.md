@@ -13,5 +13,6 @@ Historical inputs:
 - Phase 0
   - [Final Revision Recommendations](phase0/Contract_IR_v0_Phase0_Final_Revision_Recommendations.md)
   - [Assessment Revision Recommendations v2](phase0/IR_Design_Memo_v0_Phase0_Assessment_Revision_Recommendations_v2.md)
+  - [Engineering Plan Evaluation Recommendations](phase0/Contract_IR_v0_Phase0_Engineering_Plan_Evaluation_Recommendations.md)
 - Phase 1
   - [Assessment Revision Recommendations](phase1/IR_Design_Memo_v0_Phase1_Assessment_Revision_Recommendations.md)
