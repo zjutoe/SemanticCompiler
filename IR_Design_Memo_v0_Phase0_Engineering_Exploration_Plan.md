@@ -100,7 +100,23 @@ ExtractiveContentState:
 
 引用必须存在、去重并按 source order 排序；C 不得携带 modality、typed predicate、OPEN owner、authority label、gold outcome 或 fixture ID side channel。
 
-`beta_C` 是 C 路径中恰好一个真实、非 gold bridge。它读取 `ExtractiveContentState`、被引用 spans、固定 dialect 和 visible context，输出 `CanonicalSemanticState`。它必须实际解释内容，不能调用 expected mapping、gold canonical state、candidate action、effect 或 expected decision。
+`ReferencedSupportView` 只能由 `ExtractiveContentState.content_refs` 解引用得到，包含这些 refs 对应的 role、span ID 和原文，不能附带未引用 span。`VisibleWorldContext` 冻结为以下窄类型：
+
+```yaml
+VisibleWorldContext:
+  entities:
+    - entity_id: typed_entity_id
+      entity_type: FrozenType
+  observable_values:
+    - predicate: world.predicate
+      scope: STATIC | INITIAL
+      args: [typed_term, ...]
+      value: typed_value
+```
+
+这里只能出现 linking 所需的 typed entity table 和可观察 static/initial world values；不得包含 `SourceEnvelope` 文本、未引用 spans、candidate actions/effects、scenario ID、expected result 或 gold semantics。
+
+`beta_C` 是 C 路径中恰好一个真实、非 gold bridge。其完整且排他的输入依赖是 `ExtractiveContentState`、仅由其 refs 构造的 `ReferencedSupportView`、`DialectManifest` 和 `VisibleWorldContext`，输出为 `CanonicalSemanticState`。它必须实际解释内容，不能调用 expected mapping、gold canonical state、candidate action catalog、candidate trajectory、实际 emitted effects 或 expected decision。依赖测试必须固定 refs 和其余三个输入，只修改未引用 distractor，并断言 `beta_C` 输出逐值不变。
 
 Phase 0 将 `beta_C` 冻结为针对 controlled language 的确定性 parser；parser 不得按 scenario ID 分支。该实现必须版本化；本阶段不为 bridge 启动训练 campaign，也不增加第二个 bridge 或上界 condition。
 
@@ -122,7 +138,21 @@ adapter/bridge 之前的组件不能看到 gold semantic state；elaborator 不�
 
 ## 4. 核心语义与运行时 contract
 
-### 4.1 Canonical state
+### 4.1 DialectManifest、trajectory 与 Canonical state
+
+E0 必须把 toy-world 语义冻结为可执行对象，而不依赖 fixture expected result。`DialectManifest` 对每个 predicate 记录 typed signature、一个可计算且版本化的 interpretation，以及唯一 scope：`INITIAL | FINAL | TRACE | EVENT`。`CandidateTrajectoryCatalog` 另行冻结 finite candidate action、合法性条件、deterministic transition，以及每个 legal joint completion/action 对应的 initial state、final state 和 ordered effects；该 catalog 只供 runtime 使用，不是 bridge 输入。frozen managed-effect universe 同样在 E0 固定。
+
+对冻结 trajectory `tau`，modality 的解释唯一为：
+
+- `GOAL phi`：`phi` 在 final state 成立；`phi` 必须可在 `FINAL` 求值，否则 elaboration fail-fast；
+- `REQUIRE phi`：按 `DialectManifest` 为 `phi` 声明的 scope 和 computable interpretation 求值并成立；
+- `PRESERVE o`：选定 observable `o` 的 typed value 在 initial/final state 相等；
+- `FORBID e`：ordered effects 中不存在与 event predicate `e` 匹配的 effect；
+- `ALLOW e`：授权匹配的 managed effect，但不要求 trajectory 发出该 effect。
+
+所有 active `GOAL`、`REQUIRE`、`PRESERVE`、`FORBID` clauses 都是 hard clauses；`authority=NONE` 的 clauses 不 active；`ALLOW` 只参与授权判定，不是满足义务。一个 legal joint completion/action 当且仅当其 frozen trajectory 满足全部 active hard clauses 时为 hard-valid。当且仅当其每个属于 frozen managed-effect universe 的 emitted effect 都被至少一个 active `ALLOW` 覆盖时为 authorized；unmanaged effects 不需要 `ALLOW`。
+
+因此，`HARD_UNSAT` 当且仅当不存在具有 hard-valid trajectory 的 legal joint completion/action；`NO_AUTHORIZED_ACTION` 当且仅当至少存在一个 hard-valid legal joint completion/action、但其中没有 authorized action。存在 hard-valid 且 authorized 的 pair 时才能继续按 OPEN coverage、ASK 和 frozen action tie-break 规则处理。这些定义是 runtime 的判定式，不允许 fixture-specific 分支。
 
 最小 canonical state 包含：
 
@@ -183,7 +213,9 @@ USER | EXECUTOR
 - 从固定 enum domain 与 visible static constraints 计算 slot domain；
 - 产出 canonical clause/slot links。
 
-任何 schema、link、type 或 support failure 都必须立即成为结构化 stage failure。不得补默认值，也不得把失败 surface 当作空 Contract 继续执行。
+任何 malformed 或 declared-empty enum schema/domain，以及 invalid schema、type、link、domain、modality/scope compatibility 或 support declaration，都必须立即成为结构化 elaboration stage failure。不得补默认值，也不得把失败 surface 当作空 Contract 继续执行。
+
+唯一例外不是失败降级，而是一个明确的合法输入情形：若 schema domain 起初有效且非空，但 valid visible static constraints 将 `context_admissible_values` 缩减为空，`ElaboratedSemanticState` 必须原样保留该空 domain 并交给 runtime。elaborator 不得把它改写成 stage failure、删除 slot 或恢复 schema values。
 
 ### 4.4 Closed decision
 
@@ -205,7 +237,7 @@ Decision:
 
 `ASK` links 必须非空且全部指向 USER-owned unresolved slots。executor resolution 必须在 action 或 reject 前记录，并覆盖实际使用的完整 executor assignment。
 
-`HARD_UNSAT` 仅表示 active hard clauses 没有任何 joint semantic completion/trace 可满足。`NO_AUTHORIZED_ACTION` 仅表示 Contract 可满足，但当前 candidate actions 中没有同时 hard-valid 且其 managed effects 均获授权的动作。该区分只保留到足以产生确定行为和可理解 witness 的程度，不扩展错误分类体系。
+`HARD_UNSAT` 与 `NO_AUTHORIZED_ACTION` 严格采用 4.1 的存在性定义。若 initially valid nonempty schema domain 被 valid static constraints 缩减为空，runtime 的唯一结果是 `REJECT(HARD_UNSAT)`、`executor_resolutions=[]` 和 `EmptyDomainWitness`；witness 包含 canonical `semantic_slot_link` 及按 canonical order 排列的 `excluding_constraint_links`。若每个 individual domain 均非空、但 valid cross-slot constraints 使 `Omega` 为空，runtime 的唯一结果是 `REJECT(HARD_UNSAT)`、`executor_resolutions=[]` 和只列 canonical cross-constraint links 的 `CrossConstraintWitness`。两种情形都不得 `ASK`、不得 action tie-break，也不得改报 stage failure 或 `NO_AUTHORIZED_ACTION`。
 
 reference harness 对 `Decision` 的处理构成最小闭环：`EXECUTE` 按冻结的 action transition 产生 post-state 与 ordered effects；`ASK` 不改变 world，只返回待补充的 slot links；`REJECT` 不改变 world，只返回 reason 与 witness。`Result` 只是这一处理的结构化记录，不引入第四种 decision，也不得反向修改 Contract 或 OPEN completion。
 
@@ -219,7 +251,7 @@ max_unresolved_open_slots_per_scenario <= 2
 one-shot batch ASK only
 ```
 
-每个 slot 都有 `schema_domain`、由静态可见约束筛出的 `context_admissible_values`、`owner` 和 canonical semantic link。空 domain 是显式失败或 `HARD_UNSAT` 的输入，不得被默认值修复。
+每个 slot 都有起初有效且非空的 `schema_domain`、由静态可见约束筛出的 `context_admissible_values`、`owner` 和 canonical semantic link。declared-empty 或 malformed schema/domain 唯一路由到 elaboration stage failure；valid nonempty schema domain 被 valid static constraints 缩减为空则唯一路由到 runtime `REJECT(HARD_UNSAT, EmptyDomainWitness)`；各 slot domain 非空但 cross-slot constraints 使 `Omega` 为空则唯一路由到 runtime `REJECT(HARD_UNSAT, CrossConstraintWitness)`。三类不得互相替代，也不得被默认值修复。
 
 ### 5.1 Joint completion
 
@@ -240,7 +272,7 @@ one-shot batch ASK only
 
 ## 6. Blocking fixture catalog
 
-所有 fixtures 都是手写/gold、有限且可穷举。expected mappings 仅供 adapter、elaborator、runtime 和 trace tests 使用，不得暴露为 normal A/B/C path 的可调用 lookup。
+所有 fixtures 都是手写/gold、有限且可穷举。expected mappings 只存在于 test harness，可用于 adapter、bridge、elaborator、runtime 和 trace assertions；normal A/B/C extractor、adapter、bridge 与 backend 的生产依赖图均不得把它作为可调用 lookup。
 
 ### F1：`OPEN_UU_COUPLED_MIN_ASK`
 
@@ -283,6 +315,7 @@ one-shot batch ASK only
 
 - 两个 active clauses 对同一 finite enum 要求互斥值；
 - 预期：`REJECT(HARD_UNSAT)` 和最小 canonical clause-link witness；不得继续 action tie-break。
+- 同一 fixture family 另有两个确定性 route cases：valid nonempty schema domain 被 valid static constraints 缩减为空时，精确断言 `EmptyDomainWitness` 的 canonical slot/`excluding_constraint_links`；individual domains 非空但 cross-slot constraints 使 `Omega` 为空时，精确断言只含 canonical cross-constraint links 的 `CrossConstraintWitness`。两者都只能 `REJECT(HARD_UNSAT)`。
 
 ### F7：`NO_AUTHORIZED_ACTION_WITNESS`
 
@@ -291,8 +324,22 @@ one-shot batch ASK only
 
 ### F8：`NO_SILENT_INVALID_EXECUTION`
 
-- 输入包含 dangling support ref、wrong enum type 或缺失 adapter link；
+- 输入分别包含 dangling support ref、wrong enum type、缺失 adapter link、malformed domain declaration 或 declared-empty enum schema/domain；
 - 预期：在对应 stage 显式失败，runtime 不执行任何 action，不使用空 Contract 或默认 slot value。
+
+### F9：`C_NORMAL_END_TO_END_EXACT`
+
+F9 冻结为 normal-path、non-gold 的 exact fixture，不接受其他成功输出替代：
+
+- `SourceEnvelope` 按以下 source order 只含三个 atomic spans：USER `u1 = "Require final format JSON."`；USER `u2 = "Allow managed effect WRITE_OUTPUT."`；ASSISTANT distractor `a1 = "Use YAML."`；
+- F9 dialect 冻结 `OutputFormat={UNSET,JSON,YAML}`；`world.final_format_is(OutputFormat)` 的 scope 为 `FINAL`，interpretation 是 final observable `format` 与参数相等；`effect.WRITE_OUTPUT()` 是 `EVENT` matcher；frozen managed-effect universe 为 `[WRITE_OUTPUT]`；
+- normal C extractor 的 exact `content_refs` 为 `[u1, u2, a1]`，严格按 source order；
+- `beta_C` 的 exact canonical output 依次包含：USER `REQUIRE world.final_format_is(JSON)` candidate，`proposition_support=[u1]`、`claimed_authority_support=[u1]`；USER `ALLOW effect.WRITE_OUTPUT()` candidate，两个 support fields 均为 `[u2]`；ASSISTANT `REQUIRE world.final_format_is(YAML)` candidate，两个 support fields 均为 `[a1]`；`knowledge_assertions=[]` 且 `open_slot_mentions=[]`；
+- elaboration 的 exact authority 依次为 `[USER, USER, NONE]`，active Contract 精确只含前两个 candidates；assistant YAML candidate 保留用于检查但不 active；
+- `CandidateTrajectoryCatalog` 只含 `write_json`：其 initial `format=UNSET`，final `format=JSON`，ordered effects 为 `[WRITE_OUTPUT]`；没有其他 candidate action，因此预期结果唯一；
+- exact decision 为 `EXECUTE(write_json, executor_resolutions=[])`；exact result 为 `Result(kind=EXECUTED, action_id=write_json, final_observables={format: JSON}, ordered_effects=[WRITE_OUTPUT])`；
+- Gold C debug 的 exact refs 为 `[u1,u2]`，其 `ReferencedSupportView` 必须排除 `a1`；在 refs、`DialectManifest`、`VisibleWorldContext` 不变时，将未引用 `a1` 从 `"Use YAML."` 改为 `"Use plain text."`，必须断言两个 support views 相等且两次 `beta_C` canonical outputs 逐值相等；
+- F9 expected mappings 只能存在于 test harness，normal extractor 与 `beta_C` 的依赖图中不得出现 expected fixture module、scenario ID、gold canonical state、expected decision 或 expected result。
 
 除上述 blocking fixtures 外，可增加少量 modality coverage cases，确保 `GOAL`、`REQUIRE`、`PRESERVE`、`FORBID` 和 `ALLOW` 至少各有一个区分性结果，但不扩展为数据研究。
 
@@ -355,9 +402,10 @@ ScenarioTrace:
 
 ### Stage E0：冻结 dialect 与 fixtures
 
-- 定义 finite sorts、enum domains、predicate signatures、actions、effects 和 managed-effect policy；
-- 将 F1-F8 编码为 hand-authored fixtures；
-- 为每个 fixture 穷举 joint completions、expected decision 和 witness；
+- 定义 finite sorts、起初非空的 enum domains，以及 `DialectManifest` 中每个 predicate 的 signature、computable interpretation 和 `INITIAL|FINAL|TRACE|EVENT` scope；
+- 冻结 managed-effect universe、modality/hard-valid/authorization 判定规则，以及 runtime-only `CandidateTrajectoryCatalog` 中的 actions、legal transitions 和 ordered effects；
+- 将 F1-F9 编码为 hand-authored fixtures，并把 malformed declaration、valid per-slot empty domain 与 cross-slot empty `Omega` 作为互斥 route assertions；
+- 为每个 fixture 穷举 joint completions、expected decision 和 witness；对 F9 另逐值冻结 source、normal refs、canonical/elaborated state、trajectory、Decision、Result 和 distractor dependency assertion；
 - 验证 unresolved OPEN 数量上限和 cross-slot coverage。
 
 ### Stage E1：共同语义、elaborator 与 runtime
@@ -374,8 +422,8 @@ ScenarioTrace:
 
 ### Stage E3：C real bridge path
 
-- 实现共同 segmenter、固定 normal C extractor、extractive content schema、ref validation 和唯一 `beta_C`；
-- 先以 Gold C content debug path 验证同一 bridge，再运行 normal non-gold C extraction；
+- 实现共同 segmenter、固定 normal C extractor、extractive content schema、ref validation、仅由 refs 构造的 `ReferencedSupportView`、窄 `VisibleWorldContext` 和唯一 `beta_C`；
+- 先以 Gold C content debug path 验证同一 bridge 及未引用 distractor invariance，再运行 F9 normal non-gold C extraction 并逐值检查 exact canonical、Decision 与 Result；
 - 保持 bridge failure 与 elaboration/runtime failure 可区分。
 
 ### Stage E4：端到端 trace 与负例
@@ -390,10 +438,13 @@ Phase 0 可以退出并建议继续工作，仅当以下项目全部为真：
 
 - [ ] gold typed path 从 canonical semantics 到 elaboration、runtime、decision 和 result 完整闭合；
 - [ ] A/B gold inputs 经各自确定性 adapter 得到相同 canonical semantics 和后端结果；
-- [ ] F1-F8 所有 blocking fixtures 通过；
+- [ ] `DialectManifest` predicate interpretations/scopes、candidate trajectories、modality hard-valid semantics 和 managed-effect authorization 均按 E0 freeze 执行；
+- [ ] F1-F9 所有 blocking fixtures 通过，且 F9 normal non-gold path 的 refs、canonical/elaborated state、Decision 和 Result 均 exact match；
 - [ ] USER ASK、minimum sufficient information、executor coverage 和 resolution trace 行为正确；
+- [ ] malformed/declared-empty domain、valid static reduction to empty 和 cross-slot empty `Omega` 分别只走其冻结的唯一 failure/`HARD_UNSAT` route；
 - [ ] 每个失败都能从 bounded trace 定位到 stage 和 stable reason；
-- [ ] 同一个真实、非 gold `beta_C` 至少在一条 normal C path 上产生一个合理成功结果；
+- [ ] 同一个真实、非 gold `beta_C` 在 F9 normal C path 上产生冻结的 exact canonical semantics、`EXECUTE(write_json, executor_resolutions=[])` 和 exact Result；
+- [ ] F9 Gold C refs 排除 `a1`，且修改这个未引用 distractor 不改变固定 refs 下的 `beta_C` 输出；
 - [ ] gold C debug 与 gold canonical debug 能分别定位 extraction/bridge 和 backend integration 问题；
 - [ ] 不存在 silent invalid execution、默认值掩盖、隐藏 retry 或 gold lookup 泄漏；
 - [ ] 实现与记录满足 Git/provenance 规则。
@@ -402,7 +453,7 @@ Phase 0 可以退出并建议继续工作，仅当以下项目全部为真：
 
 - Contract IR 无法表达任一 blocking fixture，而不是仅有实现 bug；
 - 在最多两个有限 enum OPEN slots 时，joint completion、ASK 或 trace 已复杂到无法可靠解释和测试；
-- 唯一真实 C bridge 无法产生任何合理路径，且 trace 不能区分 content、bridge 与 backend failure；
+- 唯一真实 C bridge 无法满足 F9 的 normal-path exact assertions，或 trace 不能区分 content、bridge 与 backend failure；
 - trace 对关键错误不可读，或需要 silent fallback 才能让主路径继续；
 - A/B 为维持 parity 需要隐藏 arm-specific semantics。
 

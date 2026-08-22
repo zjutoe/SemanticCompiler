@@ -347,22 +347,28 @@ Tasks:
 -   implement a minimal A/B/C topology that converges on shared canonical
     semantics, deterministic elaboration, typed OPEN handling, and a closed
     `EXECUTE | ASK | REJECT` runtime;
+-   freeze executable finite-world predicate interpretations/scopes, candidate
+    trajectories, managed-effect authorization, and unique invalid/empty-domain
+    routes before implementation;
 -   keep OPEN to finite enum domains with at most two unresolved slots per
     scenario while testing joint USER/USER and USER/EXECUTOR behavior;
--   exercise hand-authored blocking fixtures, executor coverage, authority, and
-    bounded per-scenario traces;
--   run exactly one real non-gold C bridge path plus separate Gold C and Gold
-    canonical debug paths;
+-   exercise the hand-authored F1-F9 blocking fixtures, executor coverage,
+    authority, and bounded per-scenario traces;
+-   require the real non-gold C bridge to satisfy the exact named
+    `C_NORMAL_END_TO_END_EXACT` fixture, including its fixed-reference
+    distractor-invariance test, plus separate Gold C and Gold canonical debug
+    paths;
 -   use an optional frozen-LM interface smoke test only after the deterministic
     path closes.
 
 Engineering exit:
 
-All blocking fixtures and gold typed paths close; ASK/executor behavior is
-correct; failures are inspectable; the real C bridge has at least one plausible
-success; and no invalid state can execute silently. Stop and revise if the IR is
-unexpressive, the two-slot semantics are already excessively complex, or the
-bridge/traces are unusable.
+All F1-F9 blocking fixtures and gold typed paths close; ASK/executor behavior is
+correct; invalid and empty domains follow their unique frozen routes; failures
+are inspectable; the real C bridge exactly matches
+`C_NORMAL_END_TO_END_EXACT`; and no invalid state can execute silently. Stop
+and revise if the IR is unexpressive, the two-slot semantics are already
+excessively complex, or the exact C fixture/trace contract cannot be met.
 
 The authoritative scope, topology, fixtures, debug paths, exit checklist, and
 provenance rules are defined in
