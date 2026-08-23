@@ -593,6 +593,10 @@ def _closes_without_another_ask(
     pairs = _matching_pairs(restricted_legal, trajectories)
     hard_valid = _hard_valid_pairs(elaborated, pairs)
     if not hard_valid:
+        try:
+            _clause_conflict_witness(elaborated, pairs)
+        except RuntimeFailure:
+            return False
         return True
     authorized, _excluded = _authorization(elaborated, hard_valid)
     if not authorized:

@@ -6,6 +6,8 @@ from dataclasses import dataclass
 
 from Phase0.implementation.dialect import PREDICATE_BY_ID
 from Phase0.implementation.schema import (
+    AssertionBasis,
+    AssertionCommitment,
     CanonicalSemanticState,
     ContextAvailability,
     CrossConstraint,
@@ -89,6 +91,8 @@ def _source_ref_table(source_envelope: SourceEnvelope | None) -> dict[str, str]:
         _fail("MISSING_SOURCE_ENVELOPE")
     refs: dict[str, str] = {}
     for span in source_envelope.spans:
+        if span.role not in SourceRole.values():
+            _fail("INVALID_SOURCE_ROLE")
         if span.ref in refs:
             _fail("DUPLICATE_SOURCE_REF")
         refs[span.ref] = span.role
@@ -116,8 +120,11 @@ def _support_sort_key(
 
 def _term_sort_key(term: object) -> str:
     if isinstance(term, ValueTerm):
+        _check_value_term_kind(term)
+        _check_enum_member(term.value)
         return f"VALUE:{term.value.type}:{term.value.value}"
     if isinstance(term, OpenTerm):
+        _check_open_term_kind(term)
         return f"OPEN:{term.type}:{term.semantic_slot_link}"
     _fail("INVALID_TERM")
 
@@ -176,6 +183,10 @@ def _ordered_knowledge_assertions(
     source_positions: dict[str, int],
 ) -> tuple[KnowledgeAssertion, ...]:
     for assertion in canonical_state.knowledge_assertions:
+        if assertion.basis not in AssertionBasis.values():
+            _fail("INVALID_KNOWLEDGE_BASIS")
+        if assertion.commitment not in AssertionCommitment.values():
+            _fail("INVALID_KNOWLEDGE_COMMITMENT")
         _require_supports(assertion.proposition_support, source_roles)
     keyed = tuple(
         (_knowledge_sort_key(assertion, source_positions), assertion)
@@ -183,6 +194,30 @@ def _ordered_knowledge_assertions(
     )
     _ensure_unambiguous_order(tuple(key for key, _assertion in keyed))
     return tuple(assertion for _key, assertion in sorted(keyed, key=lambda item: item[0]))
+
+
+def _check_value_term_kind(term: ValueTerm) -> None:
+    if term.kind != "VALUE":
+        _fail("INVALID_VALUE_TERM_KIND")
+
+
+def _check_open_term_kind(term: OpenTerm) -> None:
+    if term.kind != "OPEN":
+        _fail("INVALID_OPEN_TERM_KIND")
+
+
+def _check_enum_member(value: TypedValue) -> None:
+    order = TYPE_VALUE_ORDER.get(value.type)
+    if order is None:
+        _fail("UNKNOWN_ENUM_TYPE")
+    if value.value not in order:
+        _fail("UNKNOWN_ENUM_VALUE")
+
+
+def _check_typed_value(value: TypedValue, expected_type: str) -> None:
+    if value.type != expected_type:
+        _fail("TYPE_MISMATCH")
+    _check_enum_member(value)
 
 
 def _check_predicate_terms(
@@ -197,9 +232,10 @@ def _check_predicate_terms(
         _fail("ARGUMENT_COUNT_MISMATCH")
     for term, expected_type in zip(terms, signature, strict=True):
         if isinstance(term, ValueTerm):
-            if term.value.type != expected_type:
-                _fail("TYPE_MISMATCH")
+            _check_value_term_kind(term)
+            _check_typed_value(term.value, expected_type)
         elif isinstance(term, OpenTerm):
+            _check_open_term_kind(term)
             if term.type != expected_type:
                 _fail("TYPE_MISMATCH")
         else:

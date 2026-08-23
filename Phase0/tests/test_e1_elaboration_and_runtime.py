@@ -36,6 +36,7 @@ from Phase0.implementation.schema import (
     KnowledgeAssertion,
     Modality,
     NormativeCandidate,
+    OpenTerm,
     SourceEnvelope,
     SourceRole,
     SourceSpan,
@@ -430,6 +431,78 @@ class E1ElaborationAndRuntimeTest(unittest.TestCase):
             elaboration.elaborate(unknown_modality, source, visible, (), (), ())
         self.assertEqual(unknown.exception.reason, "UNKNOWN_MODALITY")
 
+    def test_direct_dataclass_record_semantics_fail_at_elaboration_boundary(self) -> None:
+        source = SourceEnvelope(
+            spans=(SourceSpan(ref="u1", role=SourceRole.USER.value, text="same"),)
+        )
+        visible = VisibleWorldContext(entities=(), observable_values=())
+        valid_candidate = NormativeCandidate(
+            modality=Modality.REQUIRE.value,
+            predicate="world.final_format_is",
+            args=(ValueTerm("VALUE", TypedValue("OutputFormat", "JSON")),),
+            proposition_support=("u1",),
+            claimed_authority_support=("u1",),
+        )
+        malformed_value_tag = replace(
+            valid_candidate,
+            args=(ValueTerm("OPEN", TypedValue("OutputFormat", "JSON")),),
+        )
+        malformed_open_tag = replace(
+            valid_candidate,
+            args=(OpenTerm("VALUE", "OutputFormat", "slot:clause:000:arg0"),),
+        )
+        unknown_enum_value = replace(
+            valid_candidate,
+            args=(ValueTerm("VALUE", TypedValue("OutputFormat", "TOML")),),
+        )
+        cases = (
+            (malformed_value_tag, source, "INVALID_VALUE_TERM_KIND"),
+            (malformed_open_tag, source, "INVALID_OPEN_TERM_KIND"),
+            (unknown_enum_value, source, "UNKNOWN_ENUM_VALUE"),
+            (
+                valid_candidate,
+                SourceEnvelope(
+                    spans=(SourceSpan(ref="u1", role="SYSTEM", text="bad"),)
+                ),
+                "INVALID_SOURCE_ROLE",
+            ),
+        )
+        for candidate, envelope, reason in cases:
+            with self.subTest(reason=reason):
+                state = CanonicalSemanticState(
+                    normative_candidates=(candidate,),
+                    knowledge_assertions=(),
+                    open_slot_mentions=(),
+                )
+                with self.assertRaises(ElaborationFailure) as raised:
+                    elaboration.elaborate(state, envelope, visible, (), (), ())
+                self.assertEqual(raised.exception.reason, reason)
+
+        valid_knowledge = KnowledgeAssertion(
+            predicate="world.final_format_is",
+            args=(ValueTerm("VALUE", TypedValue("OutputFormat", "JSON")),),
+            basis=AssertionBasis.EXPLICIT_STATEMENT.value,
+            commitment=AssertionCommitment.ASSERTED.value,
+            proposition_support=("u1",),
+        )
+        invalid_knowledge_records = (
+            (replace(valid_knowledge, basis="GUESS"), "INVALID_KNOWLEDGE_BASIS"),
+            (
+                replace(valid_knowledge, commitment="MAYBE"),
+                "INVALID_KNOWLEDGE_COMMITMENT",
+            ),
+        )
+        for assertion, reason in invalid_knowledge_records:
+            with self.subTest(reason=reason):
+                state = CanonicalSemanticState(
+                    normative_candidates=(),
+                    knowledge_assertions=(assertion,),
+                    open_slot_mentions=(),
+                )
+                with self.assertRaises(ElaborationFailure) as raised:
+                    elaboration.elaborate(state, source, visible, (), (), ())
+                self.assertEqual(raised.exception.reason, reason)
+
     def test_empty_domain_witness_uses_minimal_redundant_exclusions(self) -> None:
         case = load_fixture_input(
             FIXTURE_DIR / "F6_HARD_UNSAT_WITNESS.json",
@@ -540,7 +613,28 @@ class E1ElaborationAndRuntimeTest(unittest.TestCase):
             empty_witness.exception.reason,
             "EMPTY_CLAUSE_CONFLICT_WITNESS",
         )
-        self.assertIn("NO_SUFFICIENT_USER_QUERY", inspect.getsource(runtime))
+
+        f1_case = load_fixture_input(
+            FIXTURE_DIR / "F1_OPEN_UU_COUPLED_MIN_ASK.json",
+            "unresolved",
+        )
+        assistant_source = SourceEnvelope(
+            spans=tuple(
+                replace(span, role=SourceRole.ASSISTANT.value)
+                for span in f1_case.source_envelope.spans
+            )
+        )
+        with self.assertRaises(RuntimeFailure) as no_query:
+            run_backend(
+                f1_case.entry_payload.canonical_state,
+                assistant_source,
+                f1_case.visible_world_context,
+                f1_case.slot_declarations,
+                f1_case.static_constraints,
+                f1_case.cross_constraints,
+                ("tau:f1:json_strict",),
+            )
+        self.assertEqual(no_query.exception.reason, "NO_SUFFICIENT_USER_QUERY")
 
     def test_public_backend_api_and_production_dependencies_are_expected_blind(self) -> None:
         self.assertEqual(
