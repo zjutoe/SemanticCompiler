@@ -559,6 +559,37 @@ class E1ElaborationAndRuntimeTest(unittest.TestCase):
             ("constraint:f6:aaa_json_duplicate",),
         )
 
+    def test_static_constraints_reject_non_initial_manifest_predicates(self) -> None:
+        case = load_fixture_input(
+            FIXTURE_DIR / "F6_HARD_UNSAT_WITNESS.json",
+            "static_empty",
+        )
+        bad_constraints = tuple(
+            replace(constraint, context_predicate="world.final_format_is")
+            for constraint in case.static_constraints
+        )
+        bad_context = VisibleWorldContext(
+            entities=case.visible_world_context.entities,
+            observable_values=tuple(
+                replace(observation, predicate="world.final_format_is")
+                for observation in case.visible_world_context.observable_values
+            ),
+        )
+        with self.assertRaises(ElaborationFailure) as raised:
+            run_backend(
+                case.entry_payload.canonical_state,
+                case.source_envelope,
+                bad_context,
+                case.slot_declarations,
+                bad_constraints,
+                case.cross_constraints,
+                case.candidate_trajectory_ids,
+            )
+        self.assertEqual(
+            raised.exception.reason,
+            "STATIC_CONSTRAINT_PREDICATE_SCOPE_MISMATCH",
+        )
+
     def test_runtime_contract_violations_have_distinct_stable_reasons(self) -> None:
         base_case = load_fixture_input(
             FIXTURE_DIR / "F5_AUTHORITY_ROLE_COUNTERFACTUAL.json",
@@ -611,23 +642,33 @@ class E1ElaborationAndRuntimeTest(unittest.TestCase):
             )
         self.assertEqual(
             empty_witness.exception.reason,
-            "EMPTY_CLAUSE_CONFLICT_WITNESS",
+            "EMPTY_TRAJECTORY_FIBER",
         )
+
+        out_of_omega_case = load_fixture_input(
+            FIXTURE_DIR / "F2_OPEN_UE_OWNER_BOUNDARY.json",
+            "resolved_return_none",
+        )
+        with self.assertRaises(RuntimeFailure) as out_of_omega:
+            run_backend(
+                out_of_omega_case.entry_payload.canonical_state,
+                out_of_omega_case.source_envelope,
+                out_of_omega_case.visible_world_context,
+                out_of_omega_case.slot_declarations,
+                out_of_omega_case.static_constraints,
+                out_of_omega_case.cross_constraints,
+                ("tau:f2:raise_verbose",),
+            )
+        self.assertEqual(out_of_omega.exception.reason, "EMPTY_TRAJECTORY_FIBER")
 
         f1_case = load_fixture_input(
             FIXTURE_DIR / "F1_OPEN_UU_COUPLED_MIN_ASK.json",
             "unresolved",
         )
-        assistant_source = SourceEnvelope(
-            spans=tuple(
-                replace(span, role=SourceRole.ASSISTANT.value)
-                for span in f1_case.source_envelope.spans
-            )
-        )
         with self.assertRaises(RuntimeFailure) as no_query:
             run_backend(
                 f1_case.entry_payload.canonical_state,
-                assistant_source,
+                f1_case.source_envelope,
                 f1_case.visible_world_context,
                 f1_case.slot_declarations,
                 f1_case.static_constraints,

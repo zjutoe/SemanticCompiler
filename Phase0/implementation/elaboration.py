@@ -429,6 +429,8 @@ def _apply_static_constraints(
                 _fail("UNKNOWN_PREDICATE")
             if definition.signature != (slot.type,):
                 _fail("STATIC_CONSTRAINT_SIGNATURE_MISMATCH")
+            if definition.scope != PredicateScope.INITIAL.value:
+                _fail("STATIC_CONSTRAINT_PREDICATE_SCOPE_MISMATCH")
             matches = _context_matches(
                 visible_world_context,
                 constraint.context_predicate,

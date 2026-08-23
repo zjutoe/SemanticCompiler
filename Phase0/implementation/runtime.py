@@ -541,6 +541,8 @@ def _clause_conflict_witness(
     elaborated: ElaboratedSemanticState,
     pairs: tuple[_Pair, ...],
 ) -> ClauseConflictWitness:
+    if not pairs:
+        _runtime_fail("EMPTY_TRAJECTORY_FIBER")
     hard = _hard_candidates(elaborated)
     if not hard:
         _runtime_fail("EMPTY_CLAUSE_CONFLICT_WITNESS")
@@ -591,6 +593,8 @@ def _closes_without_another_ask(
     trajectories: tuple[Trajectory, ...],
 ) -> bool:
     pairs = _matching_pairs(restricted_legal, trajectories)
+    if not pairs:
+        return False
     hard_valid = _hard_valid_pairs(elaborated, pairs)
     if not hard_valid:
         try:
@@ -657,6 +661,8 @@ def decide(
     trajectories = _candidate_trajectories(candidate_trajectory_ids)
     _validate_trajectory_structure(elaborated, trajectories)
     pairs = _matching_pairs(legal_joint_completions, trajectories)
+    if not pairs:
+        _runtime_fail("EMPTY_TRAJECTORY_FIBER")
     hard_valid = _hard_valid_pairs(elaborated, pairs)
     if not hard_valid:
         return RuntimeEvaluation(
