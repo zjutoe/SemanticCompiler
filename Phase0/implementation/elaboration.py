@@ -10,6 +10,7 @@ from Phase0.implementation.schema import (
     AssertionCommitment,
     CanonicalSemanticState,
     ContextAvailability,
+    ContextValue,
     CrossConstraint,
     KnowledgeAssertion,
     Modality,
@@ -22,6 +23,7 @@ from Phase0.implementation.schema import (
     SlotDeclaration,
     SourceEnvelope,
     SourceRole,
+    SourceSpan,
     StaticConstraint,
     TYPE_VALUE_ORDER,
     TypedValue,
@@ -84,6 +86,241 @@ class ElaboratedSemanticState:
 
 def _fail(reason: str) -> None:
     raise ElaborationFailure(reason)
+
+
+def _require_tuple(value: object, reason: str) -> tuple[object, ...]:
+    if type(value) is not tuple:
+        _fail(reason)
+    return value
+
+
+def _require_string(value: object, reason: str) -> str:
+    if type(value) is not str:
+        _fail(reason)
+    return value
+
+
+def _require_bool(value: object, reason: str) -> bool:
+    if type(value) is not bool:
+        _fail(reason)
+    return value
+
+
+def _validate_ref_tuple(value: object, reason: str) -> tuple[str, ...]:
+    refs = _require_tuple(value, reason)
+    for ref in refs:
+        _require_string(ref, "INVALID_SUPPORT_REF")
+    if len(set(refs)) != len(refs):
+        _fail("DUPLICATE_SUPPORT_REF")
+    return refs
+
+
+def _validate_typed_value_record(value: object, reason: str) -> TypedValue:
+    if not isinstance(value, TypedValue):
+        _fail(reason)
+    _require_string(value.type, "INVALID_TYPED_VALUE_SHAPE")
+    _require_string(value.value, "INVALID_TYPED_VALUE_SHAPE")
+    return value
+
+
+def _validate_value_term(term: ValueTerm) -> None:
+    _require_string(term.kind, "INVALID_VALUE_TERM_KIND")
+    _validate_typed_value_record(term.value, "INVALID_TERM_VALUE_SHAPE")
+
+
+def _validate_open_term(term: OpenTerm) -> None:
+    _require_string(term.kind, "INVALID_OPEN_TERM_KIND")
+    _require_string(term.type, "INVALID_OPEN_TERM_SHAPE")
+    _require_string(term.semantic_slot_link, "INVALID_OPEN_TERM_SHAPE")
+
+
+def _validate_terms(value: object) -> tuple[object, ...]:
+    terms = _require_tuple(value, "INVALID_TERM_CONTAINER")
+    for term in terms:
+        if isinstance(term, ValueTerm):
+            _validate_value_term(term)
+        elif isinstance(term, OpenTerm):
+            _validate_open_term(term)
+        else:
+            _fail("INVALID_TERM")
+    return terms
+
+
+def _validate_source_envelope(source_envelope: SourceEnvelope | None) -> None:
+    if source_envelope is None:
+        return
+    if not isinstance(source_envelope, SourceEnvelope):
+        _fail("INVALID_SOURCE_ENVELOPE_RECORD")
+    spans = _require_tuple(source_envelope.spans, "INVALID_SOURCE_SPANS")
+    for span in spans:
+        if not isinstance(span, SourceSpan):
+            _fail("INVALID_SOURCE_SPAN_RECORD")
+        _require_string(span.ref, "INVALID_SOURCE_REF")
+        _require_string(span.role, "INVALID_SOURCE_ROLE")
+        _require_string(span.text, "INVALID_SOURCE_TEXT")
+
+
+def _validate_candidate(candidate: object) -> None:
+    if not isinstance(candidate, NormativeCandidate):
+        _fail("INVALID_CANDIDATE_RECORD")
+    _require_string(candidate.modality, "UNKNOWN_MODALITY")
+    _require_string(candidate.predicate, "UNKNOWN_PREDICATE")
+    _validate_terms(candidate.args)
+    _validate_ref_tuple(candidate.proposition_support, "INVALID_SUPPORT_REFS")
+    _validate_ref_tuple(candidate.claimed_authority_support, "INVALID_SUPPORT_REFS")
+
+
+def _validate_knowledge_assertion(assertion: object) -> None:
+    if not isinstance(assertion, KnowledgeAssertion):
+        _fail("INVALID_KNOWLEDGE_RECORD")
+    _require_string(assertion.predicate, "UNKNOWN_PREDICATE")
+    _validate_terms(assertion.args)
+    _require_string(assertion.basis, "INVALID_KNOWLEDGE_BASIS")
+    _require_string(assertion.commitment, "INVALID_KNOWLEDGE_COMMITMENT")
+    _validate_ref_tuple(assertion.proposition_support, "INVALID_SUPPORT_REFS")
+
+
+def _validate_open_slot_mention(mention: object) -> None:
+    if not isinstance(mention, OpenSlotMention):
+        _fail("INVALID_OPEN_SLOT_MENTION_RECORD")
+    _require_string(mention.type, "UNKNOWN_SLOT_TYPE")
+    _require_string(mention.owner, "INVALID_OPEN_OWNER")
+    _require_string(mention.proposition_link, "INVALID_OPEN_SLOT_MENTION_SHAPE")
+    if type(mention.argument_position) is not int or mention.argument_position < 0:
+        _fail("INVALID_OPEN_SLOT_MENTION_SHAPE")
+    _validate_ref_tuple(mention.proposition_support, "INVALID_SUPPORT_REFS")
+
+
+def _validate_canonical_state(canonical_state: CanonicalSemanticState) -> None:
+    if not isinstance(canonical_state, CanonicalSemanticState):
+        _fail("INVALID_CANONICAL_STATE_RECORD")
+    candidates = _require_tuple(
+        canonical_state.normative_candidates,
+        "INVALID_CANDIDATE_CONTAINER",
+    )
+    assertions = _require_tuple(
+        canonical_state.knowledge_assertions,
+        "INVALID_KNOWLEDGE_CONTAINER",
+    )
+    mentions = _require_tuple(
+        canonical_state.open_slot_mentions,
+        "INVALID_OPEN_SLOT_MENTION_CONTAINER",
+    )
+    for candidate in candidates:
+        _validate_candidate(candidate)
+    for assertion in assertions:
+        _validate_knowledge_assertion(assertion)
+    for mention in mentions:
+        _validate_open_slot_mention(mention)
+
+
+def _validate_context_value(value: object) -> None:
+    if not isinstance(value, ContextValue):
+        _fail("INVALID_CONTEXT_VALUE_RECORD")
+    _require_string(value.predicate, "UNKNOWN_PREDICATE")
+    _require_string(value.scope, "INVALID_CONTEXT_SCOPE")
+    if value.scope not in ContextAvailability.values():
+        _fail("INVALID_CONTEXT_SCOPE")
+    args = _require_tuple(value.args, "INVALID_CONTEXT_ARGS")
+    definition = PREDICATE_BY_ID.get(value.predicate)
+    if definition is None:
+        _fail("UNKNOWN_PREDICATE")
+    if len(args) != len(definition.signature):
+        _fail("CONTEXT_SIGNATURE_MISMATCH")
+    for arg, expected_type in zip(args, definition.signature, strict=True):
+        typed_arg = _validate_typed_value_record(arg, "INVALID_CONTEXT_ARGUMENT")
+        _check_typed_value(typed_arg, expected_type)
+    _require_bool(value.value, "INVALID_CONTEXT_BOOL")
+
+
+def _validate_visible_world_context(
+    visible_world_context: VisibleWorldContext,
+) -> None:
+    if not isinstance(visible_world_context, VisibleWorldContext):
+        _fail("INVALID_VISIBLE_CONTEXT_RECORD")
+    entities = _require_tuple(visible_world_context.entities, "INVALID_CONTEXT_ENTITIES")
+    if entities:
+        _fail("UNSUPPORTED_CONTEXT_ENTITIES")
+    observable_values = _require_tuple(
+        visible_world_context.observable_values,
+        "INVALID_CONTEXT_OBSERVABLES",
+    )
+    for value in observable_values:
+        _validate_context_value(value)
+
+
+def _validate_slot_declaration(declaration: object) -> None:
+    if not isinstance(declaration, SlotDeclaration):
+        _fail("INVALID_SLOT_DECLARATION_RECORD")
+    _require_string(declaration.semantic_slot_link, "INVALID_SLOT_DECLARATION_SHAPE")
+    _require_string(declaration.type, "UNKNOWN_SLOT_TYPE")
+    _require_string(declaration.owner, "INVALID_OPEN_OWNER")
+    if declaration.resolved_value is not None:
+        _validate_typed_value_record(
+            declaration.resolved_value,
+            "INVALID_SLOT_DECLARATION_SHAPE",
+        )
+
+
+def _validate_static_constraint(constraint: object) -> None:
+    if not isinstance(constraint, StaticConstraint):
+        _fail("INVALID_STATIC_CONSTRAINT_RECORD")
+    _require_string(constraint.constraint_link, "INVALID_STATIC_CONSTRAINT_SHAPE")
+    _require_string(constraint.semantic_slot_link, "INVALID_STATIC_CONSTRAINT_SHAPE")
+    _validate_typed_value_record(
+        constraint.candidate_value,
+        "INVALID_STATIC_CONSTRAINT_SHAPE",
+    )
+    _require_string(constraint.context_predicate, "UNKNOWN_PREDICATE")
+    _require_bool(
+        constraint.required_context_value,
+        "INVALID_STATIC_CONSTRAINT_BOOL",
+    )
+
+
+def _validate_cross_constraint(constraint: object) -> None:
+    if not isinstance(constraint, CrossConstraint):
+        _fail("INVALID_CROSS_CONSTRAINT_RECORD")
+    _require_string(constraint.constraint_link, "INVALID_CROSS_CONSTRAINT_SHAPE")
+    links = _require_tuple(
+        constraint.semantic_slot_links,
+        "CROSS_CONSTRAINT_LINK_SHAPE",
+    )
+    if len(links) != 2:
+        _fail("CROSS_CONSTRAINT_LINK_SHAPE")
+    for link in links:
+        _require_string(link, "CROSS_CONSTRAINT_LINK_SHAPE")
+    allowed_tuples = _require_tuple(
+        constraint.allowed_tuples,
+        "CROSS_CONSTRAINT_ALLOWED_TUPLES_SHAPE",
+    )
+    for pair in allowed_tuples:
+        if type(pair) is not tuple or len(pair) != 2:
+            _fail("CROSS_CONSTRAINT_TUPLE_SHAPE")
+        for value in pair:
+            _validate_typed_value_record(value, "CROSS_CONSTRAINT_VALUE_SHAPE")
+
+
+def _validate_elaboration_inputs(
+    canonical_state: CanonicalSemanticState,
+    source_envelope: SourceEnvelope | None,
+    visible_world_context: VisibleWorldContext,
+    slot_declarations: tuple[SlotDeclaration, ...],
+    static_constraints: tuple[StaticConstraint, ...],
+    cross_constraints: tuple[CrossConstraint, ...],
+) -> None:
+    _validate_canonical_state(canonical_state)
+    _validate_source_envelope(source_envelope)
+    _validate_visible_world_context(visible_world_context)
+    slots = _require_tuple(slot_declarations, "INVALID_SLOT_DECLARATION_CONTAINER")
+    statics = _require_tuple(static_constraints, "INVALID_STATIC_CONSTRAINT_CONTAINER")
+    crosses = _require_tuple(cross_constraints, "INVALID_CROSS_CONSTRAINT_CONTAINER")
+    for declaration in slots:
+        _validate_slot_declaration(declaration)
+    for constraint in statics:
+        _validate_static_constraint(constraint)
+    for constraint in crosses:
+        _validate_cross_constraint(constraint)
 
 
 def _source_ref_table(source_envelope: SourceEnvelope | None) -> dict[str, str]:
@@ -366,10 +603,7 @@ def _check_domain(declaration: SlotDeclaration) -> tuple[TypedValue, ...]:
     for value in domain:
         if not isinstance(value, TypedValue):
             _fail("MALFORMED_DOMAIN_DECLARATION")
-        if value.type != declaration.type:
-            _fail("TYPE_MISMATCH")
-        if value.value not in order:
-            _fail("TYPE_MISMATCH")
+        _check_typed_value(value, declaration.type)
         if value in seen:
             _fail("MALFORMED_DOMAIN_DECLARATION")
         seen.add(value)
@@ -378,8 +612,7 @@ def _check_domain(declaration: SlotDeclaration) -> tuple[TypedValue, ...]:
             _fail("MALFORMED_DOMAIN_DECLARATION")
         previous_index = index
     if declaration.resolved_value is not None:
-        if declaration.resolved_value.type != declaration.type:
-            _fail("TYPE_MISMATCH")
+        _check_typed_value(declaration.resolved_value, declaration.type)
         if declaration.resolved_value not in domain:
             _fail("RESOLVED_VALUE_OUTSIDE_DOMAIN")
     return domain
@@ -420,8 +653,7 @@ def _apply_static_constraints(
             constraints_by_slot[slot.semantic_slot_link],
             key=lambda item: item.constraint_link,
         ):
-            if constraint.candidate_value.type != slot.type:
-                _fail("TYPE_MISMATCH")
+            _check_typed_value(constraint.candidate_value, slot.type)
             if constraint.candidate_value not in schema_domain:
                 _fail("STATIC_CONSTRAINT_VALUE_OUTSIDE_DOMAIN")
             definition = PREDICATE_BY_ID.get(constraint.context_predicate)
@@ -516,8 +748,8 @@ def _check_cross_constraints(
             if len(pair) != 2:
                 _fail("CROSS_CONSTRAINT_TUPLE_ARITY")
             left_value, right_value = pair
-            if left_value.type != left.type or right_value.type != right.type:
-                _fail("TYPE_MISMATCH")
+            _check_typed_value(left_value, left.type)
+            _check_typed_value(right_value, right.type)
             if left_value not in schema_domains[links[0]] or right_value not in schema_domains[links[1]]:
                 _fail("CROSS_CONSTRAINT_VALUE_OUTSIDE_DOMAIN")
             if pair in seen:
@@ -535,6 +767,14 @@ def elaborate(
     static_constraints: tuple[StaticConstraint, ...],
     cross_constraints: tuple[CrossConstraint, ...],
 ) -> ElaboratedSemanticState:
+    _validate_elaboration_inputs(
+        canonical_state,
+        source_envelope,
+        visible_world_context,
+        slot_declarations,
+        static_constraints,
+        cross_constraints,
+    )
     source_roles = _source_ref_table(source_envelope)
     source_positions = _source_order(source_envelope)
     candidates = _ordered_candidates(canonical_state, source_roles, source_positions)

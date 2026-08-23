@@ -590,6 +590,81 @@ class E1ElaborationAndRuntimeTest(unittest.TestCase):
             "STATIC_CONSTRAINT_PREDICATE_SCOPE_MISMATCH",
         )
 
+    def test_direct_context_and_static_bools_must_be_exact_bool(self) -> None:
+        case = load_fixture_input(
+            FIXTURE_DIR / "F6_HARD_UNSAT_WITNESS.json",
+            "static_empty",
+        )
+        bad_observations = tuple(
+            replace(observation, value=1) if index == 0 else observation
+            for index, observation in enumerate(case.visible_world_context.observable_values)
+        )
+        with self.assertRaises(ElaborationFailure) as bad_context:
+            run_backend(
+                case.entry_payload.canonical_state,
+                case.source_envelope,
+                replace(case.visible_world_context, observable_values=bad_observations),
+                case.slot_declarations,
+                case.static_constraints,
+                case.cross_constraints,
+                case.candidate_trajectory_ids,
+            )
+        self.assertEqual(bad_context.exception.reason, "INVALID_CONTEXT_BOOL")
+
+        bad_static_constraints = tuple(
+            replace(constraint, required_context_value=1)
+            if index == 0
+            else constraint
+            for index, constraint in enumerate(case.static_constraints)
+        )
+        with self.assertRaises(ElaborationFailure) as bad_static:
+            run_backend(
+                case.entry_payload.canonical_state,
+                case.source_envelope,
+                case.visible_world_context,
+                case.slot_declarations,
+                bad_static_constraints,
+                case.cross_constraints,
+                case.candidate_trajectory_ids,
+            )
+        self.assertEqual(
+            bad_static.exception.reason,
+            "INVALID_STATIC_CONSTRAINT_BOOL",
+        )
+
+    def test_direct_cross_constraint_shapes_fail_before_hashing_or_membership(self) -> None:
+        case = load_fixture_input(
+            FIXTURE_DIR / "F1_OPEN_UU_COUPLED_MIN_ASK.json",
+            "unresolved",
+        )
+        cross = case.cross_constraints[0]
+        json_value = TypedValue("OutputFormat", "JSON")
+        strict_value = TypedValue("Strictness", "STRICT")
+        bad_list_pair = replace(
+            cross,
+            allowed_tuples=([json_value, strict_value],),
+        )
+        bad_element = replace(
+            cross,
+            allowed_tuples=(("not_a_typed_value", strict_value),),
+        )
+        for bad_cross, reason in (
+            (bad_list_pair, "CROSS_CONSTRAINT_TUPLE_SHAPE"),
+            (bad_element, "CROSS_CONSTRAINT_VALUE_SHAPE"),
+        ):
+            with self.subTest(reason=reason):
+                with self.assertRaises(ElaborationFailure) as raised:
+                    run_backend(
+                        case.entry_payload.canonical_state,
+                        case.source_envelope,
+                        case.visible_world_context,
+                        case.slot_declarations,
+                        case.static_constraints,
+                        (bad_cross,),
+                        case.candidate_trajectory_ids,
+                    )
+                self.assertEqual(raised.exception.reason, reason)
+
     def test_runtime_contract_violations_have_distinct_stable_reasons(self) -> None:
         base_case = load_fixture_input(
             FIXTURE_DIR / "F5_AUTHORITY_ROLE_COUNTERFACTUAL.json",
