@@ -19,7 +19,7 @@ Phase0/run_phase0.py
 | `ACCEPTED` | Main accepted the exact reviewed commit/range after a passing independent review |
 | `REJECTED` | Review or main rejected the frozen change; any repair must be a separate commit and receive a fresh review |
 
-The current checked-in stage template is `READY_TO_BIND`, subject to the independent contract-acceptance gate named in that handoff. Actual dispatch changes operational state through a main-thread message; the template itself is not edited. The binding message must contain the stage ID, exact source commit, handoff path, handoff blob SHA, predecessor accepted commit/range, exact allowed mutation paths, exact verification commands, and exact output roots. If any binding field is absent, there is no mutation authority. Historical accepted handoffs remain committed for provenance but are not current templates and grant no new authority.
+When a current stage template exists, it is `READY_TO_BIND` only after its independent contract-acceptance gate. Actual dispatch changes operational state through a main-thread message; the template itself is not edited. The binding message must contain the stage ID, exact source commit, handoff path, handoff blob SHA, predecessor accepted commit/range, exact allowed mutation paths, exact verification commands, and exact output roots. If any binding field is absent, there is no mutation authority. Historical accepted handoffs remain committed for provenance but are not current templates and grant no new authority. If no current template is listed below, no stage may be dispatched.
 
 ## Progressive generation rule
 
@@ -40,11 +40,12 @@ The current checked-in stage template is `READY_TO_BIND`, subject to the indepen
 
 ## Current executable handoff
 
-- [E1 — shared semantics, elaborator, and runtime](E1_shared_semantics_elaborator_runtime.md)
+None. E1 is accepted, and the E2 handoff has not yet been generated or reviewed.
 
 ## Accepted predecessor handoffs
 
 - [E0 — dialect and fixtures](E0_dialect_and_fixtures.md), implementation accepted at `70de224`; see [`E0_70de224_review.md`](../reviews/E0_70de224_review.md).
+- [E1 — shared semantics, elaborator, and runtime](E1_shared_semantics_elaborator_runtime.md), implementation accepted at `086f9da`; see [`E1_086f9da_review.md`](../reviews/E1_086f9da_review.md).
 
 ## Non-binding dependency roadmap
 
