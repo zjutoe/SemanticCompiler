@@ -682,6 +682,25 @@ class E1ElaborationAndRuntimeTest(unittest.TestCase):
             )
         self.assertEqual(unknown.exception.reason, "UNKNOWN_TRAJECTORY_ID")
 
+        malformed_trajectory_inputs = (
+            (None, "INVALID_TRAJECTORY_ID_CONTAINER"),
+            (["tau:f5:fixed_json"], "INVALID_TRAJECTORY_ID_CONTAINER"),
+            ((["tau:f5:fixed_json"],), "INVALID_TRAJECTORY_ID"),
+        )
+        for trajectory_ids, reason in malformed_trajectory_inputs:
+            with self.subTest(reason=reason):
+                with self.assertRaises(RuntimeFailure) as malformed:
+                    run_backend(
+                        base_case.entry_payload.canonical_state,
+                        base_case.source_envelope,
+                        base_case.visible_world_context,
+                        base_case.slot_declarations,
+                        base_case.static_constraints,
+                        base_case.cross_constraints,
+                        trajectory_ids,
+                    )
+                self.assertEqual(malformed.exception.reason, reason)
+
         structural_case = load_fixture_input(
             FIXTURE_DIR / "F1_OPEN_UU_COUPLED_MIN_ASK.json",
             "unresolved",

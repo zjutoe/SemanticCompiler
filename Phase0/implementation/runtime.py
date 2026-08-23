@@ -263,6 +263,11 @@ def _cross_empty_witness(
 def _candidate_trajectories(
     candidate_trajectory_ids: tuple[str, ...],
 ) -> tuple[Trajectory, ...]:
+    if type(candidate_trajectory_ids) is not tuple:
+        _runtime_fail("INVALID_TRAJECTORY_ID_CONTAINER")
+    for trajectory_id in candidate_trajectory_ids:
+        if type(trajectory_id) is not str:
+            _runtime_fail("INVALID_TRAJECTORY_ID")
     if len(set(candidate_trajectory_ids)) != len(candidate_trajectory_ids):
         _runtime_fail("DUPLICATE_TRAJECTORY_ID")
     trajectories: list[Trajectory] = []
