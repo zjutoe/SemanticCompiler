@@ -40,7 +40,7 @@ When a current stage template exists, it is `READY_TO_BIND` only after its indep
 
 ## Current executable handoff
 
-[E2 — fixture-direct typed A/B paths](E2_typed_a_b_paths.md). Independent contract acceptance and a main-thread binding packet are still required; this link alone grants no mutation authority.
+[E2 — fixture-direct typed A/B paths](E2_typed_a_b_paths.md), contract-accepted at `e79950e`; see [`E2_e79950e_review.md`](../reviews/E2_e79950e_review.md). It is `READY_TO_BIND` but not dispatched; a main-thread binding packet is still required.
 
 ## Accepted predecessor handoffs
 
