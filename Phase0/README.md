@@ -14,7 +14,7 @@ Any conflict blocks execution and returns to main. An executor may not repair, r
 |---|---|---|---|---|
 | E0 | Blocking | None | `ACCEPTED` at `70de224`; see `reviews/E0_70de224_review.md` | Yes |
 | E1 | Blocking | E0 | `ACCEPTED` at `086f9da`; see `reviews/E1_086f9da_review.md` | Yes |
-| E2 | Blocking | E1 | Eligible for just-in-time handoff generation; not yet generated | Yes |
+| E2 | Blocking | E1 | Current handoff candidate `handoffs/E2_typed_a_b_paths.md`; independent contract acceptance required before dispatch | Yes |
 | E3 | Blocking | E2 | Generate only after exact E2 acceptance | Yes |
 | E4 | Blocking | E3 | Generate only after exact E3 acceptance | Yes |
 | E5 | Optional | E4 | Generate only after exact E4 acceptance and explicit optional-scope authorization | No |

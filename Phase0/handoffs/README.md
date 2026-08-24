@@ -40,7 +40,7 @@ When a current stage template exists, it is `READY_TO_BIND` only after its indep
 
 ## Current executable handoff
 
-None. E1 is accepted, and the E2 handoff has not yet been generated or reviewed.
+[E2 — fixture-direct typed A/B paths](E2_typed_a_b_paths.md). Independent contract acceptance and a main-thread binding packet are still required; this link alone grants no mutation authority.
 
 ## Accepted predecessor handoffs
 
@@ -53,7 +53,6 @@ These entries name expected successors but are not handoffs and grant no mutatio
 
 | Stage | Coarse objective | When its handoff may be generated |
 |---|---|---|
-| E2 | Fixture-direct typed A/B paths | After accepted E1 |
 | E3 | Normal C extractor and real bridge path | After accepted E2 |
 | E4 | Bounded tracing and end-to-end closure | After accepted E3 |
 | E5 | Optional frozen-LM interface smoke | After accepted E4 and explicit authorization |
