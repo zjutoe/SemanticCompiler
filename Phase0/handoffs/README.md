@@ -40,7 +40,7 @@ When a current stage template exists, it is `READY_TO_BIND` only after its indep
 
 ## Current executable handoff
 
-None. E3 is accepted, and the E4 handoff has not yet been generated or reviewed. No stage currently has mutation authority.
+[E4 — bounded trace and end-to-end closure](E4_trace_and_end_to_end_closure.md). Independent contract acceptance and a main-thread binding packet are still required; this link alone grants no mutation authority.
 
 ## Accepted predecessor handoffs
 
@@ -56,5 +56,5 @@ These entries name expected successors but are not handoffs and grant no mutatio
 | Stage | Coarse objective | When its handoff may be generated |
 |---|---|---|
 | E3 | Normal C extractor and real bridge path | Accepted at `fb4be7c` |
-| E4 | Bounded tracing and end-to-end closure | Eligible now; handoff not yet generated |
+| E4 | Bounded tracing and end-to-end closure | Current contract-review candidate; not yet executable |
 | E5 | Optional frozen-LM interface smoke | After accepted E4 and explicit authorization |
