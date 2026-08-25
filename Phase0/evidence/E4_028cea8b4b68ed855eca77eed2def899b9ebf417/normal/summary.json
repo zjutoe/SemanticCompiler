@@ -1,0 +1,1 @@
+{"counts":{"ASK":1,"EXECUTE":2,"REJECT":0,"decision_count":3,"executed_result_count":1,"scenario_count":4,"system_failure_count":1},"implementation_source_commit":"028cea8b4b68ed855eca77eed2def899b9ebf417","package":"normal","scenario_ids":["A__F1__unresolved","B__F3__unresolved","C__F9__normal","A__F8__missing_adapter_link"],"schema_version":"phase0.e4.v1","status":"PASS"}
