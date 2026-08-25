@@ -65,7 +65,7 @@ def _valid_atomic_span(span: object) -> bool:
         return False
     if type(span.text) is not str or not span.text or span.text != span.text.strip():
         return False
-    if "\n" in span.text or "\r" in span.text:
+    if span.text.splitlines() != [span.text]:
         return False
     return span.text.endswith(".") and span.text.count(".") == 1
 

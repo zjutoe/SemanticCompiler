@@ -72,6 +72,8 @@ def _assignment(value) -> list[dict[str, Any]]:
 
 
 def _project_elaboration(value) -> dict[str, Any]:
+    if value.knowledge_assertions:
+        raise AssertionError(value.knowledge_assertions)
     return {
         "candidates": [
             {
@@ -233,6 +235,21 @@ class E3ContentBridgeTest(unittest.TestCase):
         self.assertEqual(_project_decision(outcome.decision), expected["decision"])
         self.assertEqual(_project_result(outcome.result), expected["result"])
 
+    def test_elaboration_projection_rejects_nonempty_knowledge_assertions(self) -> None:
+        case = _cases_by_id()["normal"]
+        state = normal_c_extract(case.source_envelope)
+        canonical = beta_C(
+            state,
+            build_referenced_support_view(case.source_envelope, state),
+            PREDICATES,
+            case.visible_world_context,
+        )
+        outcome = _run_case(case, canonical)
+        with self.assertRaises(AssertionError):
+            _project_elaboration(
+                replace(outcome.elaborated, knowledge_assertions=(object(),))
+            )
+
     def test_open_user_and_executor_have_exact_typed_links_and_support(self) -> None:
         envelope = SourceEnvelope(
             spans=(
@@ -371,6 +388,23 @@ class E3ContentBridgeTest(unittest.TestCase):
                     "INVALID_SOURCE_ENVELOPE",
                     segment_source,
                     value,
+                )
+
+    def test_unicode_line_boundary_invalidates_entire_mixed_envelope(self) -> None:
+        envelope = SourceEnvelope(
+            (
+                SourceSpan("u1", "USER", "Use JSON."),
+                SourceSpan("u2", "USER", "Use\u2028YAML."),
+            )
+        )
+
+        for function in (segment_source, normal_c_extract):
+            with self.subTest(function=function.__name__):
+                self.assert_c_failure(
+                    "surface",
+                    "INVALID_SOURCE_ENVELOPE",
+                    function,
+                    envelope,
                 )
 
     def test_support_builder_validates_refs_and_preserves_exact_provenance(self) -> None:
