@@ -40,12 +40,13 @@ When a current stage template exists, it is `READY_TO_BIND` only after its indep
 
 ## Current executable handoff
 
-[E2 — fixture-direct typed A/B paths](E2_typed_a_b_paths.md), contract-accepted at `e79950e`; see [`E2_e79950e_review.md`](../reviews/E2_e79950e_review.md). It is `READY_TO_BIND` but not dispatched; a main-thread binding packet is still required.
+None. E2 is accepted, and the E3 handoff has not yet been generated or reviewed. No stage currently has mutation authority.
 
 ## Accepted predecessor handoffs
 
 - [E0 — dialect and fixtures](E0_dialect_and_fixtures.md), implementation accepted at `70de224`; see [`E0_70de224_review.md`](../reviews/E0_70de224_review.md).
 - [E1 — shared semantics, elaborator, and runtime](E1_shared_semantics_elaborator_runtime.md), implementation accepted at `086f9da`; see [`E1_086f9da_review.md`](../reviews/E1_086f9da_review.md).
+- [E2 — fixture-direct typed A/B paths](E2_typed_a_b_paths.md), implementation accepted at `bb85d23`; see [`E2_bb85d23_review.md`](../reviews/E2_bb85d23_review.md).
 
 ## Non-binding dependency roadmap
 
@@ -53,6 +54,6 @@ These entries name expected successors but are not handoffs and grant no mutatio
 
 | Stage | Coarse objective | When its handoff may be generated |
 |---|---|---|
-| E3 | Normal C extractor and real bridge path | After accepted E2 |
+| E3 | Normal C extractor and real bridge path | Eligible now; handoff not yet generated |
 | E4 | Bounded tracing and end-to-end closure | After accepted E3 |
 | E5 | Optional frozen-LM interface smoke | After accepted E4 and explicit authorization |
