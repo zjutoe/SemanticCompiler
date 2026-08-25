@@ -16,7 +16,7 @@ Any conflict blocks execution and returns to main. An executor may not repair, r
 | E1 | Blocking | E0 | `ACCEPTED` at `086f9da`; see `reviews/E1_086f9da_review.md` | Yes |
 | E2 | Blocking | E1 | `ACCEPTED` at `bb85d23`; see `reviews/E2_bb85d23_review.md` | Yes |
 | E3 | Blocking | E2 | `ACCEPTED` at `fb4be7c`; see `reviews/E3_fb4be7c_review.md` | Yes |
-| E4 | Blocking | E3 | Current handoff candidate `handoffs/E4_trace_and_end_to_end_closure.md`; independent contract acceptance required before dispatch | Yes |
+| E4 | Blocking | E3 | Handoff contract `ACCEPTED` at `961a1a7`; see `reviews/E4_961a1a7_review.md`; `READY_TO_BIND`, not dispatched | Yes |
 | E5 | Optional | E4 | Generate only after exact E4 acceptance and explicit optional-scope authorization | No |
 
 The blocking sequence is `E0 -> E1 -> E2 -> E3 -> E4`. E5 may start only after accepted E4 and never blocks Phase 0 exit.
