@@ -1,0 +1,1 @@
+{"counts":{"ASK":0,"EXECUTE":1,"REJECT":0,"decision_count":1,"executed_result_count":1,"scenario_count":1,"system_failure_count":0},"implementation_source_commit":"028cea8b4b68ed855eca77eed2def899b9ebf417","package":"gold_c_debug","scenario_ids":["GOLD_C_DEBUG__F9__gold_c_original"],"schema_version":"phase0.e4.v1","status":"PASS"}

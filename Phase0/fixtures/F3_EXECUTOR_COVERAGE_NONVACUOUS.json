@@ -1,0 +1,29 @@
+{
+  "fixture_id": "F3_EXECUTOR_COVERAGE_NONVACUOUS",
+  "schema_version": "phase0.e0.v1",
+  "dialect_version": "contract-ir.phase0.v0",
+  "cases": [
+    {
+      "case_id": "unresolved",
+      "entry_stage": "CANONICAL",
+      "input": {
+        "source_envelope": {"spans": [{"ref": "u1", "role": "USER", "text": "Require a supported service route."}]},
+        "entry_payload": {"kind": "CANONICAL", "canonical_state": {"normative_candidates": [{"modality": "REQUIRE", "predicate": "world.service_route_is", "args": [{"kind": "OPEN", "type": "ServiceMode", "semantic_slot_link": "slot:clause:000:arg0"}, {"kind": "OPEN", "type": "Backend", "semantic_slot_link": "slot:clause:000:arg1"}], "proposition_support": ["u1"], "claimed_authority_support": ["u1"]}], "knowledge_assertions": [], "open_slot_mentions": [{"type": "ServiceMode", "owner": "USER", "proposition_link": "clause:000", "argument_position": 0, "proposition_support": ["u1"]}, {"type": "Backend", "owner": "EXECUTOR", "proposition_link": "clause:000", "argument_position": 1, "proposition_support": ["u1"]}]}},
+        "visible_world_context": {"entities": [], "observable_values": []},
+        "slot_declarations": [{"semantic_slot_link": "slot:clause:000:arg0", "type": "ServiceMode", "owner": "USER", "schema_domain": [{"type": "ServiceMode", "value": "SAFE"}, {"type": "ServiceMode", "value": "FAST"}], "resolved_value": null}, {"semantic_slot_link": "slot:clause:000:arg1", "type": "Backend", "owner": "EXECUTOR", "schema_domain": [{"type": "Backend", "value": "LOCAL"}, {"type": "Backend", "value": "REMOTE"}], "resolved_value": null}],
+        "static_constraints": [],
+        "cross_constraints": [{"constraint_link": "constraint:f3:service_backend_pairs", "semantic_slot_links": ["slot:clause:000:arg0", "slot:clause:000:arg1"], "allowed_tuples": [[{"type": "ServiceMode", "value": "SAFE"}, {"type": "Backend", "value": "LOCAL"}], [{"type": "ServiceMode", "value": "FAST"}, {"type": "Backend", "value": "LOCAL"}], [{"type": "ServiceMode", "value": "FAST"}, {"type": "Backend", "value": "REMOTE"}]]}],
+        "candidate_trajectory_ids": ["tau:f3:safe_local", "tau:f3:fast_local", "tau:f3:fast_remote"]
+      },
+      "expected": {
+        "canonical_state": null,
+        "elaboration": {"candidates": [{"clause_link": "clause:000", "authority": "USER", "active": true}], "active_clause_links": ["clause:000"], "knowledge_assertions": [], "open_slots": [{"semantic_slot_link": "slot:clause:000:arg0", "type": "ServiceMode", "owner": "USER", "resolved_value": null}, {"semantic_slot_link": "slot:clause:000:arg1", "type": "Backend", "owner": "EXECUTOR", "resolved_value": null}], "slot_domains": [{"semantic_slot_link": "slot:clause:000:arg0", "values": [{"type": "ServiceMode", "value": "SAFE"}, {"type": "ServiceMode", "value": "FAST"}]}, {"semantic_slot_link": "slot:clause:000:arg1", "values": [{"type": "Backend", "value": "LOCAL"}, {"type": "Backend", "value": "REMOTE"}]}], "constraint_links": ["constraint:f3:service_backend_pairs"]},
+        "legal_joint_completions": [[{"semantic_slot_link": "slot:clause:000:arg0", "value": {"type": "ServiceMode", "value": "SAFE"}}, {"semantic_slot_link": "slot:clause:000:arg1", "value": {"type": "Backend", "value": "LOCAL"}}], [{"semantic_slot_link": "slot:clause:000:arg0", "value": {"type": "ServiceMode", "value": "FAST"}}, {"semantic_slot_link": "slot:clause:000:arg1", "value": {"type": "Backend", "value": "LOCAL"}}], [{"semantic_slot_link": "slot:clause:000:arg0", "value": {"type": "ServiceMode", "value": "FAST"}}, {"semantic_slot_link": "slot:clause:000:arg1", "value": {"type": "Backend", "value": "REMOTE"}}]],
+        "decision": {"kind": "EXECUTE", "action_id": "f3_use_local", "executor_resolutions": [{"semantic_slot_link": "slot:clause:000:arg1", "value": {"type": "Backend", "value": "LOCAL"}}]},
+        "result": null,
+        "failure": null,
+        "dependency_assertions": null
+      }
+    }
+  ]
+}

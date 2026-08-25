@@ -19,7 +19,7 @@ Phase0/run_phase0.py
 | `ACCEPTED` | Main accepted the exact reviewed commit/range after a passing independent review |
 | `REJECTED` | Review or main rejected the frozen change; any repair must be a separate commit and receive a fresh review |
 
-The current checked-in stage template is `READY_TO_BIND`. Actual dispatch changes operational state through a main-thread message; the template itself is not edited. The binding message must contain the stage ID, exact source commit, handoff path, handoff blob SHA, predecessor accepted commit/range, exact allowed mutation paths, exact verification commands, and exact output roots. If any binding field is absent, there is no mutation authority.
+When a current stage template exists, it is `READY_TO_BIND` only after its independent contract-acceptance gate. Actual dispatch changes operational state through a main-thread message; the template itself is not edited. The binding message must contain the stage ID, exact source commit, handoff path, handoff blob SHA, predecessor accepted commit/range, exact allowed mutation paths, exact verification commands, and exact output roots. If any binding field is absent, there is no mutation authority. Historical accepted handoffs remain committed for provenance but are not current templates and grant no new authority. If no current template is listed below, no stage may be dispatched.
 
 ## Progressive generation rule
 
@@ -40,7 +40,15 @@ The current checked-in stage template is `READY_TO_BIND`. Actual dispatch change
 
 ## Current executable handoff
 
-- [E0 — dialect and fixtures](E0_dialect_and_fixtures.md)
+None. E4 and all blocking Phase 0 stages are accepted. E5 is optional, has no handoff, and remains unauthorized.
+
+## Accepted predecessor handoffs
+
+- [E0 — dialect and fixtures](E0_dialect_and_fixtures.md), implementation accepted at `70de224`; see [`E0_70de224_review.md`](../reviews/E0_70de224_review.md).
+- [E1 — shared semantics, elaborator, and runtime](E1_shared_semantics_elaborator_runtime.md), implementation accepted at `086f9da`; see [`E1_086f9da_review.md`](../reviews/E1_086f9da_review.md).
+- [E2 — fixture-direct typed A/B paths](E2_typed_a_b_paths.md), implementation accepted at `bb85d23`; see [`E2_bb85d23_review.md`](../reviews/E2_bb85d23_review.md).
+- [E3 — normal C extraction and real bridge path](E3_c_real_bridge_path.md), implementation accepted at `fb4be7c`; see [`E3_fb4be7c_review.md`](../reviews/E3_fb4be7c_review.md).
+- [E4 — bounded trace and end-to-end closure](E4_trace_and_end_to_end_closure.md), implementation and evidence accepted at `20411e9`; see [`E4_20411e9_review.md`](../reviews/E4_20411e9_review.md).
 
 ## Non-binding dependency roadmap
 
@@ -48,8 +56,6 @@ These entries name expected successors but are not handoffs and grant no mutatio
 
 | Stage | Coarse objective | When its handoff may be generated |
 |---|---|---|
-| E1 | Shared semantics, elaborator, and runtime | After accepted E0 |
-| E2 | Fixture-direct typed A/B paths | After accepted E1 |
-| E3 | Normal C extractor and real bridge path | After accepted E2 |
-| E4 | Bounded tracing and end-to-end closure | After accepted E3 |
+| E3 | Normal C extractor and real bridge path | Accepted at `fb4be7c` |
+| E4 | Bounded tracing and end-to-end closure | Accepted at `20411e9`; Phase 0 blocking sequence complete |
 | E5 | Optional frozen-LM interface smoke | After accepted E4 and explicit authorization |

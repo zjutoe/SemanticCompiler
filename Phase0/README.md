@@ -12,18 +12,18 @@ Any conflict blocks execution and returns to main. An executor may not repair, r
 
 | Stage | Classification | Predecessor | Handoff availability | Blocks Phase 0 exit |
 |---|---|---|---|---|
-| E0 | Blocking | None | Current `READY_TO_BIND` handoff | Yes |
-| E1 | Blocking | E0 | Generate only after exact E0 acceptance | Yes |
-| E2 | Blocking | E1 | Generate only after exact E1 acceptance | Yes |
-| E3 | Blocking | E2 | Generate only after exact E2 acceptance | Yes |
-| E4 | Blocking | E3 | Generate only after exact E3 acceptance | Yes |
+| E0 | Blocking | None | `ACCEPTED` at `70de224`; see `reviews/E0_70de224_review.md` | Yes |
+| E1 | Blocking | E0 | `ACCEPTED` at `086f9da`; see `reviews/E1_086f9da_review.md` | Yes |
+| E2 | Blocking | E1 | `ACCEPTED` at `bb85d23`; see `reviews/E2_bb85d23_review.md` | Yes |
+| E3 | Blocking | E2 | `ACCEPTED` at `fb4be7c`; see `reviews/E3_fb4be7c_review.md` | Yes |
+| E4 | Blocking | E3 | Implementation and evidence `ACCEPTED` at `20411e9`; see `reviews/E4_20411e9_review.md` | Yes |
 | E5 | Optional | E4 | Generate only after exact E4 acceptance and explicit optional-scope authorization | No |
 
-The blocking sequence is `E0 -> E1 -> E2 -> E3 -> E4`. E5 may start only after accepted E4 and never blocks Phase 0 exit.
+The blocking sequence `E0 -> E1 -> E2 -> E3 -> E4` is complete. E5 may start only after explicit optional-scope authorization and never blocks Phase 0 exit.
 
 ## Just-in-time handoff rule
 
-Only the next executable stage has a concrete handoff document. Downstream handoffs are deliberately absent because implementation and review may discover constraints that must shape the next stage. After a stage is independently accepted, main first incorporates any accepted interface, fixture, or contract changes, then writes and reviews the successor handoff against that exact state.
+Only the next unaccepted executable stage has a current concrete handoff document. Historical accepted handoffs remain committed for provenance but grant no new mutation authority. Downstream handoffs are deliberately absent because implementation and review may discover constraints that must shape the next stage. After a stage is independently accepted, main first incorporates any accepted interface, fixture, or contract changes, then writes and reviews the successor handoff against that exact state.
 
 A dependency roadmap may retain later stage names and coarse objectives, but it is not executable authority. No agent may infer missing downstream instructions from an old plan, a temporary draft, or a predecessor handoff. Unexpected findings stop the current stage and return to main for contract repair before any successor handoff is generated.
 

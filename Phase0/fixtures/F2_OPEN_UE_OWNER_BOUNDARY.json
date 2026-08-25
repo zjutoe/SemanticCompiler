@@ -1,0 +1,51 @@
+{
+  "fixture_id": "F2_OPEN_UE_OWNER_BOUNDARY",
+  "schema_version": "phase0.e0.v1",
+  "dialect_version": "contract-ir.phase0.v0",
+  "cases": [
+    {
+      "case_id": "unresolved",
+      "entry_stage": "CANONICAL",
+      "input": {
+        "source_envelope": {"spans": [{"ref": "u1", "role": "USER", "text": "Require a supported error-handling policy."}]},
+        "entry_payload": {"kind": "CANONICAL", "canonical_state": {"normative_candidates": [{"modality": "REQUIRE", "predicate": "world.error_handling_is", "args": [{"kind": "OPEN", "type": "ErrorPolicy", "semantic_slot_link": "slot:clause:000:arg0"}, {"kind": "OPEN", "type": "LogMode", "semantic_slot_link": "slot:clause:000:arg1"}], "proposition_support": ["u1"], "claimed_authority_support": ["u1"]}], "knowledge_assertions": [], "open_slot_mentions": [{"type": "ErrorPolicy", "owner": "USER", "proposition_link": "clause:000", "argument_position": 0, "proposition_support": ["u1"]}, {"type": "LogMode", "owner": "EXECUTOR", "proposition_link": "clause:000", "argument_position": 1, "proposition_support": ["u1"]}]}},
+        "visible_world_context": {"entities": [], "observable_values": []},
+        "slot_declarations": [{"semantic_slot_link": "slot:clause:000:arg0", "type": "ErrorPolicy", "owner": "USER", "schema_domain": [{"type": "ErrorPolicy", "value": "RETURN_NONE"}, {"type": "ErrorPolicy", "value": "RAISE"}], "resolved_value": null}, {"semantic_slot_link": "slot:clause:000:arg1", "type": "LogMode", "owner": "EXECUTOR", "schema_domain": [{"type": "LogMode", "value": "QUIET"}, {"type": "LogMode", "value": "VERBOSE"}], "resolved_value": null}],
+        "static_constraints": [],
+        "cross_constraints": [{"constraint_link": "constraint:f2:error_log_pairs", "semantic_slot_links": ["slot:clause:000:arg0", "slot:clause:000:arg1"], "allowed_tuples": [[{"type": "ErrorPolicy", "value": "RETURN_NONE"}, {"type": "LogMode", "value": "QUIET"}], [{"type": "ErrorPolicy", "value": "RAISE"}, {"type": "LogMode", "value": "VERBOSE"}]]}],
+        "candidate_trajectory_ids": ["tau:f2:return_none_quiet", "tau:f2:raise_verbose"]
+      },
+      "expected": {
+        "canonical_state": null,
+        "elaboration": {"candidates": [{"clause_link": "clause:000", "authority": "USER", "active": true}], "active_clause_links": ["clause:000"], "knowledge_assertions": [], "open_slots": [{"semantic_slot_link": "slot:clause:000:arg0", "type": "ErrorPolicy", "owner": "USER", "resolved_value": null}, {"semantic_slot_link": "slot:clause:000:arg1", "type": "LogMode", "owner": "EXECUTOR", "resolved_value": null}], "slot_domains": [{"semantic_slot_link": "slot:clause:000:arg0", "values": [{"type": "ErrorPolicy", "value": "RETURN_NONE"}, {"type": "ErrorPolicy", "value": "RAISE"}]}, {"semantic_slot_link": "slot:clause:000:arg1", "values": [{"type": "LogMode", "value": "QUIET"}, {"type": "LogMode", "value": "VERBOSE"}]}], "constraint_links": ["constraint:f2:error_log_pairs"]},
+        "legal_joint_completions": [[{"semantic_slot_link": "slot:clause:000:arg0", "value": {"type": "ErrorPolicy", "value": "RETURN_NONE"}}, {"semantic_slot_link": "slot:clause:000:arg1", "value": {"type": "LogMode", "value": "QUIET"}}], [{"semantic_slot_link": "slot:clause:000:arg0", "value": {"type": "ErrorPolicy", "value": "RAISE"}}, {"semantic_slot_link": "slot:clause:000:arg1", "value": {"type": "LogMode", "value": "VERBOSE"}}]],
+        "decision": {"kind": "ASK", "semantic_slot_links": ["slot:clause:000:arg0"]},
+        "result": null,
+        "failure": null,
+        "dependency_assertions": null
+      }
+    },
+    {
+      "case_id": "resolved_return_none",
+      "entry_stage": "CANONICAL",
+      "input": {
+        "source_envelope": {"spans": [{"ref": "u1", "role": "USER", "text": "Require a supported error-handling policy."}]},
+        "entry_payload": {"kind": "CANONICAL", "canonical_state": {"normative_candidates": [{"modality": "REQUIRE", "predicate": "world.error_handling_is", "args": [{"kind": "OPEN", "type": "ErrorPolicy", "semantic_slot_link": "slot:clause:000:arg0"}, {"kind": "OPEN", "type": "LogMode", "semantic_slot_link": "slot:clause:000:arg1"}], "proposition_support": ["u1"], "claimed_authority_support": ["u1"]}], "knowledge_assertions": [], "open_slot_mentions": [{"type": "ErrorPolicy", "owner": "USER", "proposition_link": "clause:000", "argument_position": 0, "proposition_support": ["u1"]}, {"type": "LogMode", "owner": "EXECUTOR", "proposition_link": "clause:000", "argument_position": 1, "proposition_support": ["u1"]}]}},
+        "visible_world_context": {"entities": [], "observable_values": []},
+        "slot_declarations": [{"semantic_slot_link": "slot:clause:000:arg0", "type": "ErrorPolicy", "owner": "USER", "schema_domain": [{"type": "ErrorPolicy", "value": "RETURN_NONE"}, {"type": "ErrorPolicy", "value": "RAISE"}], "resolved_value": {"type": "ErrorPolicy", "value": "RETURN_NONE"}}, {"semantic_slot_link": "slot:clause:000:arg1", "type": "LogMode", "owner": "EXECUTOR", "schema_domain": [{"type": "LogMode", "value": "QUIET"}, {"type": "LogMode", "value": "VERBOSE"}], "resolved_value": null}],
+        "static_constraints": [],
+        "cross_constraints": [{"constraint_link": "constraint:f2:error_log_pairs", "semantic_slot_links": ["slot:clause:000:arg0", "slot:clause:000:arg1"], "allowed_tuples": [[{"type": "ErrorPolicy", "value": "RETURN_NONE"}, {"type": "LogMode", "value": "QUIET"}], [{"type": "ErrorPolicy", "value": "RAISE"}, {"type": "LogMode", "value": "VERBOSE"}]]}],
+        "candidate_trajectory_ids": ["tau:f2:return_none_quiet", "tau:f2:raise_verbose"]
+      },
+      "expected": {
+        "canonical_state": null,
+        "elaboration": {"candidates": [{"clause_link": "clause:000", "authority": "USER", "active": true}], "active_clause_links": ["clause:000"], "knowledge_assertions": [], "open_slots": [{"semantic_slot_link": "slot:clause:000:arg0", "type": "ErrorPolicy", "owner": "USER", "resolved_value": {"type": "ErrorPolicy", "value": "RETURN_NONE"}}, {"semantic_slot_link": "slot:clause:000:arg1", "type": "LogMode", "owner": "EXECUTOR", "resolved_value": null}], "slot_domains": [{"semantic_slot_link": "slot:clause:000:arg0", "values": [{"type": "ErrorPolicy", "value": "RETURN_NONE"}, {"type": "ErrorPolicy", "value": "RAISE"}]}, {"semantic_slot_link": "slot:clause:000:arg1", "values": [{"type": "LogMode", "value": "QUIET"}, {"type": "LogMode", "value": "VERBOSE"}]}], "constraint_links": ["constraint:f2:error_log_pairs"]},
+        "legal_joint_completions": [[{"semantic_slot_link": "slot:clause:000:arg0", "value": {"type": "ErrorPolicy", "value": "RETURN_NONE"}}, {"semantic_slot_link": "slot:clause:000:arg1", "value": {"type": "LogMode", "value": "QUIET"}}]],
+        "decision": {"kind": "EXECUTE", "action_id": "f2_return_none_quiet", "executor_resolutions": [{"semantic_slot_link": "slot:clause:000:arg1", "value": {"type": "LogMode", "value": "QUIET"}}]},
+        "result": null,
+        "failure": null,
+        "dependency_assertions": null
+      }
+    }
+  ]
+}

@@ -5,6 +5,12 @@
 > [`IR_Design_Memo_v0_Phase0_Engineering_Exploration_Plan.md`](../../../Phase0/IR_Design_Memo_v0_Phase0_Engineering_Exploration_Plan.md)。加入本状态块之前，收到的原始正文 SHA-256 为
 > `7f5f2fec79da69acb6a63549687f78f65b2958972bdbc69a5eea3173d65c764b`。
 
+> [!NOTE]
+> **RESOLUTION: ACCEPTED WITH MODIFICATIONS**
+>
+> 主线程仅接受 learned semantic compilation 范围声明、A/B 工程解释边界、`beta_C` 语义 bridge 职责和有限 fixture-local cross-slot 边界；F10、8–12 周承诺及未来 handoff 均未采纳。修订提交为
+> `9115cef916c1d62b74ff23321e6cb57ad754967c`（父提交 `4cbf7a4f2fe68ec0fe70d876c3355a20bfb4d100`）。独立只读审查结论为 `ACCEPT`，无阻塞问题且无需修复提交。本文件仍是非权威 review input，生效语义只以权威计划为准。
+
 # Contract IR v0 Phase 0 工程探索计划评估与修订意见
 
 ## 总体评价

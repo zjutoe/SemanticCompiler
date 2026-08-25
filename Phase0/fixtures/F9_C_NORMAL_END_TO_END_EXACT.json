@@ -1,0 +1,49 @@
+{
+  "fixture_id": "F9_C_NORMAL_END_TO_END_EXACT",
+  "schema_version": "phase0.e0.v1",
+  "dialect_version": "contract-ir.phase0.v0",
+  "cases": [
+    {
+      "case_id": "normal",
+      "entry_stage": "SOURCE",
+      "input": {"source_envelope": {"spans": [{"ref": "u1", "role": "USER", "text": "Require final format JSON."}, {"ref": "u2", "role": "USER", "text": "Allow managed effect WRITE_OUTPUT."}, {"ref": "a1", "role": "ASSISTANT", "text": "Use YAML."}]}, "entry_payload": {"kind": "SOURCE"}, "visible_world_context": {"entities": [], "observable_values": []}, "slot_declarations": [], "static_constraints": [], "cross_constraints": [], "candidate_trajectory_ids": ["tau:f9:write_json"]},
+      "expected": {
+        "canonical_state": {"normative_candidates": [{"modality": "REQUIRE", "predicate": "world.final_format_is", "args": [{"kind": "VALUE", "value": {"type": "OutputFormat", "value": "JSON"}}], "proposition_support": ["u1"], "claimed_authority_support": ["u1"]}, {"modality": "ALLOW", "predicate": "effect.WRITE_OUTPUT", "args": [], "proposition_support": ["u2"], "claimed_authority_support": ["u2"]}, {"modality": "REQUIRE", "predicate": "world.final_format_is", "args": [{"kind": "VALUE", "value": {"type": "OutputFormat", "value": "YAML"}}], "proposition_support": ["a1"], "claimed_authority_support": ["a1"]}], "knowledge_assertions": [], "open_slot_mentions": []},
+        "elaboration": {"candidates": [{"clause_link": "clause:000", "authority": "USER", "active": true}, {"clause_link": "clause:001", "authority": "USER", "active": true}, {"clause_link": "clause:002", "authority": "NONE", "active": false}], "active_clause_links": ["clause:000", "clause:001"], "knowledge_assertions": [], "open_slots": [], "slot_domains": [], "constraint_links": []},
+        "legal_joint_completions": [[]],
+        "decision": {"kind": "EXECUTE", "action_id": "write_json", "executor_resolutions": []},
+        "result": {"kind": "EXECUTED", "action_id": "write_json", "final_observables": {"format": {"type": "OutputFormat", "value": "JSON"}}, "ordered_effects": ["WRITE_OUTPUT"]},
+        "failure": null,
+        "dependency_assertions": {"normal_content_refs": ["u1", "u2", "a1"], "referenced_support_view": [{"ref": "u1", "role": "USER", "text": "Require final format JSON."}, {"ref": "u2", "role": "USER", "text": "Allow managed effect WRITE_OUTPUT."}, {"ref": "a1", "role": "ASSISTANT", "text": "Use YAML."}], "canonical_equals_case": null}
+      }
+    },
+    {
+      "case_id": "gold_c_original",
+      "entry_stage": "EXTRACTIVE_CONTENT",
+      "input": {"source_envelope": {"spans": [{"ref": "u1", "role": "USER", "text": "Require final format JSON."}, {"ref": "u2", "role": "USER", "text": "Allow managed effect WRITE_OUTPUT."}, {"ref": "a1", "role": "ASSISTANT", "text": "Use YAML."}]}, "entry_payload": {"kind": "EXTRACTIVE_CONTENT", "content_refs": ["u1", "u2"]}, "visible_world_context": {"entities": [], "observable_values": []}, "slot_declarations": [], "static_constraints": [], "cross_constraints": [], "candidate_trajectory_ids": ["tau:f9:write_json"]},
+      "expected": {
+        "canonical_state": {"normative_candidates": [{"modality": "REQUIRE", "predicate": "world.final_format_is", "args": [{"kind": "VALUE", "value": {"type": "OutputFormat", "value": "JSON"}}], "proposition_support": ["u1"], "claimed_authority_support": ["u1"]}, {"modality": "ALLOW", "predicate": "effect.WRITE_OUTPUT", "args": [], "proposition_support": ["u2"], "claimed_authority_support": ["u2"]}], "knowledge_assertions": [], "open_slot_mentions": []},
+        "elaboration": {"candidates": [{"clause_link": "clause:000", "authority": "USER", "active": true}, {"clause_link": "clause:001", "authority": "USER", "active": true}], "active_clause_links": ["clause:000", "clause:001"], "knowledge_assertions": [], "open_slots": [], "slot_domains": [], "constraint_links": []},
+        "legal_joint_completions": [[]],
+        "decision": {"kind": "EXECUTE", "action_id": "write_json", "executor_resolutions": []},
+        "result": {"kind": "EXECUTED", "action_id": "write_json", "final_observables": {"format": {"type": "OutputFormat", "value": "JSON"}}, "ordered_effects": ["WRITE_OUTPUT"]},
+        "failure": null,
+        "dependency_assertions": {"normal_content_refs": [], "referenced_support_view": [{"ref": "u1", "role": "USER", "text": "Require final format JSON."}, {"ref": "u2", "role": "USER", "text": "Allow managed effect WRITE_OUTPUT."}], "canonical_equals_case": null}
+      }
+    },
+    {
+      "case_id": "gold_c_distractor_variant",
+      "entry_stage": "EXTRACTIVE_CONTENT",
+      "input": {"source_envelope": {"spans": [{"ref": "u1", "role": "USER", "text": "Require final format JSON."}, {"ref": "u2", "role": "USER", "text": "Allow managed effect WRITE_OUTPUT."}, {"ref": "a1", "role": "ASSISTANT", "text": "Use plain text."}]}, "entry_payload": {"kind": "EXTRACTIVE_CONTENT", "content_refs": ["u1", "u2"]}, "visible_world_context": {"entities": [], "observable_values": []}, "slot_declarations": [], "static_constraints": [], "cross_constraints": [], "candidate_trajectory_ids": ["tau:f9:write_json"]},
+      "expected": {
+        "canonical_state": {"normative_candidates": [{"modality": "REQUIRE", "predicate": "world.final_format_is", "args": [{"kind": "VALUE", "value": {"type": "OutputFormat", "value": "JSON"}}], "proposition_support": ["u1"], "claimed_authority_support": ["u1"]}, {"modality": "ALLOW", "predicate": "effect.WRITE_OUTPUT", "args": [], "proposition_support": ["u2"], "claimed_authority_support": ["u2"]}], "knowledge_assertions": [], "open_slot_mentions": []},
+        "elaboration": {"candidates": [{"clause_link": "clause:000", "authority": "USER", "active": true}, {"clause_link": "clause:001", "authority": "USER", "active": true}], "active_clause_links": ["clause:000", "clause:001"], "knowledge_assertions": [], "open_slots": [], "slot_domains": [], "constraint_links": []},
+        "legal_joint_completions": [[]],
+        "decision": {"kind": "EXECUTE", "action_id": "write_json", "executor_resolutions": []},
+        "result": {"kind": "EXECUTED", "action_id": "write_json", "final_observables": {"format": {"type": "OutputFormat", "value": "JSON"}}, "ordered_effects": ["WRITE_OUTPUT"]},
+        "failure": null,
+        "dependency_assertions": {"normal_content_refs": [], "referenced_support_view": [{"ref": "u1", "role": "USER", "text": "Require final format JSON."}, {"ref": "u2", "role": "USER", "text": "Allow managed effect WRITE_OUTPUT."}], "canonical_equals_case": "gold_c_original"}
+      }
+    }
+  ]
+}
