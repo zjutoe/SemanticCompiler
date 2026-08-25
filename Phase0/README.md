@@ -17,9 +17,9 @@ Any conflict blocks execution and returns to main. An executor may not repair, r
 | E2 | Blocking | E1 | `ACCEPTED` at `bb85d23`; see `reviews/E2_bb85d23_review.md` | Yes |
 | E3 | Blocking | E2 | `ACCEPTED` at `fb4be7c`; see `reviews/E3_fb4be7c_review.md` | Yes |
 | E4 | Blocking | E3 | Implementation and evidence `ACCEPTED` at `20411e9`; see `reviews/E4_20411e9_review.md` | Yes |
-| E5 | Optional | E4 | Generate only after exact E4 acceptance and explicit optional-scope authorization | No |
+| E5 | Optional | E4 | Implementation `ACCEPTED` at `18fd3bc`; evidence integrity `ACCEPTED` at `98da089`; recorded smoke `FAIL`; see `reviews/E5_98da089_review.md` | No |
 
-The blocking sequence `E0 -> E1 -> E2 -> E3 -> E4` is complete. E5 may start only after explicit optional-scope authorization and never blocks Phase 0 exit.
+The blocking sequence `E0 -> E1 -> E2 -> E3 -> E4` is complete. The optional E5 local smoke was run once and recorded a truthful non-blocking `FAIL`; it does not alter Phase 0 exit acceptance.
 
 ## Just-in-time handoff rule
 
