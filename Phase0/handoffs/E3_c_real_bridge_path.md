@@ -100,20 +100,22 @@ E0 already freezes source order and stable atomic span refs in `SourceEnvelope`;
 
 Malformed input raises `surface/INVALID_SOURCE_ENVELOPE`.
 
-`normal_c_extract` must call the same segmenter and select every syntactically supported atom, regardless of USER/ASSISTANT/TOOL role, in exact source order. Selection is based only on the frozen grammar shapes below. A recognized shape with an unknown typed value/effect is selected and then fails in `beta_C`; it must not be silently filtered as a distractor. Unknown sentence shapes are unrepresentable distractors and are omitted. If no span is representable, fail with `surface/NO_REPRESENTABLE_CONTENT`.
+`normal_c_extract` must call the same segmenter and select every lexically recognized atom, regardless of USER/ASSISTANT/TOOL role, in exact source order. Selection uses only the fixed keyword/token shapes below, not manifest membership. A recognized shape with an unknown typed value, effect, or OPEN owner is selected and then fails in `beta_C`; it must not be silently filtered as a distractor. Unknown sentence shapes are unrepresentable distractors and are omitted. If no span is recognized, fail immediately with `surface/NO_REPRESENTABLE_CONTENT` rather than returning an empty state.
 
 For F9 normal input, the exact refs are `("u1", "u2", "a1")`.
 
 ## Frozen controlled-language grammar
 
-Implement a small structural interpreter, not a table from complete fixture sentences to canonical objects. After removing the one terminal period, accept exactly these ASCII token shapes:
+Implement a small structural interpreter, not a table from complete fixture sentences to canonical objects. Lexical recognition removes the one terminal period, splits on single ASCII spaces, and recognizes exactly these shapes:
 
 ```text
-Require final format <OutputFormat-member>
-Require final format OPEN(<USER|EXECUTOR>)
-Use <OutputFormat-member>
-Allow managed effect <zero-argument EVENT name>
+Require final format <IDENTIFIER>
+Require final format OPEN(<IDENTIFIER>)
+Use <IDENTIFIER>
+Allow managed effect <IDENTIFIER>
 ```
+
+`IDENTIFIER` has the exact syntax `[A-Z][A-Z0-9_]*`. Keyword spelling, case, token count, and spacing are exact. Recognition checks only this lexical structure. In particular, `TOML`, `UNKNOWN_EFFECT`, and `OPEN(ADMIN)` are recognized and selected even though the frozen dialect later rejects them. Text with unknown keywords, a different token count, or a nonmatching identifier shape is an unrepresentable distractor.
 
 Interpret them as follows:
 
@@ -122,7 +124,7 @@ Interpret them as follows:
 - `Allow managed effect E` -> `ALLOW effect.E()`;
 - `OPEN(owner)` in the first form -> an `OpenTerm` of the manifest argument type and one matching `OpenSlotMention`.
 
-The interpreter must separately perform modality recognition, phrase-to-predicate linking, manifest signature/scope checks, enum type/member checks, OPEN owner extraction, canonical clause/slot-link construction, and support mapping. Do not use a full-sentence lookup, fixture/case ID, source role branch, expected canonical value, decision, action, trajectory, result, or emitted-effect data.
+After selection, `beta_C` performs semantic validation: it must separately perform modality recognition, phrase-to-predicate linking, manifest signature/scope checks, enum type/member checks, OPEN owner membership checks, canonical clause/slot-link construction, and support mapping. An identifier not admitted by the frozen manifest, enum domain, or `USER|EXECUTOR` owner set raises `UNSUPPORTED_CONTENT`. Do not use a full-sentence lookup, fixture/case ID, source role branch, expected canonical value, decision, action, trajectory, result, or emitted-effect data.
 
 For every interpreted candidate, both support fields are exactly the one source ref. This records claimed support only; `beta_C` must not derive authority. Candidate and OPEN order follows `ReferencedSupportView` order. Clause links are `clause:<three-digit-index>` and OPEN links are `slot:<clause-link>:arg<argument-index>`. E3 produces no knowledge assertions for this grammar.
 
@@ -133,6 +135,8 @@ For every interpreted candidate, both support fields are exactly the one source 
 `ExtractiveContentState.content_refs` must be a nonempty exact tuple of unique nonempty strings. `build_referenced_support_view` validates that every ref exists in the segmented envelope and that the tuple is already in source order; missing, duplicate, or reordered refs raise `surface/INVALID_CONTENT_REFS`. Invalid state structure raises `surface/INVALID_EXTRACTIVE_CONTENT`.
 
 The builder returns a fresh `ReferencedSupportView` containing only fresh copies of the selected spans. It must never attach an unreferenced span, source envelope, scenario identity, or gold metadata.
+
+`beta_C` validates the support view as semantic input, not as independently authenticated provenance. Because its frozen four-argument boundary deliberately excludes `SourceEnvelope`, a structurally valid role or text change is a different semantic input and may change canonical output. Fidelity to the original envelope is enforced and tested at `build_referenced_support_view`; E3 must not add the envelope, fingerprints, hidden global state, or authentication metadata to `beta_C`.
 
 Before constructing canonical output, `beta_C` validates its complete four-argument boundary:
 
@@ -165,9 +169,10 @@ Tests must establish all of:
 2. F9 `gold_c_original` and `gold_c_distractor_variant` each use their frozen refs `("u1", "u2")`; both support views are exactly equal and exclude `a1`; the same `beta_C` returns equal canonical values matching the frozen Gold-C canonical state.
 3. The Gold-C original output reaches the unchanged backend with its exact frozen elaboration, decision, and result. No alternate oracle bridge or canonical substitution is used.
 4. One small direct in-memory source covers both `OPEN(USER)` and `OPEN(EXECUTOR)` and asserts exact typed terms, owners, canonical links, and support refs. It does not create a new fixture or backend scenario.
-5. A mixed in-memory envelope proves normal extraction includes all recognized grammar shapes in source order, includes a syntactically recognized invalid typed atom for loud bridge failure, and omits only unknown sentence shapes.
-6. Direct-dataclass malformed cases cover source containers/records/roles/refs/atomic text; empty/duplicate/missing/reordered refs; extra, reordered, wrong-role, or changed-text view spans; malformed manifest and visible context; unsupported values/effects/owners; and exact failure stages/reasons without raw exceptions.
-7. Production dependency inspection proves no JSON/file reads, fixture/test/backend imports, expected/gold identifiers, scenario IDs, candidate trajectories/actions/results, `TRAJECTORIES`, or full-sentence canonical lookup.
+5. One in-memory envelope places valid recognized content under USER, ASSISTANT, and TOOL roles and proves all three are selected in source order and preserved into canonical support without role filtering.
+6. A separate mixed envelope proves lexical extraction includes recognized `TOML`, `UNKNOWN_EFFECT`, and `OPEN(ADMIN)` atoms, each producing loud bridge failure when tested, while omitting an unknown sentence shape. An envelope containing only valid atomic but lexically unrecognized shapes fails directly with exact `surface/NO_REPRESENTABLE_CONTENT`; it must not return an empty state or defer the failure to `beta_C`.
+7. Direct-dataclass malformed cases cover source containers/records/roles/refs/atomic text; empty/duplicate/missing/reordered refs; extra or reordered view spans; invalid-role or invalid-atomic-text view records; malformed manifest and visible context; unsupported values/effects/owners; and exact failure stages/reasons without raw exceptions. Builder tests assert exact role/text/ref fidelity, source order, fresh records, and exclusion of every unreferenced span. They do not require `beta_C` to detect structurally valid semantic changes without the envelope.
+8. Production dependency inspection proves no JSON/file reads, fixture/test/backend imports, expected/gold identifiers, scenario IDs, candidate trajectories/actions/results, `TRAJECTORIES`, or full-sentence canonical lookup.
 
 Tests must keep fixture expected readers and backend projections local. Production cannot import the fixture loader, backend, or test modules.
 
