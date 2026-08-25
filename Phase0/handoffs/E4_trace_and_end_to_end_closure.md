@@ -10,7 +10,7 @@
 
 ## Objective and non-goals
 
-Close the deterministic Phase 0 path with one bounded trace schema shared by A, B, C, Gold-C debug, and gold-canonical debug. Produce a small committed evidence package from a clean reviewed implementation commit, and prove that every F8 invalid route stops at its exact failure stage without a decision or execution result.
+Close the deterministic Phase 0 path with one bounded trace schema shared by A, B, C, Gold-C debug, and gold-canonical debug. Produce three small committed evidence packages from a clean reviewed implementation commit, keeping normal, Gold-C debug, and gold-canonical debug artifacts in distinct roots, and prove that every F8 invalid route stops at its exact failure stage without a decision or execution result.
 
 E4 is orchestration and observability over accepted E0-E3 behavior. It must not change or reinterpret any fixture, schema, dialect, adapter, bridge, elaborator, runtime, decision, result, or failure reason.
 
@@ -27,7 +27,7 @@ E4 does not add:
 E4 has two sequential gates under this one handoff:
 
 1. **Implementation gate.** A single writer edits only the two implementation paths below, runs the test commands, and returns without committing. Main freezes the diff, then a strict independent reviewer accepts or rejects the exact implementation range.
-2. **Recorded closure gate.** Only after implementation review acceptance, main starts from that exact clean implementation commit and binds the derived evidence root. The runner writes exactly four files. Main freezes those files in a separate evidence commit, then a fresh independent reviewer checks the implementation, committed evidence, reproducibility, F8 fail-stop behavior, and Phase 0 exit checklist.
+2. **Recorded closure gate.** Only after implementation review acceptance, main starts from that exact clean implementation commit and binds the derived evidence base root. The runner writes three fixed four-file packages below it. Main freezes those files in a separate evidence commit, then a fresh independent reviewer checks the implementation, committed evidence, reproducibility, F8 fail-stop behavior, and Phase 0 exit checklist.
 
 E4 is not complete after implementation review alone. Any rejected implementation or evidence requires a separate repair commit, a fresh clean run in a new root derived from the repaired implementation SHA, and a new independent review. Reviewed history is never rewritten and superseded evidence is never used in conclusions.
 
@@ -73,7 +73,7 @@ ScenarioTrace:
 
 The harness also exposes a minimal in-memory bundle builder, deterministic evidence writer, committed-evidence verifier, and CLI. Exact private helper names may vary. Do not create a general recorder API or accept arbitrary scenario lists.
 
-Every artifact ref has one entry in `artifacts.json`; no dangling or duplicate refs are allowed. Artifacts contain bounded JSON projections of actual fixture input/surface, canonical state, elaboration, legal completions/decision, result, failure, or reject witness. Never serialize private runtime support trajectories or arbitrary process/environment state. Raw source text may exist in its referenced input/surface artifact but never inline in `ScenarioTrace`.
+Every artifact ref has one entry in its package's `artifacts.json`; refs never cross package roots, and no dangling or duplicate refs are allowed. Artifacts contain bounded JSON projections of actual fixture input/surface, canonical state, elaboration, legal completions/decision, result, failure, or reject witness. Never serialize private runtime support trajectories or arbitrary process/environment state. Raw source text may exist in its referenced input/surface artifact but never inline in `ScenarioTrace`.
 
 For a successful path, append stages in actual pipeline order. `ASK` and `REJECT` end after `runtime`; only `EXECUTE` may append `execution` and have a non-null `result_ref`. On a system failure, the final stage has `output_ref=null` and the exact failure reason, then tracing stops. A system failure always has `NOT_PRODUCED`, no result, no ASK links, no resolutions, no reject metadata, and no later-stage artifact.
 
@@ -81,20 +81,22 @@ Existing exception types and their public `stage/reason` values determine failur
 
 ## Exact ten-scenario matrix
 
-Generate exactly these traces in this order:
+Generate exactly these traces. Within each package's `traces.jsonl`, preserve the relative row order shown below:
 
-| # | Scenario ID | Arm | Accepted path | Expected terminal state |
-|---|---|---|---|---|
-| 1 | `A__F1__unresolved` | A | hand-authored fixture-direct A -> `alpha_A` -> backend | `ASK`, exact F1 links |
-| 2 | `B__F3__unresolved` | B | hand-authored fixture-direct B -> `alpha_B` -> backend | `EXECUTE`, exact F3 resolution |
-| 3 | `C__F9__normal` | C | normal extractor -> support view -> `beta_C` -> backend | exact F9 `EXECUTE` and result |
-| 4 | `GOLD_C_DEBUG__F9__gold_c_original` | GOLD_C_DEBUG | frozen Gold-C refs -> same support builder/`beta_C` -> backend | exact F9 Gold-C `EXECUTE` and result |
-| 5 | `GOLD_CANONICAL_DEBUG__F6__clause_conflict` | GOLD_CANONICAL_DEBUG | canonical fixture input -> backend | exact `REJECT(HARD_UNSAT)` and witness |
-| 6 | `GOLD_CANONICAL_DEBUG__F8__dangling_support` | GOLD_CANONICAL_DEBUG | canonical fixture input -> backend | `elaboration/DANGLING_SUPPORT_REF` |
-| 7 | `GOLD_CANONICAL_DEBUG__F8__wrong_enum_type` | GOLD_CANONICAL_DEBUG | canonical fixture input -> backend | `elaboration/TYPE_MISMATCH` |
-| 8 | `A__F8__missing_adapter_link` | A | frozen adapter payload -> dispatcher | `adapter_or_bridge/MISSING_ADAPTER_LINK` |
-| 9 | `GOLD_CANONICAL_DEBUG__F8__malformed_domain` | GOLD_CANONICAL_DEBUG | canonical fixture input -> backend | `elaboration/MALFORMED_DOMAIN_DECLARATION` |
-| 10 | `GOLD_CANONICAL_DEBUG__F8__declared_empty_domain` | GOLD_CANONICAL_DEBUG | canonical fixture input -> backend | `elaboration/DECLARED_EMPTY_DOMAIN` |
+| # | Package | Scenario ID | Arm | Exact stage tuple | Expected terminal state |
+|---|---|---|---|---|---|
+| 1 | `normal` | `A__F1__unresolved` | A | `adapter_or_bridge, elaboration, runtime` | `ASK`, exact F1 links |
+| 2 | `normal` | `B__F3__unresolved` | B | `adapter_or_bridge, elaboration, runtime` | `EXECUTE`, exact F3 resolution, null result |
+| 3 | `normal` | `C__F9__normal` | C | `surface, adapter_or_bridge, elaboration, runtime, execution` | exact F9 `EXECUTE` and result |
+| 4 | `gold_c_debug` | `GOLD_C_DEBUG__F9__gold_c_original` | GOLD_C_DEBUG | `adapter_or_bridge, elaboration, runtime, execution` | exact F9 Gold-C `EXECUTE` and result |
+| 5 | `gold_canonical_debug` | `GOLD_CANONICAL_DEBUG__F6__clause_conflict` | GOLD_CANONICAL_DEBUG | `elaboration, runtime` | exact `REJECT(HARD_UNSAT)` and witness |
+| 6 | `gold_canonical_debug` | `GOLD_CANONICAL_DEBUG__F8__dangling_support` | GOLD_CANONICAL_DEBUG | `elaboration` (failure) | `elaboration/DANGLING_SUPPORT_REF` |
+| 7 | `gold_canonical_debug` | `GOLD_CANONICAL_DEBUG__F8__wrong_enum_type` | GOLD_CANONICAL_DEBUG | `elaboration` (failure) | `elaboration/TYPE_MISMATCH` |
+| 8 | `normal` | `A__F8__missing_adapter_link` | A | `adapter_or_bridge` (failure) | `adapter_or_bridge/MISSING_ADAPTER_LINK` |
+| 9 | `gold_canonical_debug` | `GOLD_CANONICAL_DEBUG__F8__malformed_domain` | GOLD_CANONICAL_DEBUG | `elaboration` (failure) | `elaboration/MALFORMED_DOMAIN_DECLARATION` |
+| 10 | `gold_canonical_debug` | `GOLD_CANONICAL_DEBUG__F8__declared_empty_domain` | GOLD_CANONICAL_DEBUG | `elaboration` (failure) | `elaboration/DECLARED_EMPTY_DOMAIN` |
+
+The named package is a fixed enum, not a configurable partitioning facility. `normal` contains rows 1, 2, 3, and 8; `gold_c_debug` contains row 4; `gold_canonical_debug` contains rows 5, 6, 7, 9, and 10. A stage marked `(failure)` has `output_ref=null` and the listed stable reason. F3 ends at `runtime`: its accepted decision is `EXECUTE`, but the backend returns no `Result` because its legal supporting trajectories do not share final observables.
 
 The missing-link probe is labeled A only to remain inside the plan's closed arm enum; its trace must show that dispatch fails before inspecting or accepting the generic fixture surface. It must not call `alpha_A`, construct a replacement Contract surface, or switch to B.
 
@@ -113,16 +115,18 @@ system_failure_count = 5
 ASK = 1
 EXECUTE = 3
 REJECT = 1
-executed_result_count = 3
+executed_result_count = 2
 ```
+
+Package-local counts are fixed as follows: `normal` has 4 scenarios, 3 decisions, 1 system failure, 1 ASK, 2 EXECUTE, 0 REJECT, and 1 result; `gold_c_debug` has 1 scenario, 1 EXECUTE decision, and 1 result; `gold_canonical_debug` has 5 scenarios, 1 REJECT decision, 4 system failures, and no result. Verification also checks their aggregate against the totals above.
 
 All actual terminal decisions, results, witnesses, and failures must match the frozen fixture expected values before the bundle can be marked passing. Expected values validate outputs only; they cannot construct a normal C canonical value, choose a decision, synthesize a result, route a failure, or populate actual artifacts.
 
 Each trace has at most five stage records. Scenario IDs, stage order, artifact refs, artifact ordering, trace ordering, and JSON serialization are deterministic. No timestamp, UUID, filesystem inode, hostname, absolute workspace path, or dictionary/set iteration order may affect bytes.
 
-The summary is an engineering closure record only. It reports the exact counts above, `status=PASS`, scenario IDs, and source commit. It must not rank arms, compute a score, claim causality, or recommend publication/deployment.
+Each package summary is an engineering closure record only. It reports that package's fixed local counts, `status=PASS`, ordered scenario IDs, and source commit. `verify` computes and checks the aggregate totals above in memory; it does not add a fourth aggregate package. A summary must not rank arms, compute a score, claim causality, or recommend publication/deployment.
 
-## CLI and four-file evidence package
+## CLI and three fixed four-file evidence packages
 
 The CLI supports only:
 
@@ -131,18 +135,17 @@ record --source-commit <40 lowercase hex> --handoff-blob <40 lowercase hex> --ou
 verify --source-commit <40 lowercase hex> --handoff-blob <40 lowercase hex> --output-root <path>
 ```
 
-Both commands require `output-root` to be the normalized repo-relative path `Phase0/evidence/E4_<source-commit>`; absolute paths and alternate roots are invalid. `record` must fail before writing unless the Git HEAD equals `source-commit`, the worktree/index is clean, the handoff blob argument equals `E4_HANDOFF_BLOB`, and the output root does not exist. It then writes exactly:
+Both commands require `output-root` to be the normalized repo-relative base path `Phase0/evidence/E4_<source-commit>`; absolute paths and alternate roots are invalid. `record` must fail before writing unless the Git HEAD equals `source-commit`, the worktree/index is clean including untracked paths, the handoff blob argument equals `E4_HANDOFF_BLOB`, and the base root does not exist. It then creates exactly these package roots:
 
 ```text
-manifest.json
-artifacts.json
-traces.jsonl
-summary.json
+Phase0/evidence/E4_<source-commit>/normal/
+Phase0/evidence/E4_<source-commit>/gold_c_debug/
+Phase0/evidence/E4_<source-commit>/gold_canonical_debug/
 ```
 
-`verify` requires the same embedded handoff identity, reads exactly those four files, rejects extras/missing files or schema drift, rebuilds the fixed matrix using current versioned code/fixtures, serializes it canonically, and requires exact byte equality for all four files. It does not require current HEAD to equal the recorded source commit because the evidence commit is necessarily a descendant that changes only evidence files.
+Each package root contains exactly `manifest.json`, `artifacts.json`, `traces.jsonl`, and `summary.json`; the base root contains no files or other directories. `verify` requires the same embedded handoff identity, rejects any missing or extra root/file and schema drift, rebuilds the fixed matrix using current versioned code/fixtures, serializes each package canonically, and requires exact byte equality for all twelve files. It does not require current HEAD to equal the recorded source commit because the evidence commit is necessarily a descendant that changes only evidence files.
 
-`manifest.json` records exactly the schema version, implementation source commit, accepted handoff path/blob, runner path, five fixture paths used by the matrix, exact relative output root, and ordered scenario IDs. No parallel source checksum is recorded.
+Each `manifest.json` records exactly the schema version, package name, implementation source commit, accepted handoff path/blob, runner path, applicable fixture paths, exact relative package root, and ordered scenario IDs for that package. Collectively they name the five fixture paths used by the matrix. No parallel source checksum is recorded.
 
 After implementation review acceptance, main binds:
 
@@ -158,18 +161,19 @@ The exact recorded command is then:
 python -B Phase0/run_phase0.py record --source-commit <E4_IMPL_SHA> --handoff-blob <E4_HANDOFF_BLOB> --output-root Phase0/evidence/E4_<E4_IMPL_SHA>
 ```
 
-The run must start from the clean implementation commit. Main verifies the four-file allowlist, runs `verify`, freezes only that derived evidence root in a new commit, and gives the final reviewer both the implementation and evidence commits. Because accepted evidence becomes Git-versioned, do not maintain parallel checksums for its files.
+The run must start from the clean implementation commit. Main verifies the fixed three-directory/twelve-file allowlist, runs `verify`, freezes only that derived evidence base root in a new commit, and gives the final reviewer both the implementation and evidence commits. Because accepted evidence becomes Git-versioned, do not maintain parallel checksums for its files.
 
 ## Implementation tests and verification
 
 `test_e4_trace_and_closure.py` must establish:
 
-1. exact ten-scenario order, arm labels, stage sequences, aggregate counts, fixture decision/result/failure parity, and F8 stop points;
+1. exact package membership, per-package trace order, arm labels, frozen stage tuples, package-local and aggregate counts, fixture decision/result/failure parity, F3's runtime-terminal null-result EXECUTE, and F8 stop points;
 2. all artifact refs resolve exactly once, no unreferenced large artifact is emitted, trace JSON contains no raw source text, and every trace has at most five stages;
 3. ASK/EXECUTE/REJECT/SYSTEM_FAILURE field consistency and result/witness refs;
 4. A/B fixture-direct canonical equality, C normal non-gold flow, Gold-C same-bridge flow, and gold-canonical bypass semantics;
-5. writer determinism, exact four-file allowlist, non-overwrite behavior, manifest fields, fixed normalized output-root and embedded handoff-blob checks, verifier rejection of missing/extra/tampered files, and no timestamps/random IDs/absolute paths;
-6. production normal components remain expected-blind and no E0-E3 file changes are required.
+5. writer determinism, exact three-root/twelve-file allowlist, non-overwrite behavior, manifest fields, fixed normalized base root and embedded handoff-blob checks, verifier rejection of missing/extra/tampered files, and no timestamps/random IDs/absolute paths;
+6. `record` rejects source/HEAD mismatch plus dirty staged, dirty tracked-but-unstaged, and untracked states before creating the base output root;
+7. production normal components remain expected-blind and no E0-E3 file changes are required.
 
 Run exactly:
 
@@ -185,7 +189,7 @@ The implementation executor returns binding identity, exact paths, summary, all 
 
 The implementation reviewer checks exact binding/two-path scope, all invariants above, test integrity, expected-data direction, deterministic output, failure-stop behavior, KISS, and absence of E5/general infrastructure. `ACCEPT` authorizes only the recorded closure gate, not E4 final acceptance.
 
-The final evidence reviewer receives the exact implementation commit/range, evidence commit/range, handoff blob, recorded command, committed four-file root, completed tests, and no external artifacts. It reruns `verify` and the full suite; checks trace/artifact/manifest/summary consistency and every Phase 0 exit item; confirms superseded evidence is excluded; and returns:
+The final evidence reviewer receives the exact implementation commit/range, evidence commit/range, handoff blob, recorded command, committed three-package root, completed tests, and no external artifacts. It reruns `verify` and the full suite; checks trace/artifact/manifest/summary consistency and every Phase 0 exit item; confirms superseded evidence is excluded; and returns:
 
 ```text
 VERDICT: ACCEPT | REJECT
