@@ -40,7 +40,7 @@ When a current stage template exists, it is `READY_TO_BIND` only after its indep
 
 ## Current executable handoff
 
-[E5 — local `qwen3:14b` LM-interface smoke](E5_local_qwen3_14b_smoke.md). The user authorized this exact local model, two inference requests, no download, no external network, and no paid API. Independent contract acceptance and a main-thread binding packet are still required; this candidate grants no mutation authority.
+[E5 — local `qwen3:14b` LM-interface smoke](E5_local_qwen3_14b_smoke.md) is contract-accepted at `5c5894a` with handoff blob `ca8daecea42dcaf28c9d1de5cfc6a4988013be10`; see [`E5_5c5894a_review.md`](../reviews/E5_5c5894a_review.md). It is `READY_TO_BIND` and still requires a main-thread binding packet; this template alone grants no mutation or inference authority.
 
 ## Accepted predecessor handoffs
 
@@ -58,4 +58,4 @@ These entries name expected successors but are not handoffs and grant no mutatio
 |---|---|---|
 | E3 | Normal C extractor and real bridge path | Accepted at `fb4be7c` |
 | E4 | Bounded tracing and end-to-end closure | Accepted at `20411e9`; Phase 0 blocking sequence complete |
-| E5 | Optional frozen-LM interface smoke | Current contract-review candidate for local `qwen3:14b`; not executable yet |
+| E5 | Optional frozen-LM interface smoke | Contract accepted at `5c5894a`; implementation is next and model inference remains unauthorized |
