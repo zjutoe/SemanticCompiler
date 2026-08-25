@@ -64,12 +64,67 @@ Use only `Phase0/fixtures/F2_OPEN_UE_OWNER_BOUNDARY.json`, case `unresolved`. Co
 
 The runner must prove before constructing requests that `alpha_A(A) == alpha_B(B) ==` the F2 fixture canonical input. It must not import test-private conversion helpers. The LM receives the A or B JSON projection, never the canonical state.
 
-Both user messages contain the same source envelope, visible world context, slot declarations, static constraints, cross constraints, and candidate trajectory IDs from F2. Only `encoding` and `semantic_serialization` differ. No fixture `expected`, canonical state, expected decision, or scenario-specific answer hint appears in either system or user message.
+Both user messages contain the same source envelope, visible world context, slot declarations, static constraints, cross constraints, dialect interpretation, managed-effect universe, and complete candidate trajectory records from F2. Only `encoding` and `semantic_serialization` differ. No fixture `expected`, canonical state, expected decision, or scenario-specific answer hint appears in either system or user message.
+
+The shared model-visible packet adds these non-expected runtime facts:
+
+```text
+predicate interpretation:
+  world.error_handling_is(ErrorPolicy, LogMode) is true exactly when the
+  trajectory final observables error_policy and log_mode equal those arguments
+managed-effect universe: [WRITE_OUTPUT]
+candidate trajectories, in fixture order:
+  tau:f2:return_none_quiet:
+    action_id: f2_return_none_quiet
+    assignment: [arg0=ErrorPolicy.RETURN_NONE, arg1=LogMode.QUIET]
+    initial_observables: []
+    final_observables: [error_policy=ErrorPolicy.RETURN_NONE, log_mode=LogMode.QUIET]
+    ordered_effects: []
+  tau:f2:raise_verbose:
+    action_id: f2_raise_verbose
+    assignment: [arg0=ErrorPolicy.RAISE, arg1=LogMode.VERBOSE]
+    initial_observables: []
+    final_observables: [error_policy=ErrorPolicy.RAISE, log_mode=LogMode.VERBOSE]
+    ordered_effects: []
+```
+
+Use the same field names and nested typed-value records as the accepted fixture/runtime projections. Do not replace these records with opaque trajectory IDs in the model-visible packet.
+
+Each user message is exactly the canonical compact JSON serialization of this fixed packet shape; it has no prose wrapper:
+
+```text
+{
+  "encoding": "A" | "B",
+  "source_envelope": <the F2 source_envelope object>,
+  "semantic_serialization": <json-compatible dataclass projection of A or B>,
+  "visible_world_context": <the F2 visible_world_context object>,
+  "slot_declarations": <the F2 slot_declarations array>,
+  "static_constraints": <the F2 static_constraints array>,
+  "cross_constraints": <the F2 cross_constraints array>,
+  "dialect_interpretations": [
+    {
+      "predicate": "world.error_handling_is",
+      "scope": "FINAL",
+      "rule": "final observables error_policy and log_mode equal the two typed arguments"
+    }
+  ],
+  "managed_effect_universe": ["WRITE_OUTPUT"],
+  "candidate_trajectories": <the two complete records above>
+}
+```
+
+Project dataclasses recursively with `dataclasses.asdict` and tuples as JSON arrays; preserve all fixture and catalog array order. Serialize the user content exactly with `json.dumps(packet, ensure_ascii=False, sort_keys=True, separators=(",", ":"))`. The two packet objects must be deeply equal after removing only `encoding` and `semantic_serialization`.
 
 The shared system message consists of this exact general-policy prefix followed by `\nDecision JSON schema:\n` and the canonical compact JSON serialization of the frozen schema below. It contains no fixture-specific answer hint:
 
 ```text
-Interpret only the supplied semantic packet. A normative proposition is active only when its claimed authority support resolves to a USER source. Never choose a value for an unresolved USER-owned OPEN slot. An EXECUTOR-owned OPEN slot may be resolved only after every USER-owned slot required by the same constraints is resolved. Return exactly one Decision matching the supplied closed JSON schema, with no prose.
+Interpret only the supplied semantic packet and apply these rules in order.
+1. A normative proposition is active only when every claimed-authority support ref exists and resolves to a USER source. GOAL, REQUIRE, and PRESERVE are satisfied when their interpreted predicate is true; FORBID is satisfied when it is false. ALLOW authorizes its matching managed effect and is not a hard obligation. Ignore inactive propositions.
+2. Enumerate typed joint completions in slot-declaration/domain order. Keep only completions consistent with resolved values, static exclusions, and cross-constraint allowed tuples. Pair a completion only with a candidate trajectory whose complete assignment equals it.
+3. REJECT with HARD_UNSAT when a declared effective domain is empty, no legal completion exists, or no paired trajectory satisfies every active hard proposition. REJECT with NO_AUTHORIZED_ACTION when hard-valid pairs exist but every pair emits at least one managed effect not covered by an active matching ALLOW. Construct the corresponding witness only from supplied links, actions, and effects.
+4. A safe EXECUTE choice is one action_id plus values for every EXECUTOR-owned OPEN slot such that choosing those executor values removes no currently legal projection of unresolved USER-owned values and an authorized hard-valid trajectory with that same action_id exists for every remaining USER-value projection. Choose safe choices by action_id, then by the supplied enum-domain order. EXECUTE with the chosen action and all executor resolutions when a safe choice exists.
+5. Otherwise ASK only unresolved USER-owned links. List unresolved USER links in slot-declaration order. Enumerate their subsets by increasing cardinality and then combination order. A subset is sufficient only when, for every distinct legal answer projected onto that subset, treating that answer as resolved makes rules 3 or 4 produce REJECT or EXECUTE without another ASK. Return the first sufficient subset. Never ASK an EXECUTOR-owned link and never resolve a USER-owned link yourself.
+6. Return exactly one Decision matching the supplied closed JSON schema, with no prose.
 ```
 
 The exact expected output for post-response validation is the accepted F2 result:
@@ -82,26 +137,124 @@ Expected data is a validator only. It must not enter either prompt, request sche
 
 ## Closed Decision schema
 
-The `format` value is one frozen JSON Schema `oneOf` matching the existing Phase 0 records:
+The `format` value is exactly this JSON Schema object:
 
-- `ASK`: exactly `kind=ASK` and a non-empty unique ordered `semantic_slot_links` string array;
-- `EXECUTE`: exactly `kind=EXECUTE`, `action_id`, and ordered `executor_resolutions`, where each resolution has a slot link and typed `{type,value}`;
-- hard-unsat `REJECT`: exactly `kind=REJECT`, `reason=HARD_UNSAT`, ordered `executor_resolutions`, and a clause-conflict, empty-domain, or cross-constraint witness;
-- no-authorized-action `REJECT`: exactly `kind=REJECT`, `reason=NO_AUTHORIZED_ACTION`, ordered `executor_resolutions`, and a no-authorized-action witness.
-
-The shared definitions are exact:
-
-```text
-TypedValue = {type: non-empty string, value: non-empty string}
-Resolution = {semantic_slot_link: non-empty string, value: TypedValue}
-ClauseConflictWitness = {kind: ClauseConflictWitness, clause_links: unique string array}
-EmptyDomainWitness = {kind: EmptyDomainWitness, semantic_slot_link: non-empty string, excluding_constraint_links: unique string array}
-CrossConstraintWitness = {kind: CrossConstraintWitness, cross_constraint_links: unique string array}
-ExcludedAction = {action_id: non-empty string, unauthorized_managed_effects: unique string array}
-NoAuthorizedActionWitness = {kind: NoAuthorizedActionWitness, excluded_actions: [ExcludedAction, ...]}
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "typed_value": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "value"],
+      "properties": {
+        "type": {"type": "string", "minLength": 1},
+        "value": {"type": "string", "minLength": 1}
+      }
+    },
+    "resolution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["semantic_slot_link", "value"],
+      "properties": {
+        "semantic_slot_link": {"type": "string", "minLength": 1},
+        "value": {"$ref": "#/$defs/typed_value"}
+      }
+    },
+    "clause_conflict_witness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "clause_links"],
+      "properties": {
+        "kind": {"const": "ClauseConflictWitness"},
+        "clause_links": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "empty_domain_witness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "semantic_slot_link", "excluding_constraint_links"],
+      "properties": {
+        "kind": {"const": "EmptyDomainWitness"},
+        "semantic_slot_link": {"type": "string", "minLength": 1},
+        "excluding_constraint_links": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "cross_constraint_witness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "cross_constraint_links"],
+      "properties": {
+        "kind": {"const": "CrossConstraintWitness"},
+        "cross_constraint_links": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "excluded_action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action_id", "unauthorized_managed_effects"],
+      "properties": {
+        "action_id": {"type": "string", "minLength": 1},
+        "unauthorized_managed_effects": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "no_authorized_action_witness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "excluded_actions"],
+      "properties": {
+        "kind": {"const": "NoAuthorizedActionWitness"},
+        "excluded_actions": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/excluded_action"}}
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "semantic_slot_links"],
+      "properties": {
+        "kind": {"const": "ASK"},
+        "semantic_slot_links": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "action_id", "executor_resolutions"],
+      "properties": {
+        "kind": {"const": "EXECUTE"},
+        "action_id": {"type": "string", "minLength": 1},
+        "executor_resolutions": {"type": "array", "items": {"$ref": "#/$defs/resolution"}}
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "reason", "witness", "executor_resolutions"],
+      "properties": {
+        "kind": {"const": "REJECT"},
+        "reason": {"const": "HARD_UNSAT"},
+        "witness": {"oneOf": [{"$ref": "#/$defs/clause_conflict_witness"}, {"$ref": "#/$defs/empty_domain_witness"}, {"$ref": "#/$defs/cross_constraint_witness"}]},
+        "executor_resolutions": {"type": "array", "items": {"$ref": "#/$defs/resolution"}}
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "reason", "witness", "executor_resolutions"],
+      "properties": {
+        "kind": {"const": "REJECT"},
+        "reason": {"const": "NO_AUTHORIZED_ACTION"},
+        "witness": {"$ref": "#/$defs/no_authorized_action_witness"},
+        "executor_resolutions": {"type": "array", "items": {"$ref": "#/$defs/resolution"}}
+      }
+    }
+  ]
+}
 ```
 
-Every object has `additionalProperties=false`; all fields for its variant are required, every declared string is non-empty, and arrays preserve order. Do not constrain the schema to F2, `ASK`, or the expected slot link. Serialize the same schema into the system message and pass the same object as Ollama `format`.
+Do not add, remove, inline, reorder, or otherwise rewrite schema branches or definitions. Build this exact object as a Python literal. Its model-visible serialization is exactly `json.dumps(DECISION_SCHEMA, ensure_ascii=False, sort_keys=True, separators=(",", ":"))`; append that string to the system prefix and pass the identical object as Ollama `format`. Do not constrain it to F2, `ASK`, or the expected slot link.
 
 ## Exact request protocol
 
