@@ -197,7 +197,7 @@ The deliverable must include at least one separating pair for each of these cand
 - pre/final preservation relation versus final-state-only condition;
 - source provenance versus proposition content;
 - unresolved user choice versus unknown environmental fact;
-- logical `UNKNOWN` versus evaluator `ERROR`;
+- formula truth `TRUTH_UNKNOWN` versus `EVALUATION_ERROR`, where the latter yields no truth conclusion;
 - satisfiability versus profile completeness;
 - hard acceptance versus soft preference, whether preference is retained or explicitly excluded;
 - structural closure versus semantic evaluability;
