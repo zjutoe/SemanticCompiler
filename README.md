@@ -10,4 +10,4 @@ Current status:
 - The former [IR Design Memo v0](docs/plans/IR_Design_Memo_v0.md) and [Semantic Compiler Contract IR Research Plan](docs/plans/Semantic_Compiler_Contract_IR_Research_Plan.md) are preserved as historical design context, not current execution authority.
 - [`docs/reviews/`](docs/reviews/README.md) contains the current plan acceptance record and historical advisory review input.
 
-No implementation stage or executable handoff is currently authorized. The next permitted work is just-in-time design and independent review of the K0 handoff.
+No implementation stage is currently authorized. A [K0 handoff candidate](KernelPlugin/handoffs/K0_scope_status_and_challenges.md) now exists for independent review; it grants no mutation or dispatch authority unless accepted and explicitly bound.
