@@ -123,7 +123,7 @@ The deliverable must define exactly:
 
 Soft preference is outside K1. Language that ranks otherwise acceptable outcomes must be reported outside the accepted scope; it must not be silently converted into a hard constraint.
 
-The document must give explicit denotations for every retained primitive and prove or refute the proposed derived readings of `GOAL`, `PRESERVE`, `FORBID`, and `ALLOW`. A derived form may be accepted only if it preserves all relevant outcome, authorization, provenance, binding, truth, and error behavior—not merely two-valued acceptance.
+The document must give explicit denotations for every retained primitive and prove or refute the proposed derived readings of `GOAL`, `PRESERVE`, `FORBID`, and `ALLOW`. A derived form may be accepted only if it preserves all relevant outcome, authorization, provenance, binding, truth, evidence-reference, unknown-reason, and error behavior—not merely two-valued acceptance.
 
 ## 7. Truth, error, and composition laws
 
@@ -133,13 +133,16 @@ K1 must choose and define exact three-valued laws for every retained logical con
 
 - how multiple child values, unknowns, and errors compose;
 - whether a logically decisive child may make another child semantically irrelevant, and the exact rule if so;
+- how `evidence_refs` and unknown reasons from relevant children are retained, deduplicated or combined, and reported, including when another child is logically decisive;
 - how one or more errors are retained, combined, or reported;
 - why no error becomes true, false, unknown, satisfiable, inconsistent, complete, entailed, or equivalent;
 - how quantification, if retained, treats empty domains, unknown instances, and evaluation failures;
 - how conditionality and alternatives behave under unknown conditions;
 - which laws such as commutativity, associativity, idempotence, and De Morgan equivalence hold, fail, or require side conditions.
 
-The rules must be compositional and deterministic for the same semantic inputs. They must not branch on challenge IDs, fixture order, evaluator order, or expected outcomes.
+The deliverable must define the semantic collection model for evidence references and reasons, including equality and aggregation behavior, without relying on serialization order. It must state exactly which child metadata is semantically relevant in each connective or binder case; it may omit metadata only under an explicit rule justified by the denotation, never by short-circuit implementation order.
+
+The rules must be compositional and deterministic for the same semantic inputs. Truth, error, evidence-reference, and unknown-reason results must be invariant under evaluator traversal order. They must not branch on challenge IDs, fixture order, evaluator order, or expected outcomes.
 
 ## 8. Kernel judgments, reasoning, and normalization
 
@@ -165,7 +168,7 @@ Core derivation rules must be sound with respect to the denotation. At minimum, 
 - how service failure produces `REASONING_ERROR` and no logical conclusion;
 - semantic equivalence for Contracts, including authorization, provenance, binding, and plugin-version facets.
 
-If the calculus defines normalization, every rule must have a denotation-preservation argument across all semantic facets and truth/error behavior. If no nontrivial normalization is justified in K1, the deliverable must say so explicitly rather than promising an unspecified normal form.
+If the calculus defines normalization, every rule must have a denotation-preservation argument across all semantic facets and truth, evidence-reference, unknown-reason, and error behavior. If no nontrivial normalization is justified in K1, the deliverable must say so explicitly rather than promising an unspecified normal form.
 
 K1 may establish soundness only for the explicitly stated core rules and assumptions. It must not claim universal decidability, completeness of plugin reasoning, or adequacy beyond the accepted K0 challenges.
 
@@ -253,7 +256,7 @@ It must also report:
 - retained-primitive, derived, plugin-parameter, and excluded counts from the ledger;
 - challenge coverage count, which must be nineteen;
 - separating-pair coverage count, which must be ten;
-- a list of every truth/error table and every worked derivation or countermodel;
+- a list of every truth/error table, evidence/unknown-reason aggregation rule, and worked derivation or countermodel;
 - confirmation that no held-out content or annotation was accessed or reproduced;
 - confirmation that no serialization, plugin ABI, coding symbol catalog, executable checker, compiler, prompt, action graph, implementation, K2 handoff, or external artifact was introduced;
 - external artifacts and checksums, which must be `none`.
@@ -267,7 +270,7 @@ K1 may be accepted only if:
 - every derived form has an equivalence argument across all affected semantic facets;
 - every construct has a single final ledger disposition;
 - normative roles, choice ownership, provenance, authority, binding, and plugin version remain explicit;
-- truth/unknown/error composition is total, deterministic, and evaluation-order independent;
+- truth/unknown/error composition and associated evidence-reference/unknown-reason aggregation are total, deterministic, and evaluation-order independent;
 - kernel reasoning is sound with respect to the stated denotation and never treats failed proof as success;
 - plugin and cross-plugin conclusions are capability-relative;
 - all nineteen challenges and ten separating pairs are covered without coding-specific kernel branches or hidden expected mappings;
