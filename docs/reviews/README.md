@@ -9,7 +9,11 @@ Current accepted plan:
 
 Current accepted stage handoff:
 
-- [K0 handoff independent review and acceptance record](kernel_plugin/K0_Handoff_59d2799_review.md), handoff blob `914f1bb56792e20765b63b4a63f3db2a244cf560`; `READY_TO_BIND`, not dispatched
+- [K0 handoff independent review and acceptance record](kernel_plugin/K0_Handoff_59d2799_review.md), handoff blob `914f1bb56792e20765b63b4a63f3db2a244cf560`; consumed by the accepted K0 stage
+
+Current accepted stage result:
+
+- [K0 semantic design inputs review and acceptance record](kernel_plugin/K0_Design_Inputs_6ad555e_review.md), deliverable blob `e86e184300a6620fb6fe25062635d9bc7cb410a1`
 
 Historical inputs:
 
