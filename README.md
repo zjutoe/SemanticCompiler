@@ -1,9 +1,13 @@
 # Semantic Compiler
 
-This repository separates durable plans, historical review input, and current Phase 0 execution material:
+The project is redesigning Contract IR around a minimal declarative constraint kernel and versioned domain plugins. The current planning candidate is the [Contract IR Kernel and Coding Plugin Research Plan](docs/plans/Contract_IR_Kernel_and_Coding_Plugin_Research_Plan.md). It grants no implementation authority until independently reviewed and accepted.
 
-- [`docs/plans/`](docs/plans/) contains long-term design and research planning. The authoritative planning documents are the [IR Design Memo v0](docs/plans/IR_Design_Memo_v0.md) and the [Semantic Compiler Contract IR Research Plan](docs/plans/Semantic_Compiler_Contract_IR_Research_Plan.md).
-- [`docs/reviews/`](docs/reviews/README.md) contains historical review input. These records are advisory context and never current execution authority.
-- [`Phase0/`](Phase0/README.md) contains the current Phase 0 process, stage handoffs, and later accepted stage review records. The unique Phase 0 semantic and engineering authority is the [Phase 0 Engineering Exploration Plan](Phase0/IR_Design_Memo_v0_Phase0_Engineering_Exploration_Plan.md).
+Current status:
 
-Start Phase 0 work from its [process contract](Phase0/README.md), then use the [handoff index](Phase0/handoffs/README.md) for stage dispatch.
+- Phase 0 is complete but is historical engineering evidence for its frozen finite kernel, not current semantic authority.
+- The controlled-code Phase 1 milestone is paused after accepted C0 commit `4e3135b` on branch `milestone/phase1-controlled-code-planning`; no C1 handoff was created, and the branch was not merged into `main`.
+- Phase 0/1 source may later be reused or discarded only after the new kernel and plugin contracts are accepted. No deletion is currently authorized or needed.
+- The former [IR Design Memo v0](docs/plans/IR_Design_Memo_v0.md) and [Semantic Compiler Contract IR Research Plan](docs/plans/Semantic_Compiler_Contract_IR_Research_Plan.md) are preserved as historical design context, not current execution authority.
+- [`docs/reviews/`](docs/reviews/README.md) contains historical advisory review input.
+
+No implementation stage or executable handoff is currently authorized. The next work is semantic design and independent plan review.

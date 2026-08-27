@@ -1,5 +1,7 @@
 # Research Plan: Semantic Compiler for Reliable AI Agents
 
+> Historical roadmap: its Phase 1-3 sequence is not current execution authority. The controlled-code Phase 1 branch is paused before C1, and current work is governed only after acceptance of the [Contract IR Kernel and Coding Plugin Research Plan](Contract_IR_Kernel_and_Coding_Plugin_Research_Plan.md).
+
 ## Proposed Title
 
 **Semantic Compiler: Learning a Contract-Based Intermediate

@@ -1,5 +1,7 @@
 # IR Design Memo v0
 
+> Historical baseline: the current project direction reopens the core representation, graph choice, and primitive boundary. Current work is governed only after acceptance of the [Contract IR Kernel and Coding Plugin Research Plan](Contract_IR_Kernel_and_Coding_Plugin_Research_Plan.md). This memo remains design context and grants no current implementation authority.
+
 ## 项目名称
 
 **Semantic Compiler：面向可靠 AI 执行的可细化契约中间表示**
