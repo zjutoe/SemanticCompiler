@@ -237,10 +237,10 @@ The following 19 cases are natural-language design inputs, not expected-IR fixtu
 ### K0-C11 — plugin-visible contradiction
 
 - **Challenge ID:** K0-C11
-- **Natural-language instruction:** Keep every generated bundle below 100 KiB, and require every generated bundle to be at least 200 KiB.
-- **Minimal context:** The size constraints are individually well-formed and share the same declared unit and bundle population; the bound domain reasoner understands numeric bounds.
+- **Natural-language instruction:** Produce at least one bundle, keep every generated bundle below 100 KiB, and require every generated bundle to be at least 200 KiB.
+- **Minimal context:** At least one generated bundle is required. The size constraints are individually well-formed and apply to that same nonempty population using the same declared unit; the bound domain reasoner understands numeric bounds.
 - **Semantic distinction under test:** Contradiction proved by plugin-supplied domain semantics rather than core connective structure alone.
-- **Abstract acceptance or authorization condition:** Both numeric bounds apply to the same generated bundles.
+- **Abstract acceptance or authorization condition:** One or more generated bundles exist, and both numeric bounds apply to every member of that same population.
 - **Expected K0 meta-statuses:** `REPRESENTABLE`; `WELL_FORMED`; `CLOSED`; `EVALUABILITY_AVAILABLE(bound numeric reasoning capability)`; `CONSISTENCY_UNSAT(plugin-accepted bound proof)`.
 - **Forbidden shortcut:** Encoding numeric ordering as a task-specific kernel rule.
 - **Why the case can falsify a design choice:** If opaque domain atoms cannot contribute sound proofs, the contradiction stays invisible; if the kernel hard-codes it, the boundary is not domain-independent.
@@ -367,10 +367,10 @@ These ten pairs freeze semantic distinctions, not required primitives. K1 may pr
 | Pair | Intents or cases compared | Semantic information lost if collapsed |
 |---|---|---|
 | SP-01: positive obligation / permission | K0-C05’s requirement to regenerate when metadata changes versus K0-C04’s permission to regenerate under that same condition. | Whether omission under the condition is a violation and whether occurrence is merely authorized. |
-| SP-02: final-state / trace condition | K0-C01’s completed behavior versus K0-C03’s no-network execution history. | Which of two traces reaching the same final state is acceptable. |
-| SP-03: pre/final preservation / final-state-only | K0-C02 versus a request that names only an independently specified final behavior. | Which baseline observation must remain related to the final observation. |
+| SP-02: final-state / trace condition | “When work finishes, `.tmp-key` must not exist” versus “Throughout the work, `.tmp-key` must never exist, even temporarily,” for the same path and repository. | A trace that creates and then deletes the file satisfies the final-state condition but violates the trace condition. |
+| SP-03: pre/final preservation / final-state-only | Given a baseline that currently matches the attached compatibility manifest: “Keep the public command’s accepted requests unchanged” versus “When finished, accept exactly the requests listed in the compatibility manifest.” | The two coincide for the given baseline, but only the preservation intent follows a different pre-state; collapsing them loses whether the baseline or the fixed manifest determines acceptance. |
 | SP-04: provenance / proposition content | K0-C17 variants A and B. | Who asserted the proposition, whether that source has authority, and whether quoted text becomes normative. |
-| SP-05: owned choice / unknown fact | K0-C08 versus K0-C09. | Who may settle an alternative; an environmental fact could be guessed as a choice or a choice misreported as factual uncertainty. |
+| SP-05: owned choice / unknown fact | “Configure storage as local or hosted; I have not chosen and the choice is mine” versus “Configure storage as local or hosted according to the signed deployment manifest; the manifest’s already-fixed selection is not yet available.” | The same alternatives are pending, but only the first may be settled by the user; collapsing them permits guessing an unknown fact or treating an owned choice as predetermined. |
 | SP-06: truth unknown / evaluator error | K0-C09 before evidence versus the same evaluation request when its evaluator crashes. | Whether a logical unknown was returned at all; error must yield no truth conclusion. |
 | SP-07: satisfiability / profile completeness | K0-C19’s abstract satisfying witness versus missing profile-required concrete evidence. | Existence of an acceptable outcome would be confused with coverage of declared semantic dimensions. |
 | SP-08: hard acceptance / soft preference | “The patch must keep latency below the limit” versus “Among patches below the limit, prefer the lower-latency one.” | Whether a higher-latency but otherwise acceptable outcome is rejected or merely ranked lower. Preference remains excluded, so K1 must report rather than harden it. |
