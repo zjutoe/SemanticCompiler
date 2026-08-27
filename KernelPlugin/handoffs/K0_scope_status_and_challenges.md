@@ -124,7 +124,7 @@ CONSISTENCY_UNSAT(proof_or_core_ref)
 CONSISTENCY_UNKNOWN(reason)
 ```
 
-`CONSISTENCY_SAT` requires a valid satisfying witness under the bound semantics; `CONSISTENCY_UNSAT` requires a valid proof or unsatisfiable core under the bound reasoning capability. Failure to derive either is `CONSISTENCY_UNKNOWN`, not `CONSISTENCY_SAT`.
+`CONSISTENCY_SAT` requires a valid satisfying witness under the bound semantics; `CONSISTENCY_UNSAT` requires a valid proof or unsatisfiable core under the bound reasoning capability. If the bound reasoning service completes without deriving either, the result is `CONSISTENCY_UNKNOWN`, not `CONSISTENCY_SAT`. A reasoning-service or infrastructure failure is `REASONING_ERROR` under section 4.7 and produces no consistency judgment.
 
 ### 4.6 Profile-relative completeness judgment
 
@@ -136,6 +136,17 @@ PROFILE_UNKNOWN(profile_ref, reason)
 
 Profile completeness is relative to an explicit versioned profile. It cannot be promoted to intent completeness.
 
+### 4.7 Entailment, equivalence, and reasoning-service failure
+
+```text
+RELATION_PROVED(ENTAILMENT | EQUIVALENCE, proof_ref)
+RELATION_DISPROVED(ENTAILMENT | EQUIVALENCE, counterexample_ref)
+RELATION_UNKNOWN(ENTAILMENT | EQUIVALENCE, reason)
+REASONING_ERROR(reason)
+```
+
+`RELATION_UNKNOWN` means the bound reasoning service completed without proving or disproving the requested relation. `REASONING_ERROR` is outside the semantic relation judgment and produces no entailment or equivalence conclusion. Formula-evaluator or evaluator-infrastructure failure remains `EVALUATION_ERROR` under section 4.4 and likewise produces no truth, consistency, profile, entailment, or equivalence conclusion.
+
 The deliverable must include a cross-status table showing which judgments are independent. It must include at least these examples:
 
 - well-formed but open;
@@ -143,7 +154,8 @@ The deliverable must include a cross-status table showing which judgments are in
 - evaluable but consistency unknown;
 - satisfiable but profile-incomplete;
 - profile-complete but not certifiably intent-complete;
-- evaluator error without a logical conclusion.
+- evaluator error without a logical conclusion;
+- reasoning-service error without a consistency, entailment, or equivalence conclusion.
 
 ## 5. Seed semantic challenges
 
@@ -207,7 +219,8 @@ The procedure must specify:
 - exact recording of source text, minimal context, selection rationale, and provenance;
 - a commit or artifact boundary fixed before K4 evaluation begins;
 - prohibition on replacing, repairing, or dropping a held-out item because the accepted kernel or plugin cannot represent it;
-- required `UNREPRESENTABLE`, `UNRESOLVED`, or `UNKNOWN` reporting when appropriate.
+- required judgment-family reporting when appropriate: `UNREPRESENTABLE` or `UNRESOLVED` for representation; `EVALUABILITY_UNKNOWN` for capability availability; `TRUTH_UNKNOWN` for formula truth; `CONSISTENCY_UNKNOWN` for satisfiability; `PROFILE_UNKNOWN` for profile coverage; and `RELATION_UNKNOWN` for entailment or equivalence;
+- required `EVALUATION_ERROR` or `REASONING_ERROR` reporting for evaluator, reasoning-service, or infrastructure failure, with no logical conclusion inferred from the failure.
 
 The procedure must explicitly explain why temporal precommitment and selector isolation provide design independence even if the held-out tasks are later visible during K4 review. It must not claim statistical representativeness or secrecy.
 
@@ -221,7 +234,9 @@ The deliverable must freeze rules that apply to K1-K4. At minimum:
 - a broad predicate is allowed only through an explicit typed/versioned semantic and evidence contract;
 - plugin documentation shown to a compiler must identify the same exact symbol/version used by machine evaluation;
 - no task-specific kernel branch may be introduced to make one challenge representable;
-- inability to prove consistency, completeness, entailment, or equivalence must remain `UNKNOWN` under the relevant judgment;
+- a completed but inconclusive consistency check must remain `CONSISTENCY_UNKNOWN`; an inconclusive profile check must remain `PROFILE_UNKNOWN`; and an inconclusive entailment or equivalence check must remain `RELATION_UNKNOWN`;
+- unavailable or indeterminate capability discovery must remain `EVALUABILITY_MISSING` or `EVALUABILITY_UNKNOWN`, and indeterminate concrete formula truth must remain `TRUTH_UNKNOWN`;
+- evaluator or evaluator-infrastructure failure must be `EVALUATION_ERROR`, and symbolic reasoning or reasoning-infrastructure failure must be `REASONING_ERROR`; neither error yields a truth, consistency, profile, entailment, or equivalence conclusion;
 - a missing semantic category must be recorded and returned to main rather than hidden inside an untyped string or an evaluator with implicit inputs;
 - K1-K3 may use seed challenges but must not receive the future held-out challenge contents;
 - K4 must evaluate the accepted artifacts before any repair; any repair creates a new version and a new held-out evaluation boundary rather than rewriting the failed evidence.
