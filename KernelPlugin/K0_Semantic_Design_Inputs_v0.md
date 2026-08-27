@@ -366,7 +366,7 @@ These ten pairs freeze semantic distinctions, not required primitives. K1 may pr
 
 | Pair | Intents or cases compared | Semantic information lost if collapsed |
 |---|---|---|
-| SP-01: positive obligation / permission | “Regenerate the lockfile” versus K0-C04’s “may regenerate if metadata changes.” | Whether omission is a violation and whether the event is merely authorized. |
+| SP-01: positive obligation / permission | K0-C05’s requirement to regenerate when metadata changes versus K0-C04’s permission to regenerate under that same condition. | Whether omission under the condition is a violation and whether occurrence is merely authorized. |
 | SP-02: final-state / trace condition | K0-C01’s completed behavior versus K0-C03’s no-network execution history. | Which of two traces reaching the same final state is acceptable. |
 | SP-03: pre/final preservation / final-state-only | K0-C02 versus a request that names only an independently specified final behavior. | Which baseline observation must remain related to the final observation. |
 | SP-04: provenance / proposition content | K0-C17 variants A and B. | Who asserted the proposition, whether that source has authority, and whether quoted text becomes normative. |
