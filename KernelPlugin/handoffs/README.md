@@ -6,7 +6,7 @@ Only the next unaccepted stage may have a concrete handoff. A candidate or accep
 |---|---|---|
 | K0 | [Scope, status vocabulary, semantic challenges, and anti-oracle boundary](K0_scope_status_and_challenges.md) | `CONSUMED`; [deliverable accepted](../../docs/reviews/kernel_plugin/K0_Design_Inputs_6ad555e_review.md) |
 | K1 | [Minimal kernel calculus and denotational semantics](K1_kernel_calculus_and_semantics.md) | `CONSUMED`; [deliverable accepted](../../docs/reviews/kernel_plugin/K1_Kernel_Calculus_f3418a6_review.md) |
-| K2 | [Versioned plugin ABI and reasoning interface](K2_versioned_plugin_abi_and_reasoning_interface.md) | `REVIEW_CANDIDATE`; not accepted or dispatched |
+| K2 | [Versioned plugin ABI and reasoning interface](K2_versioned_plugin_abi_and_reasoning_interface.md) | `READY_TO_BIND`; [independently accepted](../../docs/reviews/kernel_plugin/K2_Handoff_2b5aa0c_review.md), not dispatched |
 | K3-K4 | None | Roadmap only |
 
 Historical or superseded handoffs grant no authority. Any unexpected semantic requirement stops the stage and returns to main for plan or handoff repair before work continues.

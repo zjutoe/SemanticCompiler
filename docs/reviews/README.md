@@ -11,6 +11,7 @@ Current accepted stage handoffs:
 
 - [K0 handoff independent review and acceptance record](kernel_plugin/K0_Handoff_59d2799_review.md), handoff blob `914f1bb56792e20765b63b4a63f3db2a244cf560`; consumed by the accepted K0 stage
 - [K1 handoff independent review and acceptance record](kernel_plugin/K1_Handoff_dd87c79_review.md), handoff blob `ded68369ecc2d06ac2e3ddcf9ca20cb9e928b058`; consumed by the accepted K1 stage
+- [K2 handoff independent review and acceptance record](kernel_plugin/K2_Handoff_2b5aa0c_review.md), handoff blob `f308543b4c252d739840a96df88abedcde893bbb`; `READY_TO_BIND`, not dispatched
 
 Current pre-dispatch gate:
 
@@ -21,7 +22,7 @@ Current accepted stage result:
 - [K0 semantic design inputs review and acceptance record](kernel_plugin/K0_Design_Inputs_6ad555e_review.md), deliverable blob `e86e184300a6620fb6fe25062635d9bc7cb410a1`
 - [K1 kernel calculus review and acceptance record](kernel_plugin/K1_Kernel_Calculus_f3418a6_review.md), deliverable blob `d928010319c2c3bd08a94e1856cfca24dc2ae39e`
 
-K2 is the next stage eligible for just-in-time handoff design. No K2 handoff or mutation authority exists.
+The K2 handoff is accepted and `READY_TO_BIND`. It grants no mutation authority until main issues a separate exact binding and mutation lease.
 
 Historical inputs:
 
