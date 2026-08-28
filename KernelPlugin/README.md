@@ -1,6 +1,6 @@
 # Contract IR kernel and plugin design process
 
-> Status: K0 and K1 are accepted and complete. K2 is next eligible for just-in-time handoff design; no K2 handoff exists.
+> Status: K0 and K1 are accepted and complete. The K2 handoff is a review candidate and grants no mutation authority.
 
 The accepted semantic authority is the [Contract IR Minimal Kernel and Coding Plugin Research Plan](../docs/plans/Contract_IR_Kernel_and_Coding_Plugin_Research_Plan.md), exact blob `01f959bc55f644a376f8ffa6059e9e77936be77c`. Its [acceptance record](../docs/reviews/kernel_plugin/Contract_IR_Kernel_Plugin_Plan_3f7fc69_review.md) binds reviewed range `787378d3763e584c9e9cc66aa699154641975a6b..3f7fc69a55a526c2dd8298dd9b3966738a5654bb`.
 
@@ -20,7 +20,7 @@ The [K1 kernel calculus and denotational semantics](K1_Kernel_Calculus_and_Denot
 |---|---|---|
 | K0 | Scope, statuses, seed challenges, held-out procedure, anti-oracle rules | Accepted and complete |
 | K1 | Kernel calculus and denotational semantics | Accepted and complete |
-| K2 | Versioned plugin ABI and reasoning interface | Next eligible for just-in-time handoff design; no handoff created |
+| K2 | Versioned plugin ABI and reasoning interface | [Handoff review candidate](handoffs/K2_versioned_plugin_abi_and_reasoning_interface.md); not accepted or dispatched |
 | K3 | Minimal coding plugin | Roadmap only |
 | K4 | Held-out semantic closure and manual binding assessment | Roadmap only |
 
