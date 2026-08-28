@@ -166,16 +166,32 @@ K1 semantics. It may combine roles when no distinction is lost, but must cover:
 - the ABI protocol/version identity;
 - plugin identity and exact plugin version;
 - type, literal/value-admission, function, predicate, event, event-scope-pair,
-  and profile declarations;
-- semantic contracts or binding descriptors for declared meanings;
+  and other `Delta` declarations;
+- semantic contracts or binding descriptors for declared literal, function,
+  predicate, event-pair-coherence, and profile meanings;
 - model-facing symbol documentation bound to the same semantic identity;
 - evaluator, profile-checker, and reasoning capability descriptors;
 - function and predicate invocation requests;
 - term, formula, profile, discovery, and reasoning results;
 - evidence, unknown-reason, evaluation-error, and reasoning-error identities;
 - witness, proof, model, counterexample, equivalence, and entailment
-  certificate envelopes;
+  certificate envelopes, including the separate internal `==Eval` derivation
+  role;
 - provenance values and authority attestations where they cross the interface.
+
+The object model and responsibility ledger must allocate every semantic field
+to exactly one of these non-overlapping layers:
+
+| Layer | Owns | Does not own |
+|---|---|---|
+| `Delta` declaration | identity, type/value admission, signatures, facet positions, immutable event declarations, and event-pair membership/signatures/controlled keys | denotation, evidence contract, unknown/error behavior, profile meaning, service availability |
+| `Sigma` semantic binding | literal/function/predicate meanings, evidence and access contract, unknown/error behavior, admitted event-pair coherence, profile definitions, and authority facts | evaluator/reasoner discovery or availability |
+| Service/capability | invocable evaluator/profile-checker/reasoner, supported judgment and fragment, dependency scope, trust basis, and service failure contract | declaration or semantic meaning |
+
+Combining transport records is allowed only if validation still projects these
+three layers uniquely. A missing `Delta` field is malformed; an absent required
+`Sigma` binding is open; an absent compatible service is an evaluability result,
+not a declaration or closure failure.
 
 The deliverable must give an exact lifecycle or state-transition relation that
 keeps these states independent:
@@ -220,12 +236,16 @@ Declaration schemas and validation must cover:
 
 - plugin-owned types and value admission;
 - literals and their exact types;
-- function argument/result types and `TermResult` behavior;
-- predicate argument types, outcome-facet positions, `Eval` behavior, declared
-  evidence dependencies, and unknown/error contracts;
+- function argument/result types and symbol kind;
+- predicate argument types, Boolean result kind, and outcome-facet positions;
 - immutable event key, payload type, and `CONTROLLED | OBSERVATIONAL` class;
-- exact event-scope/trace-occurrence companion declarations;
-- exact profile dimensions and coverage requirements.
+- exact event-scope/trace-occurrence companion membership, signatures,
+  controlled keys, and facet declaration.
+
+`TermResult` behavior, predicate `Eval` behavior, evidence/access dependencies,
+unknown/error contracts, exact profile dimensions, and profile coverage meaning
+belong to `Sigma` semantic bindings, not to these `Delta` schemas. Evaluator,
+profile-checker, and reasoner availability belongs only to the service layer.
 
 The ABI must preserve K1 mechanical dependency extraction. A descriptor may
 declare transitive declaration dependencies, but it cannot supply a smaller
@@ -250,7 +270,9 @@ validity.
 
 For every declared literal, function, or predicate, the interface must define
 how an exact semantic meaning is bound independently of service availability.
-A binding must expose enough information to validate:
+It must do the same for exact profile definitions and for admitted
+`EventScopePair` coherence. A semantic binding must expose enough information
+to validate:
 
 - exact declaration and version;
 - denotation or evaluation contract;
@@ -260,6 +282,11 @@ A binding must expose enough information to validate:
 - stable unknown and error behavior;
 - deterministic meaning for the same semantic inputs;
 - compatibility with the declaration and ABI version.
+
+Profile bindings additionally own their versioned dimensions and coverage
+meaning. Event-pair bindings must use the non-circular admission path required
+by §11. None of these semantic fields may be required merely to make the
+corresponding `Delta` declaration well formed.
 
 Broad atoms are permitted only under the same explicit boundary. Their
 interface must make undeclared access non-conformant, including access to a
@@ -337,13 +364,20 @@ COMPLETE_FOR_DECLARED_FRAGMENT
 For each capability, define its exact plugin/ABI versions, supported judgment
 families, sound fragment, complete fragment if any, dependency scope, required
 evidence, trust basis, service availability, and failure behavior. A service
-claim outside its declared fragment is non-conformant. Failure to return a
-proof remains unknown; a failed service returns reasoning error.
+claim outside its declared fragment is non-conformant. A partial capability, or
+a request outside a declared complete fragment, may complete without a decisive
+proof and yield the applicable relation/consistency unknown. A
+`COMPLETE_FOR_DECLARED_FRAGMENT` service handling an in-fragment request must
+return the admitted decisive judgment; a completed in-fragment “no result” is a
+protocol violation and yields `REASONING_ERROR`, never logical `UNKNOWN`. A
+service failure likewise returns reasoning error.
 
-Reasoning requests must name exactly one K1 judgment or relation taxonomy
-member and bind the complete mechanically extracted environment. Contract-level
-requests require closed Contracts; formula requests require a closed formula
-environment. No request may supply an alternate `chi_C`.
+Reasoning requests must name exactly one public K1 judgment/relation taxonomy
+member or the separate internal `EVAL_FUNCTION_EQUALITY_DERIVATION` role that
+operationalizes K1 `f ==Eval g`. Every request binds the complete mechanically
+extracted environment. Contract-level requests require closed Contracts;
+formula and `==Eval` requests require a closed formula environment. No request
+may supply an alternate `chi_C`.
 
 The certificate interface must distinguish and validate:
 
@@ -352,6 +386,10 @@ The certificate interface must distinguish and validate:
 - models and abstract witnesses;
 - decisive logical counterexamples;
 - strong entailment and truth-behavior equivalence proofs;
+- internal `==Eval` derivations proving equality of complete `Eval` functions,
+  including truth, evidence, unknown-reason and evaluation-error sets and exact
+  free dependencies under one exact `Delta`, `Sigma`, `chi_C`, and lexical
+  scope;
 - exact full-Contract equivalence or inequality evidence;
 - profile coverage evidence.
 
@@ -362,6 +400,12 @@ K1 §5.2--§5.4 exactly: `UNKNOWN` is not a decisive logical counterexample;
 evaluation or reasoning error proves nothing; an abstract satisfying witness
 is not a patch; and a certificate for one relation cannot be relabeled as
 another.
+
+An admitted `==Eval` derivation is an internal proof object only. It may support
+a derived-form preservation argument, a stronger public formula/acceptance
+equivalence proof, or one facet of full-Contract equivalence, but it never
+directly renders `RELATION_PROVED` and cannot be relabeled as public logical or
+full-Contract equivalence evidence without the receiving rule's other premises.
 
 For joint reasoning, the declared capability dependency set must cover the
 entire cross-plugin formula and shared dependencies. Separate local results do
@@ -375,7 +419,7 @@ The ABI must define the exact interface representation and validation of:
 - admitted trace-event records containing the exact `EventValue` and optional
   actor, with a controlled event lacking an actor receiving no matching grant;
 - `EventScopePair` membership, signatures, controlled keys, and coherence
-  claim or certificate;
+  validation record or certificate;
 - exact profile keys, versioned dimensions, coverage evidence, checker class,
   and complete/incomplete/unknown/error results;
 - self-contained `SourceRef` provenance values;
@@ -383,11 +427,27 @@ The ABI must define the exact interface representation and validation of:
   `BIND_CHOICE(choice_id)`;
 - multi-plugin dependency and trust scope.
 
-The event-pair interface must make the K1 full-result equality checkable in
-principle for empty and multi-event traces and for truth, evidence, unknown,
-and error aggregation. A caller cannot classify an event, weaken the
-controlled-key set, or link unrelated scope and occurrence predicates after
-binding.
+The event-pair interface must make the K1 full-result equality an actual
+semantic-binding conformance condition for every admitted trace, including
+empty and multi-event traces and truth, evidence, unknown, and error
+aggregation. A producer's bare coherence claim is never sufficient. K2 must
+choose and define at least one non-circular admission path:
+
+- the occurrence meaning is definitionally constructed from the scope meaning
+  by the frozen T3/A1 aggregation; or
+- an exact coherence proof is admitted by a separately trusted validator whose
+  declared sound fragment and trust basis do not depend on the pair's own
+  unvalidated claim.
+
+Successful admission binds the exact pair meanings. Missing validation leaves
+the required coherence semantic binding open; an unavailable validation
+capability may additionally be reported as missing evaluability. Validator or
+protocol failure yields `REASONING_ERROR` and no admission, so the Contract
+cannot close. An admitted counterexample or failed exact check makes the
+semantic binding incompatible/malformed. The deliverable must define these
+states without turning a bare claim, missing validator, or failed validator
+into closure. A caller cannot classify an event, weaken the controlled-key set,
+or link unrelated scope and occurrence predicates after binding.
 
 Profile checking must keep known omission, completed inconclusive coverage,
 concrete evaluation failure, and symbolic reasoning failure distinct. A
@@ -413,7 +473,10 @@ K2 must define discovery results and state transitions that distinguish:
 - incompatible declaration or semantic binding;
 - compatible meaning present but requested service absent;
 - service present but outside the required capability fragment;
-- completed inconclusive reasoning;
+- completed inconclusive reasoning from a partial or out-of-complete-fragment
+  request;
+- a complete in-fragment service returning no decisive result, which is a
+  reasoning protocol error rather than unknown;
 - evaluation, reasoning, and transport/protocol failure.
 
 Discovery and registration are interface concerns only. The deliverable must
@@ -446,11 +509,11 @@ cases, using fresh keys and no coding vocabulary:
 | K2-A10 | `TERM_ERROR`, factual `UNKNOWN`, and predicate `ERROR` as three distinct results |
 | K2-A11 | unordered evidence/reason sets versus reordered or duplicated transport forms |
 | K2-A12 | immutable controlled event declaration and actor matching versus a caller-supplied control flag or missing/wrong actor |
-| K2-A13 | coherent event-scope pair on empty/multi-event traces versus an unlinked occurrence predicate |
+| K2-A13 | definitionally or independently validated event-scope coherence on empty/multi-event traces versus a bare claim, missing/failed validator, or disproved pair |
 | K2-A14 | self-contained provenance versus authority adoption or choice-binding attestation |
 | K2-A15 | profile complete, incomplete, unknown, evaluation error, and reasoning error |
-| K2-A16 | concrete-only, partial-symbolic, and complete-fragment capabilities on in/out-of-fragment requests |
-| K2-A17 | valid witness/proof/counterexample bound to the exact environment versus stale or relabeled evidence |
+| K2-A16 | concrete-only, partial-symbolic, and complete-fragment capabilities on in/out-of-fragment requests, including forbidden in-fragment inconclusive completion |
+| K2-A17 | valid witness/proof/counterexample/internal `==Eval` derivation bound to the exact environment versus stale or relabeled evidence |
 | K2-A18 | Contract-derived `chi_C` versus a witness/request override attempt |
 | K2-A19 | plugin-local results versus one joint capability covering the complete cross-plugin dependency set |
 | K2-A20 | explicit compatible migration versus alias, latest-version, first-found, or discovery-order substitution |
@@ -483,7 +546,7 @@ K2 must end with a compact K3 input packet containing only:
 - the accepted ABI/protocol version and representation decision;
 - plugin-owned extension points;
 - exact declaration, binding, invocation, evidence, capability, certificate,
-  profile, event, provenance, and migration obligations;
+  internal `==Eval`, profile, event, provenance, and migration obligations;
 - the twenty accepted K2 conformance cases;
 - K3’s allowed task: choose a minimal coding-domain vocabulary and demonstrate
   it against the accepted kernel and ABI;
@@ -507,7 +570,8 @@ It must also report:
 2. the exact ten top-level sections in order;
 3. the representation decision and its precise non-claim;
 4. interface-responsibility ledger counts by disposition;
-5. all logical record roles and lifecycle states;
+5. all logical record roles, their unique declaration/binding/service layer,
+   lifecycle states, and the internal `==Eval` role;
 6. K1 §8 obligation coverage count and mapping;
 7. adversarial conformance count, which must be twenty, and the ten required
    complete interface-trace IDs;
@@ -535,7 +599,8 @@ K2 may be accepted only if:
 - truth, metadata, evaluation error, reasoning error, and profile results
   preserve K1 exactly;
 - proof and certificate admission is sound, exact-environment-bound, and
-  capability-relative;
+  capability-relative; complete in-fragment requests cannot finish
+  inconclusively, and internal `==Eval` is not a public relation status;
 - event classification, event-scope coherence, choice ownership, provenance,
   authority, profile relativity, and cross-plugin trust cannot be overridden;
 - version skew, duplicates, conflicts, migration, discovery uncertainty, and
