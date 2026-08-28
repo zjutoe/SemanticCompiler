@@ -24,24 +24,37 @@ Value, Type, Variable, Principal, ChoiceId, SourceRef, AuthorityRef,
 EvidenceRef, UnknownReason, EvaluationErrorReason, ReasoningErrorReason
 
 PluginKey = (plugin_identity, exact_version)
-SymbolKey = (PluginKey, namespace, local_name, kind, declared_signature)
+SymbolKey = (PluginKey, namespace, local_name, kind)
 ProfileKey = (plugin_identity, exact_version, profile_name)
 ```
 
-`PRE`, `TRACE`, `FINAL`, and `EVIDENCE` are projections, not commands or
-mutable stores. A controlled event is merely an event whose occurrence is
-subject to the authorization facet; the calculus neither selects nor performs
-events.
+`Outcome` is the derived Cartesian product of the four separately retained
+facet domains. `PRE`, `TRACE`, `FINAL`, and `EVIDENCE` are its projections, not
+commands or mutable stores. Product equality is componentwise, so the product
+adds no observation beyond those projections. A controlled event is merely an
+event whose occurrence is subject to the authorization facet; the calculus
+neither selects nor performs events.
 
-A semantic environment is
+A declaration context exists independently of semantic or service availability:
 
 ```text
-Sigma = (types, literal_meanings, symbol_meanings, exact_bindings,
-         evaluator_capabilities, reasoning_capabilities, profiles,
-         authority_facts)
+Delta = (type_declarations,
+         literal_declarations_and_admission,
+         symbol_signatures,
+         symbol_facet_declarations)
+
+Sigma = (Delta, literal_meanings, function_meanings, predicate_meanings,
+         exact_semantic_bindings, evaluator_capabilities,
+         reasoning_capabilities, profiles, authority_facts)
 rho   : Variable partial-map Value
-kappa : ChoiceId partial-map Value
 ```
+
+`Delta` declares types, literal admissibility and types, exact function or
+predicate signatures, and the outcome facets each symbol may consume. It says
+nothing about whether a semantic meaning, evaluator, or reasoner is installed.
+`Sigma` binds meanings and services to those exact declarations. There is no
+caller-supplied choice map; section 2.3 derives the only choice environment
+from the Contract's validated choice records.
 
 `authority_facts` is a set of attestations
 `(AuthorityRef, SourceRef, Principal, NormativeRole)`, where `NormativeRole` is
@@ -59,19 +72,24 @@ evaluation order.
 
 ### 1.2 Plugin semantic parameter
 
-For each exactly bound `SymbolKey`, `Sigma` may provide:
+For each exactly declared and semantically bound key, `Sigma` may provide:
 
 ```text
-function meaning : Value* -> Value or TERM_ERROR(reason)
+TermResult       = TERM_VALUE(Value)
+                 | TERM_ERROR(nonempty finset(EvaluationErrorReason))
+literal meaning : declared literal -> TERM_VALUE(Value)
+function meaning: Value* -> TermResult
 predicate meaning: Value* -> Eval
 ```
 
 Every outcome component observable by a predicate must be supplied explicitly
 through an anchor-derived argument, and its declared facet dependencies must
 match those arguments. Every type, literal, function, and predicate meaning
-is typed and belongs to one exact `PluginKey`. A predicate result obeys the
-kernel `Eval` algebra in section 4; plugins cannot redefine connectives,
-truth, errors, evidence aggregation, authority, provenance, or binding.
+is typed and belongs to one exact `PluginKey`. Literal and function meanings
+return only values or term-evaluation failures; `UNKNOWN` is not a term result.
+A predicate result obeys the kernel `Eval` algebra in section 4; plugins cannot
+redefine connectives, truth, errors, evidence aggregation, authority,
+provenance, or binding.
 Capabilities and profiles are also semantic parameters, but their results are
 admitted only by section 5. A meaning can be bound while no evaluator exists.
 
@@ -139,11 +157,12 @@ leave its evaluation contract unresolved.
 
 Judgments have the form `Delta; Gamma |- t : T` and
 `Delta; Gamma |- f : Bool`, where `Delta` contains declared exact symbol
-signatures and `Gamma` contains lexically bound event variables plus declared
-choice variables.
+signatures, literal admissions, and facet declarations, while `Gamma` contains
+lexically bound event variables plus declared choice variables. These judgments
+do not consult semantic meanings or evaluator/reasoner capabilities.
 
 ```text
-(LIT)    literal is admitted by PluginKey's declared type T
+(LIT)    Delta admits the exact PluginKey literal at declared type T
          --------------------------------------------------
          Delta;Gamma |- Lit[PluginKey](literal:T) : T
 
@@ -170,6 +189,13 @@ choice variables.
          Delta;Gamma |- All(S):Bool
 ```
 
+Facet support is structural: literals and variables have empty direct support,
+`support(Anchor(a))={a}`, and application support is the union of its argument
+supports. Each `(APP)` or `(ATOM)` premise additionally requires every
+argument's support to be allowed by that exact declaration's corresponding
+facet position. The formula's actual facet dependency is the recursive union;
+no meaning receives an undeclared or implicit outcome component.
+
 `Require(f)` is formed under the Contract choice environment. In
 `Authorize(p,x:T_event,scope,guard)`, `p` must be a principal, `T_event` must be
 the trace's declared `EventValue` type, and both formulas type-check under
@@ -191,10 +217,15 @@ Provenance is never inferred from wording.
 
 ### 2.3 Structure, closure, and evaluability
 
-`WELL_FORMED` means all inductive rules, uniqueness rules, declared signatures,
-choice constraints, and authority-attestation checks pass. A bound semantic
-contract whose signature or declared identity differs is `MALFORMED`; an absent
-exact contract is instead a well-formed unresolved reference.
+`WELL_FORMED` means all inductive rules, uniqueness rules, declaration-level
+literal admissions, signatures/facet declarations, choice constraints, and
+authority-attestation checks pass. A referenced literal or symbol key absent
+from `Delta`, or an incompatible declaration for that exact key, is
+`MALFORMED(missing or incompatible declaration)` because no typing derivation
+exists. By contrast, a valid exact declaration with no matching semantic
+meaning in `Sigma` is well formed but open. A purported semantic binding whose
+identity, signature, literal type, or facet contract disagrees with `Delta` is
+also `MALFORMED(incompatible semantic binding)`.
 
 `CLOSED` means every free variable is bound, every choice is bound by its
 controller, every source/authority reference resolves, and every exact
@@ -202,6 +233,18 @@ controller, every source/authority reference resolves, and every exact
 `Sigma`. Otherwise the result is `OPEN_BINDINGS(the exact finite missing set)`.
 No compatible-looking version is substituted. Lexical event variables are
 bound by `Authorize` and do not make a Contract open.
+
+For a well-formed Contract, define its choice environment mechanically:
+
+```text
+chi_C(choice_id) = binding.value
+```
+
+exactly when the unique `ChoiceDecl` has a `ChoiceBinding` whose value is in
+the declared alternatives, whose binder equals the declared controller, and
+whose exact source/authority fact validates `BIND_CHOICE(choice_id)`. No other
+entry exists. Thus `C` is closed only if every referenced choice has an entry
+in `chi_C`; no caller, evaluator, witness, or executor may override it.
 
 For a requested judgment `j`, `EVALUABILITY_AVAILABLE(capability_refs)` means
 the exact bound semantics declare all services required by `j`.
@@ -219,16 +262,26 @@ calculus. It is not inferred merely from well-formedness.
 
 ### 3.1 Terms and atoms
 
-For closed bindings, `[[t]]_{Sigma,rho,kappa,O}` is defined recursively.
-Literals use their exact plugin-version meaning; variables use `rho` or
-`kappa`; anchors project the correspondingly named component of `O`; and
-function application applies the exact bound meaning to recursively obtained
-arguments. A term error makes its enclosing atom return `ERROR` with that
-reason. An absent binding is not evaluated: it was already `OPEN_BINDINGS`.
+For a closed Contract, `[[t]]^term_{Sigma,rho,chi_C,O}` returns `TermResult`
+recursively. Literals use their exact declared and bound meaning. A lexical
+event variable uses `rho`; a choice variable uses only `chi_C`; their namespaces
+are disjoint. Anchors return `TERM_VALUE` of the named projection.
 
-An atom evaluates its terms, then invokes only its exact bound predicate
-meaning with the resulting values; anchor-derived arguments are its only
-access to outcome facets. This gives
+For `Apply(q,t1,...,tn)`, evaluate every argument denotationally. If one or more
+arguments return `TERM_ERROR`, return one `TERM_ERROR` containing the set union
+of all argument error reasons and do not invoke `q`. Otherwise invoke the exact
+bound function on the positional values and preserve its `TermResult`. This
+recursive rule is deterministic and traversal-order independent: argument
+positions determine values while error sets use semantic set union. An absent
+meaning is not evaluated because it already produced `OPEN_BINDINGS`.
+
+An atom evaluates every term argument by that same rule. Any term errors are
+unioned and projected to `ERROR(errors, evidence={}, unknowns={})`; the
+predicate is not invoked. Otherwise the atom invokes only its exact bound
+predicate meaning with the positional values; anchor-derived arguments are its
+only access to outcome facets. Term failure is therefore an
+`EVALUATION_ERROR`, never factual `UNKNOWN`, and cannot be hidden by argument
+order. This gives
 `[[f]]` by the rules in section 4. A plugin atom may be broad, but only its
 declared typed meaning, dependencies, facet boundary, evidence contract,
 unknown behavior, error behavior, and capability limits give it meaning. Its
@@ -275,10 +328,20 @@ execution policy.
 
 ### 3.4 Conditionality, alternatives, states, and choices
 
-A conditional requirement is `Require(Implies(condition, consequence))`. A
-conditional permission is `Authorize(p,x,scope,condition)`. The former can fail
-when the condition is true and the consequence false; the latter cannot fail
-merely because no matching event occurs.
+A conditional requirement for a controlled event is the composition
+
+```text
+Require(Implies(condition, Occurs(scope, TRACE)))
+Authorize(p, x, scope(x), condition)
+```
+
+The first clause imposes the obligation; the second supplies exactly the
+authority required by closed-world authorization if the event occurs. A
+conditional permission contains only the second clause. Consequently condition
+true plus occurrence can satisfy both forms, condition true plus omission
+separates them, and condition false plus omission satisfies both. Condition
+false plus occurrence is unauthorized in both. For a consequence that is not
+a controlled event, the conditional requirement needs only the `Require`.
 
 Alternative acceptable outcomes use `Any({a,b,...})` inside a requirement.
 They are factual disjunctions evaluated for an outcome. An owned choice instead
@@ -295,9 +358,10 @@ final target is not a relation to a varying baseline.
 ### 3.5 Provenance, authority, and exact versions
 
 Adoption affects normative force, not proposition truth. Two sources may carry
-identical formula content, but only a matching authority attestation admits an
-`AdoptedClause`. `Origins(C)` remains independently inspectable even when two
-adopted formulas are propositionally equivalent. Exact symbol/version
+identical formula content, but only a matching authority attestation adopts an
+attributed clause into `Hard` or `Grants`. `Origins(C)` remains independently
+inspectable even when two adopted formulas are propositionally equivalent.
+Exact symbol/version
 dependencies participate in term and atom meanings and in semantic equivalence;
 same display name or a newer version is insufficient.
 
@@ -317,8 +381,9 @@ Here `P`, `R`, and `Occurs` are typed exact plugin predicates, not new kernel
 symbols. `FORBID` means non-occurrence, which is stronger than merely omitting
 a grant. `ALLOW` grants authority and does not assert occurrence.
 
-The proof for each macro is definitional expansion. For every `Sigma`, binding,
-and `O`, the expanded term/formula is the macro's stated meaning; hence truth,
+The proof for each macro is definitional expansion. For every `Delta`, `Sigma`,
+mechanically derived `chi_C`, lexical environment, and `O`, the expanded
+term/formula is the macro's stated meaning; hence truth,
 error, evidence sets, and unknown-reason sets are identical, not merely
 two-valued acceptance. Copying `o` preserves provenance and authority; copying
 the exact symbol references preserves plugin versions; identical free variables
@@ -436,11 +501,15 @@ There is no omitted short-circuit metadata.
 
 ### 4.7 Aggregation rule A2 — term and atom boundaries
 
-Argument term errors are unioned before predicate invocation; any term error
-prevents invocation and returns `ERROR`. If invocation occurs, its returned
-sets are preserved exactly. A plugin may cite multiple evidence items or
-unknown causes but cannot prioritize one by return order. Repeated equal
-references/reasons collapse by semantic set equality.
+At every function node, all nested argument `TermResult`s are collected; any
+`TERM_ERROR` reasons are set-unioned, prevent that function invocation, and
+remain a `TERM_ERROR`. At the atom boundary, all argument term-error sets are
+unioned and projected once to `ERROR(errors,{}, {})`, preventing predicate
+invocation. If invocation occurs, its returned `Eval` sets are preserved
+exactly. A plugin may cite multiple evidence items or unknown causes but cannot
+prioritize one by return order. Repeated equal references/reasons collapse by
+semantic set equality. Neither a term error nor its projection can become
+`UNKNOWN`.
 
 ### 4.8 Laws
 
@@ -470,7 +539,7 @@ case, evidence, unknown, and error behavior and still return this `Eval` type.
 | Formula truth/failure | Section 4 `Eval` over a closed Contract and concrete `Outcome`; error produces no truth. | Kernel composition over plugin atoms |
 | Consistency | `SAT` needs an accepted witness; `UNSAT` needs a sound kernel derivation or admitted proof; otherwise `UNKNOWN`. | Kernel plus admitted capabilities |
 | Profile completeness | Coverage of every dimension in one exact `ProfileKey`, with evidence; missing/unknown stay explicit. | Versioned profile parameter |
-| Entailment/equivalence | Sound proof or counterexample under all facets and exact dependencies; otherwise `RELATION_UNKNOWN`. | Kernel plus admitted capabilities |
+| Entailment/equivalence | A named relation from §5.2 with a sound proof or relation-specific definite counterexample; otherwise `RELATION_UNKNOWN`. | Kernel plus admitted capabilities |
 | Reasoning failure | Protocol/service failure gives `REASONING_ERROR` and no relation or consistency result. | Kernel failure boundary |
 
 Intent completeness cannot be certified from a Contract. Profile completeness,
@@ -479,42 +548,76 @@ proved rule.
 
 ### 5.2 Satisfaction and core reasoning
 
-A satisfying witness is `(O,kappa,evidence)` for a closed semantic environment
-such that the choice bindings are controller-valid, exact plugin meanings are
-used, supplied evidence validates, and `AcceptEval(C,O)` is `VALUE(TRUE,...)`.
-It may be abstract; it need not be a patch or an executor output.
+A satisfying witness is `(C,O,evidence)` where `C` is closed, its sole choice
+environment is the mechanically derived `chi_C`, exact plugin meanings are
+used, supplied evidence validates, and `AcceptEval(C,O)` is
+`VALUE(TRUE,...)`. Neither the witness nor its validator supplies or overrides
+choice values. The witness may be abstract; it need not be a patch or executor
+output. If concrete witness validation returns an evaluator error, the result is
+`EVALUATION_ERROR` and neither `CONSISTENCY_SAT` nor `CONSISTENCY_UNSAT` is
+produced.
 
 Core rules are:
 
 ```text
-All({f, Not(f)}) is UNSAT                         (K-CONTRA)
-VALUE(TRUE,...) for accepted witness w => SAT(w) (K-WITNESS)
-C1 facet-equivalent C2 => EQUIVALENCE            (K-EQUIV)
-accepted countermodel O with C1 true, C2 nontrue
-    => disprove entailment C1 |= C2               (K-COUNTER)
+All({f, Not(f)}) is UNSAT                              (K-CONTRA)
+VALUE(TRUE,...) for accepted witness w => SAT(w)      (K-WITNESS)
+six-facet equality(C1,C2) => FULL_CONTRACT_EQUIVALENCE (K-EQUIV)
+
+eval(f,O)=VALUE(TRUE,...) and eval(g,O)=VALUE(FALSE,...)
+    => disprove FORMULA_ENTAILMENT(f,g)                (K-FORM-COUNTER)
+
+AcceptEval(C1,O)=VALUE(TRUE,...) and
+AcceptEval(C2,O)=VALUE(FALSE,...)
+    => disprove ACCEPTANCE_ENTAILMENT(C1,C2)           (K-ACC-COUNTER)
+
+a definite unequal structural facet, or a definite TRUE/FALSE difference in
+the Hard or Grants result functions
+    => disprove FULL_CONTRACT_EQUIVALENCE(C1,C2)       (K-FACET-COUNTER)
 ```
 
 `K-CONTRA` is sound because T1/T2 have no truth assignment making both operands
-true; evaluator failure cannot refute that denotational fact. `K-WITNESS` is
-sound by the definition of acceptance. `K-EQUIV` requires equality of hard
-`Eval` functions for every outcome and binding, grant/authorization functions,
-choice/open-binding facets, origins/authority facets, and exact version
-dependencies. Proposition-only equivalence is insufficient.
+true. It is a denotational core derivation, never a conclusion inferred from an
+observed evaluator error. An evaluator failure alone proves neither `UNSAT` nor
+any relation. `K-WITNESS` is sound by the definition of acceptance.
 
-Formula entailment `f |= g` means that, under one exact closed `Sigma`, every
-valuation/outcome making `f` logically `TRUE` makes `g` logically `TRUE`.
-Acceptance entailment `C1 |=accept C2` means every completion and outcome
-accepted by `C1` under their common exact environment is accepted by `C2`; it
-does not transfer provenance or authority. Full Contract equivalence is the
-stronger `K-EQUIV` facet equality above. A relation request must name which of
-these relations it asks; results are never silently converted among them.
+The exact relation taxonomy is:
+
+| Relation | Definition | Definite disproof |
+|---|---|---|
+| `FORMULA_ENTAILMENT(f,g)` | Under one exact closed `Delta`,`Sigma`,`chi_C`, every valuation/outcome making `f` `TRUE` makes `g` `TRUE`. | One outcome with `f=TRUE` and `g=FALSE`. |
+| `FORMULA_EQUIVALENCE(f,g)` | The complete `Eval` functions of `f` and `g` are equal for every lexical valuation and outcome, including evidence, unknown-reason, and error sets and exact free dependencies. | A definite `TRUE`/`FALSE` truth difference, or unequal metadata on two definite truth results. |
+| `ACCEPTANCE_ENTAILMENT(C1,C2)` | Under common exact declarations/semantics and each Contract's own `chi_C`, every outcome accepted by `C1` is accepted by `C2`. | One outcome with `C1` acceptance `TRUE` and `C2` acceptance `FALSE`. |
+| `ACCEPTANCE_EQUIVALENCE(C1,C2)` | The two Contracts accept exactly the same outcomes; this intentionally ignores provenance and other non-acceptance facet differences. | One outcome with one acceptance `TRUE` and the other `FALSE`. |
+| `FULL_CONTRACT_EQUIVALENCE(C1,C2)` | Equality of all six facets: `Hard` complete-result functions, `Grants`/authorization functions, `Choices` including validated bindings, `Origins`/authority attachments, exact `Dependencies`, and `Open` bindings. | A definite unequal structural facet or definite result-function difference. |
+
+`K-EQUIV` is reserved for `FULL_CONTRACT_EQUIVALENCE`; formula equivalence and
+acceptance equivalence use their separately named relations. If a concrete
+relation check encounters `UNKNOWN` where a definite truth comparison is
+needed, it returns `RELATION_UNKNOWN` absent another sound proof or definite
+counterexample. `UNKNOWN` is never itself a counterexample. If concrete
+evaluation returns `ERROR`, the request returns `EVALUATION_ERROR` and no
+relation judgment. A symbolic/reasoning service failure instead returns
+`REASONING_ERROR` and no relation judgment. These rules apply separately to
+formula, acceptance, and full-facet relation requests; a relation result is
+never silently converted to another taxonomy member.
+
+The public K0 status remains namespaced exactly: the two entailment relations
+render `RELATION_PROVED(ENTAILMENT,proof_ref)`,
+`RELATION_DISPROVED(ENTAILMENT,counterexample_ref)`, or
+`RELATION_UNKNOWN(ENTAILMENT,reason)`; the three equivalence relations render
+the corresponding statuses with `EQUIVALENCE`. The request and referenced
+evidence record the taxonomy member. No new status family is introduced.
 
 ### 5.3 Capability-relative proof admission
 
 A plugin witness, proof, model, counterexample, entailment, or equivalence
 claim is admitted only if it identifies exact semantics and dependencies, lies
 inside the capability's declared sound fragment, has a valid trust attestation,
-and its conclusion is the judgment requested. `COMPLETE_FOR_DECLARED_FRAGMENT`
+names one exact §5.2 relation when applicable, and its conclusion is the
+judgment requested. A counterexample must meet that relation's definite
+falsification rule; an `UNKNOWN` or evaluator error is inadmissible as a
+counterexample. `COMPLETE_FOR_DECLARED_FRAGMENT`
 permits `UNKNOWN` only outside that fragment; `PARTIAL_SYMBOLIC_REASONING` and
 `CONCRETE_EVALUATION_ONLY` never turn lack of result into a conclusion.
 
@@ -543,8 +646,8 @@ Neither changes acceptance or satisfiability and none certifies unstated intent.
 ### 5.5 Normalization policy
 
 The only kernel normalizations are alpha-renaming of the bound authorization
-event variable, the definitional expansion of `Any`, `Implies`, `GOAL`,
-`PRESERVE`, `FORBID`, and `ALLOW`, and mathematical canonicalization of finite
+event variable, the definitional expansion of `TrueF`, `FalseF`, `Any`,
+`Implies`, `GOAL`, `PRESERVE`, `FORBID`, and `ALLOW`, and mathematical canonicalization of finite
 sets. Alpha-renaming preserves environments by capture-free bijection.
 Definitional expansions preserve every facet by sections 3.6 and 4; finite-set
 canonicalization preserves set membership and union metadata. No distribution,
@@ -556,14 +659,16 @@ assumptions. They establish neither universal decidability nor completeness.
 
 ## 6. Minimality and derived-form ledger
 
-The controlled examples below keep `Sigma`, bindings, origins, and all unrelated
-clauses fixed. `CP-a/b` means the two named cases differ only in the stated
-feature. This supports relative minimality for the accepted cases, not absolute
-minimality over all possible calculi.
+The controlled examples below keep `Delta`, `Sigma`, mechanically derived
+`chi_C`, origins, and all unrelated clauses fixed except for the named
+variation. `CP-a/b` means the two cases differ only in that feature. This
+supports relative minimality for the accepted cases, not absolute minimality
+over all possible calculi.
 
 | Construct or role | Disposition | Denotation/derivation | Controlled pair or proof; why simpler composition fails | K0 |
 |---|---|---|---|---|
-| Completed `Outcome` tuple | RETAINED_PRIMITIVE | §1.1 projections | CP-O: same formula/bindings, two outcomes differing only in observed final value must differ; without an outcome argument constraints denote no completed result | C01,C19 |
+| Completed `Outcome` tuple | DERIVED | Cartesian product `PRE x TRACE x FINAL x EVIDENCE`, §1.1 | Componentwise product and projection laws preserve every observation; the record adds no separator beyond the four retained facets | C01,C19 |
+| Declaration context `Delta` | RETAINED_PRIMITIVE | §1.1, §2.2--2.3 | CP-D: hold a symbol reference and unavailable service fixed; absent declaration is malformed, exact declaration without meaning is open, and exact meaning without evaluator is closed but not evaluable. Collapsing declaration with service state loses these judgments | C13,C15,C16 |
 | Plugin-typed literals | PLUGIN_PARAMETER | §1.2, §3.1 | Exact type/value meaning is domain-specific; the kernel only preserves its key | C11 |
 | Typed variables and binding | RETAINED_PRIMITIVE | §2.1--2.3 | CP-V: same grant and trace, binding `x` to the current event versus an unrelated event distinguishes scope; constants cannot relate each iterated event without vocabulary growth | C04,C06,C08 |
 | `PRE` anchor | RETAINED_PRIMITIVE | `O.PRE` | SP-03 with only baseline varied; a final constant cannot preserve a varying relation | C02,C18,C19 |
@@ -576,6 +681,8 @@ minimality over all possible calculi.
 | Finite conjunction `All` | RETAINED_PRIMITIVE | T2 | CP-C: outcomes satisfy only `a`, only `b`, or both; requiring both cannot be represented by either atom or negation alone | C10,C14 |
 | Alternatives `Any` | DERIVED | `Not(All(Not children))` | T1--T3 prove identical truth/error/evidence/unknown results and bindings | C07 |
 | Conditionality `Implies` | DERIVED | `Any({Not(a),b})` | T4 is the full result-level derivation; no new normative role is needed | C05,C09 |
+| `TrueF` | DERIVED | `All({})` | T2 gives exactly `VALUE(TRUE,{},{})`; there are no children, errors, evidence, unknown reasons, free bindings, dependencies, grants, or origins to lose | C05,C07 |
+| `FalseF` | DERIVED | `Not(TrueF)` | T1 applied to the complete `TrueF` result gives exactly `VALUE(FALSE,{},{})`; all nontruth facets remain empty | C07 |
 | General quantification | EXCLUDED | delegated inside atom | No K0 pair forces kernel enumeration; adding it would require unresolved domain/evaluation semantics | C11,C12 |
 | Hard `Require` role | RETAINED_PRIMITIVE | §3.2 | SP-01: with condition true and event absent, requirement fails while permission succeeds | C01,C05 |
 | `Authorize` role with principal/event scope/guard | RETAINED_PRIMITIVE | §3.3 | SP-01: same condition/event proposition; occurrence is optional but, if controlled, must have a true grant | C04,C06 |
@@ -589,6 +696,7 @@ minimality over all possible calculi.
 | `FORBID` | DERIVED | §3.6 | Definitional full-facet proof; not confused with absent authority | C03 |
 | `ALLOW` | DERIVED | §3.6 | Definitional full-facet proof; empty trace proves no obligation | C04 |
 | Three truth values | RETAINED_PRIMITIVE | §4.1--4.5 | CP-U: same closed condition before versus after decisive evidence; collapsing unknown with true or false changes release acceptance | C09 |
+| `TermResult` value/error algebra | RETAINED_PRIMITIVE | §1.2, §3.1, A2 | CP-TE: hold the outer atom fixed; a nested function failure projects to evaluation error/no truth, while a valid term followed by an evidence-pending predicate returns truth unknown. Boolean truth cannot type or compose the term failure | C09,C15 |
 | Evaluation error boundary | RETAINED_PRIMITIVE | §4.1 | SP-06 fixes request and varies missing evidence versus evaluator crash; one returns truth unknown, the other no truth | C09 |
 | Evidence-reference set | RETAINED_PRIMITIVE | §1.1, A1/A2 | CP-R: same truth with independent signed versus unsigned observations; erasure loses admissible support | C01,C15 |
 | Unknown-reason set | RETAINED_PRIMITIVE | §1.1, A1/A2 | CP-UR: same unknown truth with missing suite result versus inaccessible manifest; reason determines what remains unresolved | C09,C12 |
@@ -599,8 +707,8 @@ minimality over all possible calculi.
 | Soft preference ordering | EXCLUDED | outside accepted scope §3.7 | SP-08 requires ranking, which hard truth cannot preserve | SP-08 |
 | Coding task/operation taxonomy | EXCLUDED | no denotation | No K0 distinction requires it; would be a domain-specific core branch | all |
 
-Ledger counts: **19 `RETAINED_PRIMITIVE`; 8 `DERIVED`; 5
-`PLUGIN_PARAMETER`; 3 `EXCLUDED`** (35 rows).
+Ledger counts: **20 `RETAINED_PRIMITIVE`; 11 `DERIVED`; 5
+`PLUGIN_PARAMETER`; 3 `EXCLUDED`** (39 rows).
 
 ## 7. K0 challenge coverage and separating derivations
 
@@ -616,7 +724,7 @@ they do not select K3 names or interfaces.
 | K0-C02 | `Require(R_public(PRE,FINAL))` | comparative observation relation | representable; evaluator available | pre/final preservation | incomplete domain evidence -> unknown | no fixed final list |
 | K0-C03 | `Require(Not(A_contact(TRACE)))` | trace occurrence meaning | representable; evaluator available | trace prohibition | absent trace evidence -> unknown | no final-state inference |
 | K0-C04 | `Authorize(p,x,A_regen(x),A_metadata_changed(PRE,FINAL))` | event scope and metadata relation | representable; evaluator available | conditional permission | unknown guard leaves occurring event authorization unknown | no obligation/evaluability authority |
-| K0-C05 | `Require(Implies(A_metadata_changed(PRE,FINAL),A_regen(TRACE)))` | same meanings as C04 | representable; evaluator available | conditional obligation | unknown condition follows T4 | no unconditional/permission rewrite |
+| K0-C05 | C04's grant plus `Require(Implies(A_metadata_changed(PRE,FINAL),A_regen(TRACE)))` | same condition, event scope, trace occurrence, and evidence meanings as C04 | representable; evaluator available | controlled conditional obligation plus necessary authority | hard implication follows T4; occurring event also evaluates grant; either evaluator fault -> error | no permission-only or unauthorized-obligation rewrite |
 | K0-C06 | conditional `Authorize` as C04 | edit scope and schema relation | representable; evaluator available | permission without duty | error in guard -> evaluation error if event occurs | no invented edit |
 | K0-C07 | `Require(Any({A_toml(FINAL),A_yaml(FINAL)}))` | two typed acceptance atoms | representable; evaluator available | acceptable alternatives | both unknown -> unknown | no fixture choice/both requirement |
 | K0-C08 | unbound `Choice(storage,T,{local,hosted},user,none)` | meanings for alternatives only | `UNRESOLVED`; `WELL_FORMED`; `OPEN_BINDINGS` | controller-owned discretion | remains open, never truth unknown | no default/executor ownership |
@@ -624,12 +732,12 @@ they do not select K3 names or interfaces.
 | K0-C10 | `Require(All({a,Not(a)}))` | same exact bound atom `a` | representable; well formed; closed; consistency unsat | kernel contradiction | evaluator error yields no concrete truth but K-CONTRA remains sound | not malformed/plugin special case |
 | K0-C11 | conjunction of nonempty/bounds atoms | sound numeric-domain proof capability | representable; well formed; closed; evaluator available; unsat | plugin contradiction | proof failure -> consistency unknown; service fault -> reasoning error | no numeric kernel rule |
 | K0-C12 | `Require(All({A_preserve,A_reduce}))` | sampled evaluation only; no complete joint reasoner | representable; local evaluator available; consistency unknown | capability-relative uncertainty | no witness/proof -> unknown | no sampled universal SAT |
-| K0-C13 | requirement references exact retired key | mandated meaning declared; exact service absent | representable; open bindings; evaluability missing | version closure vs capability | no substitution; discovery uncertainty stays evaluability unknown | no name-based rebind |
+| K0-C13 | requirement has an exact declaration for the retired key | declaration is valid; exact semantic meaning/service absent while incompatible newer key is separate | representable; well formed; open bindings; evaluability missing | declaration, semantic closure, and capability remain separate | no substitution; discovery uncertainty stays evaluability unknown | no name-based rebind |
 | K0-C14 | composed requirements with two exact plugin keys | local reasoners only | representable; local evaluability; joint consistency unknown | cross-plugin composition | absent joint capability -> unknown; failure -> reasoning error | no local-to-joint promotion |
 | K0-C15 | `Require(A_rubric(inputs,FINAL,EVIDENCE))` | explicit typed/versioned meaning, dependencies, evidence boundary, evaluator | representable; closed; evaluator available | legitimate broad atom | declared unknown/error only | no gold/ID access |
 | K0-C16 | same exact atom/meaning as C15 | semantic binding present, evaluator absent | representable; closed; evaluability missing | denotation vs service | no truth judgment requested | not meaningless/satisfied |
 | K0-C17 | same formula under two source records | source-authentication authority fact | representable; source evidence available | content vs normative adoption | unresolved authority ref -> open | no authority from wording |
-| K0-C18 | both phrasings bind to `Require(R_public(PRE,FINAL))` | one declared observation relation | representable; relation proved equivalence | surface-independent meaning | ambiguous binding would be unresolved | no phrase atoms |
+| K0-C18 | both phrasings bind to the same `R_public(PRE,FINAL)` formula but retain separate source origins | one exact declared observation relation | representable; `RELATION_PROVED(EQUIVALENCE, formula-equivalence proof)` and acceptance-equivalent requirements | surface-independent proposition with preserved provenance | ambiguous binding would be unresolved | no phrase atoms or full-facet provenance erasure |
 | K0-C19 | preservation/translation requirements | accepted abstract witness; concrete-evidence profile | representable; consistency sat; profile incomplete | satisfiability vs implementation evidence | missing profile dimension remains incomplete | no patch oracle/inconsistency |
 
 Coverage count: **19** (`C01`--`C19`).
@@ -638,11 +746,11 @@ Coverage count: **19** (`C01`--`C19`).
 
 | Pair | Denotational derivation or countermodel |
 |---|---|
-| SP-01 obligation/permission | Set condition `c=TRUE`, no regeneration event. `Implies(c,occurs)=FALSE`, so C05 rejects. C04 has no controlled occurrence, so authorization compliance is empty `All=TRUE`; it accepts if other requirements do. With an occurrence and `c=TRUE`, both can accept. Omission is the separator. |
+| SP-01 obligation/permission | C04 is grant `G`; C05 is the same `G` plus `Require(Implies(c,occurs))`. With `c=TRUE` and no event, both have vacuous authorization compliance but C05's hard implication is false, so only C04 accepts. With `c=TRUE` and occurrence, the shared grant is true and the C05 implication is true, so both can accept. With `c=FALSE` and omission, the implication and vacuous compliance are true, so both accept. Thus obligation, not missing authority, is the sole separator. |
 | SP-02 final/trace | Outcomes share `FINAL` without `.tmp-key`; one trace creates then deletes it, the other never creates it. Final atom is true for both. `Not(occurs(TRACE))` is false only for the first. |
 | SP-03 preservation/fixed final | At baseline `PRE1` matching manifest `M`, both intents accept `FINAL=M`. Change only baseline to `PRE2 != M` and final to `PRE2`: preservation is true while fixed-manifest final is false. |
 | SP-04 provenance/content | Hold formula text fixed. Variant A has a matching authenticated-user authority attestation and enters `Hard/Grants`; variant B retains the issue-comment source only as evidence and contributes no adopted clause. `Origins` and normative facets differ. |
-| SP-05 choice/unknown fact | Both expose `{local,hosted}`. The declared user may close the owned choice with either alternative. The manifest case has no choice declaration; before its fixed value is evidenced, its atom is truth unknown and no principal may bind it. |
+| SP-05 choice/unknown fact | Both expose `{local,hosted}`. The declared user may add an authority-validated `ChoiceBinding` for either alternative, from which `chi_C` is derived. The manifest case has no choice declaration; before its fixed value is evidenced, its atom is truth unknown and no principal or witness may bind it. |
 | SP-06 unknown/error | Missing suite evidence returns `VALUE(UNKNOWN,E,{missing-suite})`. A crash returns `ERROR({crash},E,U)`. T1--T4 preserve the former truth and the latter absence of truth. |
 | SP-07 satisfiability/profile | C19 witness makes `AcceptEval=TRUE`, deriving `CONSISTENCY_SAT`. The exact profile lacks concrete implementation evidence, independently deriving `PROFILE_INCOMPLETE`; neither judgment rewrites the other. |
 | SP-08 hard/preference | Hard limit rejects an over-limit outcome. Of two under-limit outcomes both satisfy hard acceptance; the requested ranking distinguishes them, but no kernel denotation does. Preference is therefore explicitly outside scope rather than hardened. |
@@ -653,23 +761,45 @@ Coverage count: **10** (`SP-01`--`SP-10`).
 
 ### 7.3 Required worked derivations and countermodels
 
-**W1 — C04/C05 conditional roles.** The SP-01 calculation covers all truth
-states through T4. For C04 an occurring event evaluates `scope AND condition`;
-no occurrence adds no formula. For C05 the hard implication is evaluated even
-without occurrence. Evidence/unknown sets union from condition and occurrence
-in both; any operand error dominates. Origins, bindings, and exact versions are
-held equal, leaving only the normative role to separate them.
+**W1 — C04/C05 conditional roles.** Let shared grant
+`G=Authorize(p,x,scope_regen(x),c)`. C04 contains only `G`; C05 contains `G`
+and `Require(Implies(c,occurs_regen(TRACE)))`. The four decisive cases are:
+
+| `c` | occurrence | C04 | C05 |
+|---|---|---|---|
+| `TRUE` | absent | authorization empty-`All=TRUE` | authorization `TRUE`, implication `FALSE`: rejects |
+| `TRUE` | present | scope/guard grant `TRUE`: accepts | same grant `TRUE`, implication `TRUE`: accepts |
+| `FALSE` | absent | authorization empty-`All=TRUE` | authorization `TRUE`, implication `TRUE`: accepts |
+| `FALSE` | present | grant `FALSE`: rejects | grant `FALSE` despite true implication: rejects |
+
+With no candidate controlled event, neither C04 nor C05 evaluates grant scope
+or guard metadata. C05 nevertheless evaluates both operands of its hard
+implication under A1, even when occurrence is absent; their evidence, unknown
+reasons, and errors aggregate normally. With occurrence, C04 evaluates the
+scope and guard once for grant compliance. C05 evaluates those grant children
+and separately evaluates the condition and trace-occurrence children of the
+hard implication; final `AcceptEval` set-unions all evidence, unknown-reason,
+and error sets, deduplicating exact repeated identities such as evidence
+returned by both evaluations of `c`. Any collected evaluation error dominates.
+Origins differ only by C05's added requirement adoption; choice bindings,
+declarations, semantic keys, event scope, condition, and shared grant origin are
+held fixed.
 
 **W2 — C08/C09 discretion versus fact.** C08 has
 `Open={choice_id}` and no `Eval`; a controller-valid binding closes it. C09 is
 closed and its evidence atom returns `VALUE(UNKNOWN,{},{missing-suite})`.
-Changing C09 requires evidence, not a choice binding. Thus representation,
-binding, truth, provenance, and authority facets cannot be exchanged.
+For C08, closing means adding the unique controller/source/authority-validated
+`ChoiceBinding`; `chi_C(choice_id)` is then mechanically that record's value.
+No caller or witness supplies a second map. Changing C09 requires evidence,
+not a choice binding. Thus representation, binding, truth, provenance, and
+authority facets cannot be exchanged.
 
 **W3 — C10 kernel contradiction.** For any logical value `v`, T1 gives
 `not(v)`. T2 applied to `{v,not(v)}` is never true: it is false for `TRUE` and
 `FALSE`, unknown for `UNKNOWN`. Hence no satisfying truth assignment exists,
-and K-CONTRA proves `CONSISTENCY_UNSAT` although both atoms type-check.
+and the denotational K-CONTRA derivation proves `CONSISTENCY_UNSAT` although
+both atoms type-check. An observed evaluator `ERROR` would instead produce
+`EVALUATION_ERROR` and proves nothing; K-CONTRA does not infer from that error.
 
 **W4 — C11 plugin contradiction.** Assume a sound admitted plugin proof states:
 `nonempty(B) AND forall b in B,size(b)<100KiB AND size(b)>=200KiB` has no model
@@ -684,10 +814,12 @@ capability is partial. Therefore the only sound consistency result is
 `CONSISTENCY_UNKNOWN(no accepted joint witness or refutation)`; a service crash
 would instead be `REASONING_ERROR`.
 
-**W6 — C13 exact version.** The syntax declares key `q@v1`; only incompatible
-`q@v2` is offered. Exact lookup leaves `q@v1` in `Open`, and its requested
-evaluator in the missing-capability set. No formula truth is evaluated. Display
-name equality supplies neither closure nor migration.
+**W6 — C13 exact version.** `Delta` contains the mandated exact declaration
+`q@v1`, so the formula is well formed. `Sigma` has no `q@v1` semantic meaning
+or evaluator; an available `q@v2` declaration/meaning is a separate,
+incompatible key. Exact lookup therefore leaves `q@v1` in `Open` and its
+requested evaluator in the missing-capability set. No formula truth is
+evaluated. Display-name equality supplies neither closure nor migration.
 
 **W7 — C14 cross-plugin countermodel.** Plugin A's local model assigns shared
 dependency `d=1`; plugin B's assigns `d=2`. Both local formulas are satisfiable,
@@ -708,13 +840,18 @@ so `p` does not enter `Hard`. Assign `p=FALSE`: A rejects, B (absent other
 requirements) accepts. Content truth is unchanged; provenance/adoption differs.
 
 **W10 — C18 surface equivalence.** Binding analysis maps both phrasings to the
-same exact relation atom over `(PRE,FINAL)` with the same origin/adoption rule.
-Their five denotational facets are equal, so K-EQUIV proves equivalence. No
-surface strings enter the calculus.
+same exact relation atom over `(PRE,FINAL)`, so their complete formula `Eval`
+functions are equal and a sound proof yields
+`RELATION_PROVED(EQUIVALENCE, formula-equivalence proof)`. Requirements formed
+from them are also acceptance-equivalent. Their distinct source records remain
+distinct in `Origins`; therefore they are not fully six-facet Contract
+equivalent and `K-EQUIV` is deliberately inapplicable. No surface string enters
+the formula vocabulary and no provenance is erased.
 
-**W11 — C19 abstract satisfaction.** An admitted abstract `Outcome` witness
-makes the preservation and translation atoms true with accepted evidence, so
-K-WITNESS gives `CONSISTENCY_SAT`. The separately bound profile lacks its
+**W11 — C19 abstract satisfaction.** An admitted closed-Contract/`Outcome`
+witness uses that Contract's mechanically derived `chi_C` and makes the
+preservation and translation atoms true with accepted evidence, so K-WITNESS
+gives `CONSISTENCY_SAT`. The separately bound profile lacks its
 concrete-implementation-evidence dimension and is `PROFILE_INCOMPLETE`. The
 witness is not an implementation or construction method.
 
@@ -722,6 +859,9 @@ witness is not an implementation or construction method.
 
 | Form | Acceptance/truth/error/evidence/unknown | Authorization | Provenance/authority | Binding/version |
 |---|---|---|---|---|
+| `Outcome` product | Componentwise tuple formation exposes exactly the four retained anchor values and introduces no `Eval` behavior | no event or grant added | none added | none added |
+| `TrueF` | empty T2 yields exactly `VALUE(TRUE,{},{})` | when used as `ALLOW` guard it adds no condition beyond that grant | formula itself adds none; adopting clause origin remains external | no free binding or dependency |
+| `FalseF` | T1 of complete `TrueF` yields exactly `VALUE(FALSE,{},{})` | adds none by itself | formula itself adds none; adopting clause origin remains external | no free binding or dependency |
 | `GOAL` | identical to its expanded final-state requirement by definition | adds none | origin copied | same free refs/exact key |
 | `PRESERVE` | identical to expanded pre/final relation requirement | adds none | origin copied | same free refs/exact key |
 | `FORBID` | T1 on the same occurrence result; all metadata/error preserved | adds no grant; prohibits occurrence | origin copied | same free refs/exact key |
@@ -738,12 +878,12 @@ question K2 may answer without changing that meaning.
 
 | Frozen semantic obligation | Unresolved K2 interface choice |
 |---|---|
-| Every type/function/predicate has typed, namespaced, exact-version identity; mismatches never silently bind. | Transport, registration, identity encoding, compatibility and explicit migration declarations. |
+| `Delta` declarations for types, literals, signatures, and facets remain distinct from semantic bindings and service availability; every key is namespaced and exact-versioned, and mismatches never silently bind. | Transport, declaration/registration schema, identity encoding, compatibility and explicit migration declarations. |
 | Model-facing documentation and machine evaluation identify the same exact semantic key and contract. | How identity is displayed, resolved, signed, and compared mechanically. |
-| Function/atom meanings declare argument/result types and permitted `Outcome` facets. | Declaration schema and invocation mechanism. |
+| Function/atom meanings match `Delta`; functions return the local `TermResult`, atoms return `Eval`, and permitted outcome facets arrive only through declared anchor arguments. | Invocation mechanism and representation of declarations/results. |
 | Concrete evaluators return the exact `Eval` algebra with stable evidence/reason identities and declared dependencies. | Evidence schema encoding, storage/reference transport, invocation protocol. |
 | Capability declarations state sound fragment, exact dependencies, trust basis, and whether they are concrete-only, partial-symbolic, or complete for a declared fragment. | Capability discovery/negotiation and declaration format. |
-| Witnesses, proofs, models, counterexamples, entailment, and equivalence claims are admitted only under §5.3 and bind exact semantics. | Certificate encodings, validators, proof-system identifiers, trust roots. |
+| Witnesses, proofs, models, and relation claims name the §5.2 relation taxonomy, satisfy §5.3, bind exact semantics, and never override `chi_C`; counterexamples require relation-specific definite falsification. | Certificate encodings, validators, proof-system identifiers, trust roots. |
 | Evaluator failures return evaluation errors; reasoning-service failures return reasoning errors; neither returns a logical conclusion. | Error taxonomies, retry metadata, transport mapping. |
 | Completeness is relative to an exact profile and dimension set; intent completeness is unavailable. | Profile declaration and coverage-evidence formats. |
 | A joint claim needs a capability whose dependency scope covers the whole cross-plugin formula; local results do not compose into joint results. | Proof exchange, orchestrating joint services, and cross-plugin trust plumbing. |
@@ -761,7 +901,8 @@ error boundary above. Concrete coding symbols remain a K3 question.
 - [x] Contract denotation exposes hard, authorization, choice/open, provenance/
   authority, and exact-version facets, including for open Contracts.
 - [x] Formation, typing, scope, binding, closure, and evaluability are exact and
-  remain independent judgment families.
+  remain independent judgment families; `Delta`, semantic meanings, and service
+  capabilities are not conflated.
 - [x] Every inherited candidate and every introduced semantic role has one
   ledger disposition; retained constructs have controlled counterexamples and
   derived constructs have full-facet proofs.
@@ -770,10 +911,15 @@ error boundary above. Concrete coding symbols remain a K3 question.
 - [x] Requirement, conditional permission, and conditional obligation have
   distinct denotations; permission never creates an occurrence obligation.
 - [x] Choice, factual unknown, provenance, authority, and exact version binding
-  remain explicit and are never inferred from content or evaluator availability.
+  remain explicit and are never inferred from content or evaluator availability;
+  only validated Contract records mechanically determine `chi_C`.
 - [x] Core and admitted reasoning rules are sound and capability-relative;
-  local plugin conclusions are not promoted to joint conclusions.
+  local plugin conclusions are not promoted to joint conclusions, `UNKNOWN` is
+  not a counterexample, and evaluation/reasoning errors yield no relation.
 - [x] Normalization is limited to proved full-facet-preserving operations.
+- [x] The 39-row ledger has 20 retained primitives, 11 derived forms, 5 plugin
+  parameters, and 3 exclusions, including dispositions for the derived Outcome
+  product, `TrueF`, and `FalseF`.
 - [x] All 19 K0 challenges and all 10 separating pairs are covered, with W1--W11
   supplying the required derivations/countermodels.
 - [x] Soft preference is reported outside scope; no coding-specific branch,
@@ -792,6 +938,6 @@ error boundary above. Concrete coding symbols remain a K3 question.
 Truth/error index: T1 (§4.2), T2 (§4.3), T3 (§4.4), T4 (§4.5).
 Aggregation index: A1 (§4.6), A2 (§4.7).
 Worked derivation/countermodel index: W1--W11 (§7.3), SP-01--SP-10 (§7.2),
-derived-form proof matrix (§7.4), and controlled primitive cases CP-O, CP-V,
-SP-03, SP-02, CP-E, CP-N, CP-C, SP-01, SP-05, SP-04, CP-P, CP-U, SP-06,
-CP-R, CP-UR, and CP-RE (§6).
+derived-form proof matrix (§7.4), and controlled primitive cases CP-D, CP-V,
+SP-03, SP-02, CP-E, CP-N, CP-C, SP-01, SP-05, SP-04, CP-P, CP-U, CP-TE,
+SP-06, CP-R, CP-UR, and CP-RE (§6).
