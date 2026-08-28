@@ -10,7 +10,11 @@ Current accepted plan:
 Current accepted stage handoffs:
 
 - [K0 handoff independent review and acceptance record](kernel_plugin/K0_Handoff_59d2799_review.md), handoff blob `914f1bb56792e20765b63b4a63f3db2a244cf560`; consumed by the accepted K0 stage
-- [K1 handoff independent review and acceptance record](kernel_plugin/K1_Handoff_dd87c79_review.md), handoff blob `ded68369ecc2d06ac2e3ddcf9ca20cb9e928b058`; held-out gate pending, not dispatched
+- [K1 handoff independent review and acceptance record](kernel_plugin/K1_Handoff_dd87c79_review.md), handoff blob `ded68369ecc2d06ac2e3ddcf9ca20cb9e928b058`; held-out gate passed, `READY_TO_BIND`, not dispatched
+
+Current pre-dispatch gate:
+
+- [K1 held-out gate receipt](../../KernelPlugin/K1_Held_Out_Gate_Receipt.md), receipt `K1-HO-GATE-20260828-A`; passed, with content-confidential evidence reserved for K4
 
 Current accepted stage result:
 
