@@ -88,16 +88,14 @@ Outcome = (PRE : State, TRACE : Trace,
            FINAL : State, EVIDENCE : EvidenceStore)
 ```
 
-`ContractSpec` is an exact logical contract value
-`(contract_key, owner_layer, domain, codomain, logical_relation,
-dependency_support)`.
-`owner_layer` is exactly one of `Delta`, `Sigma`, or `Service`;
-`domain`, `codomain`, and the mathematical relation are part of logical
-equality. `dependency_support` is a derived part of equality under the total
-support rule in section 3.3, never a producer assertion. Value-admission,
-meaning, coverage, evidence, access, unknown, failure, fragment, trust-root, and
-validation contracts below are typed `ContractSpec` values owned by the layer
-that names them.
+`ContractSpec` is a non-recursive exact logical contract. Its finite identity,
+explicit primary-input domain, finite lower-level observation queries,
+codomain, and mathematical relation are part of equality; it never consumes a
+`SemanticEnvironment`, binding record, another `ContractSpec`, or another
+logical relation. Section 3.3 gives the stratified type and its extensional
+equality. Value-admission, meaning, coverage, evidence, access, unknown,
+failure, fragment, and validation contracts below are typed `ContractSpec`
+values owned by the layer that names them.
 
 ```text
 AbiVersion        = (abi_namespace, exact_version)
@@ -114,23 +112,42 @@ BindingKey        = DeclarationKey
 ServiceKey        = (plugin_key, service_namespace, local_name,
                      exact_service_version, service_role)
 CapabilityKey     = (service_key : ServiceKey, capability_name)
-CertificateKey    = (issuer_scope, certificate_namespace, local_identity)
-MigrationKey      = (owner_scope, migration_namespace, local_identity,
+CertificateIssuer =
+    PLUGIN_CERTIFICATE_ISSUER(PluginKey)
+  | EMBEDDING_POLICY_CERTIFICATE_ISSUER(TrustPolicyKey)
+CertificateKey    = (issuer : CertificateIssuer, certificate_namespace,
+                     local_identity)
+MigrationKey      = (owner_plugin : PluginKey, migration_namespace,
+                     local_identity,
                      exact_migration_version)
 SemanticExtensionKey = (owner_plugin, extension_namespace, local_name,
                         exact_extension_version)
 ProfileDimensionKey = (profile_key, dimension_name)
-ModelContractKey    = (target_semantic_identity, document_namespace,
+SemanticTargetIdentity =
+    BINDING_IDENTITY(BindingKey)
+  | PROFILE_IDENTITY(ProfileKey)
+  | PAIR_IDENTITY(EventScopePairKey)
+ModelContractKey    = (target_semantic_identity : SemanticTargetIdentity,
+                       document_namespace,
                        locale_identity, exact_document_version)
-CompatibilityClaimKey = (owner_scope, claim_namespace, local_identity,
+AliasKey = (owner_plugin : PluginKey, alias_namespace, alias_atom)
+CompatibilityClaimKey = (owner_plugin : PluginKey, claim_namespace,
+                         local_identity,
                          exact_claim_version)
-ProducerIdentity = (producer_namespace, producer_identity, exact_version)
 TrustPolicyKey = (embedding_policy_namespace, local_policy_identity,
                   exact_policy_version)
 TrustRootKey = (trust_policy_key, root_namespace, local_root_identity,
                 exact_root_version)
-SemanticEnvironmentIdentity = IDENTITY_OF(
-  exact SemanticEnvironment fields other than trust_environment)
+ProducerIdentity =
+    PLUGIN_PRODUCER(PluginKey)
+  | EMBEDDING_POLICY_PRODUCER(TrustPolicyKey)
+  | ABI_PRODUCER(AbiVersion)
+IssuerScope =
+    PLUGIN_ISSUER(PluginKey)
+  | EMBEDDING_POLICY_ISSUER(TrustPolicyKey)
+  | ABI_ISSUER(AbiVersion)
+ABI_REASON_ISSUER = ABI_ISSUER(K2_ABI_V0)
+SemanticEnvironmentIdentity = IDENTITY_OF(all exact SemanticEnvironment fields)
 AuthorityFactKey = (authority_ref : AuthorityRef, source_ref : SourceRef,
                     principal : Principal, normative_role : NormativeRole)
 ContractIdentity = IDENTITY_OF(exact complete Contract logical record)
@@ -139,6 +156,20 @@ LexicalBindingKey = (scope_identity : LexicalScopeIdentity, variable : Variable,
                      declared_type : DeclarationKey[TYPE])
 ChoiceBindingKey = (contract_identity : ContractIdentity,
                     choice_id : ChoiceId)
+ContractSpecKey = (owner_plugin : PluginKey, contract_namespace, local_identity,
+                   exact_contract_version, contract_role)
+RequestIdentity = IDENTITY_OF(exact complete request record)
+ResultIdentity = (request_identity : RequestIdentity, result_kind,
+                  exact complete result logical identity)
+CarrierRecordKind =
+    ABI_VERSION | PLUGIN_PACKAGE | SEMANTIC_ENVIRONMENT
+  | DEPENDENCY_OBSERVATION_ENVIRONMENT | DEPENDENCY_ENVIRONMENT
+  | TRUST_ENVIRONMENT | LIFECYCLE | OUTCOME | EVENT_VALUE | TRACE_EVENT
+  | SOURCE_REF | AUTHORITY_REF | EVIDENCE_REF | REASON | CONFLICT
+K1SyntaxKey =
+    K1_PLUGIN(PluginKey) | K1_DECLARATION(DeclarationKey)
+  | K1_SYMBOL(SymbolKey) | K1_EVENT(EventKey) | K1_PROFILE(ProfileKey)
+  | K1_PAIR(EventScopePairKey)
 TrustTarget =
     PAIR_TRUST_TARGET(EventScopePairKey)
   | AUTHORITY_TRUST_TARGET(AuthorityFactKey)
@@ -153,12 +184,77 @@ DependencyKey =
     ABI(AbiVersion) | PLUGIN(PluginKey) | DECLARATION(DeclarationKey)
   | SYMBOL(SymbolKey) | EVENT(EventKey) | PROFILE(ProfileKey)
   | PAIR(EventScopePairKey) | BINDING(BindingKey)
+  | PAIR_DECLARATION(EventScopePairKey)
+  | PAIR_BINDING(EventScopePairKey)
+  | PROFILE_BINDING(ProfileKey)
+  | SERVICE(ServiceKey) | CAPABILITY(CapabilityKey)
+  | CERTIFICATE(CertificateKey) | MIGRATION(MigrationKey)
+  | COMPATIBILITY_CLAIM(CompatibilityClaimKey)
+  | MODEL_CONTRACT(ModelContractKey) | ALIAS(AliasKey)
   | AUTHORITY_FACT(AuthorityFactKey)
   | LEXICAL_BINDING(LexicalBindingKey)
   | CHOICE_BINDING(ChoiceBindingKey)
   | TRUST_POLICY(TrustPolicyKey)
   | TRUST_ROOT(TrustRootKey)
   | SEMANTIC_EXTENSION(SemanticExtensionKey)
+  | CONTRACT_SPEC(ContractSpecKey)
+  | REQUEST(RequestIdentity) | RESULT(ResultIdentity)
+  | CARRIER(CarrierRecordKind, exact finite logical identity)
+
+DependencyObservationKind =
+    IDENTITY_PRESENCE | DECLARATION_SHAPE | TYPE_ADMISSION_FACT
+  | VALUE_RESULT | TERM_RESULT | EVAL_RESULT | EVAL_RESULT_SEQUENCE
+  | PROFILE_RESULT
+  | PAIR_RESULT | AUTHORITY_FACT_STATUS | MIGRATION_STATUS
+  | COMPATIBILITY_STATUS | SEMANTIC_EXTENSION_STATUS
+  | CAPABILITY_STATUS | CERTIFICATE_STATUS
+  | LEXICAL_VALUE | CHOICE_VALUE
+
+ObservationInput = exactly one finite typed projection of K1 `Value`,
+                   `TermResult`, `Eval`, profile/admission subject value, or
+                   finite tuple/sequence thereof suitable for its
+                   DependencyObservationKind; never a ContractSpec, relation,
+                   binding, SemanticEnvironment, or trust record
+DependencyObservationQuery = (
+  expected_kind : DependencyObservationKind,
+  input_projection : exact extensional function from the ContractSpec's
+                     explicit primary input to ObservationInput
+)
+DependencyObservationValue =
+    IDENTITY_PRESENT(exact key identity)
+  | DECLARATION_OBS(exact signature/type/facet/event-class logical value)
+  | TYPE_ADMISSION_OBS(VALUE_ADMITTED | VALUE_NOT_ADMITTED)
+  | VALUE_OBS(Value) | TERM_OBS(TermResult) | EVAL_OBS(Eval)
+  | EVAL_SEQUENCE_OBS(finite sequence(Eval))
+  | PROFILE_OBS(ProfileResult) | PAIR_OBS(PairValidationResult)
+  | AUTHORITY_FACT_OBS(ADMITTED | NOT_ADMITTED)
+  | MIGRATION_OBS(ADMITTED | NOT_ADMITTED)
+  | COMPATIBILITY_OBS(ADMITTED | NOT_ADMITTED)
+  | SEMANTIC_EXTENSION_OBS(ADMITTED | NOT_ADMITTED)
+  | CAPABILITY_OBS(AVAILABLE | MISSING | UNKNOWN)
+  | CERTIFICATE_OBS(ADMITTED | REJECTED_NONDECISIVE)
+  | LEXICAL_VALUE_OBS(Value) | CHOICE_VALUE_OBS(Value)
+  | LOWER_EVALUATION_ERROR(nonempty finset(EvaluationErrorReason))
+  | LOWER_REASONING_ERROR(nonempty finset(ReasoningErrorReason))
+
+DependencyObservationEnvironment = finite exact map
+  DependencyKey -> DependencyObservationValue
+
+ContractSpec[owner_layer] = (
+  contract_key : ContractSpecKey,
+  owner_layer : Delta | Sigma | Service,
+  primary_input_domain : exact typed domain identity containing only K1 values,
+                         results, or finite typed subject tuples and never a
+                         ContractSpec, relation, binding, SemanticEnvironment,
+                         DependencyObservationEnvironment, or trust record,
+  codomain : exact typed K1 value/result/status codomain identity, never a
+             ContractSpec, relation, binding, SemanticEnvironment,
+             DependencyObservationEnvironment, or trust record,
+  observation_queries : finite exact map
+    DependencyKey -> DependencyObservationQuery,
+  logical_relation : exact extensional mathematical relation from
+    (primary_input, DependencyObservationEnvironment) to codomain
+)
 
 CapabilityTarget =
     BINDING_TARGET(BindingKey)
@@ -193,12 +289,13 @@ includes its complete exact environment identity, and the request separately
 binds the full environment; no binding-only or context-free type
 target can stand for one of these kinds. `semanticIdentity(E)` is the exact
 logical identity above: equality is equality of every displayed
-`SemanticEnvironment` field except `trust_environment`, including all derived
-dependency and choice fields. It is a finite logical key, not a byte digest or
-semantic-validity proof. The full `E` and separate exact `TrustEnvironment`
-remain request fields and must validate against this identity. Excluding trust
-from the identity prevents a root permission from recursively containing the
-trust environment that contains that root.
+`SemanticEnvironment` field, including every non-recursive `ContractSpec` and
+all derived dependency and choice fields. It is a finite exact logical
+identity, not a digest, encoding, computability claim, or semantic-validity
+proof. Trust is not a field of `SemanticEnvironment`; the full `E` and the
+separate exact `TrustEnvironment` are request fields. Consequently neither a
+`CapabilityTarget` nor a `TrustTarget` recursively contains the trust map that
+contains it.
 
 `BindingKey` is derived, not independently selected: the sole semantic
 binding for a semantic-bearing declaration has exactly that
@@ -214,8 +311,8 @@ The logical record roles are:
 | identities | the key records above, `EvidenceRef`, reason identities, `SourceRef`, `AuthorityRef`, `AuthorityFactKey`, `TrustRootKey`, derived `ContractIdentity`/`SemanticEnvironmentIdentity`/`LexicalScopeIdentity`, `LexicalBindingKey`, `ChoiceBindingKey`, `ProfileDimensionKey` |
 | declarations | `TypeDeclaration`, `LiteralDeclaration`, `FunctionDeclaration`, `PredicateDeclaration`, `EventDeclaration`, `EventScopePairDeclaration` |
 | meanings | `SemanticBinding`, `EventPairBinding`, `ProfileBinding`, `ModelContract`, `AliasBinding`, `AuthorityFactBinding` |
-| services | `CapabilityDescriptor` |
-| environment/targets | `SemanticEnvironment`, `DependencyEnvironment`, `TrustEnvironment`, `CapabilityTarget`, `TrustTarget`, `ServiceUseSubject`, `LexicalBinding`, `ChoiceBindingEntry` |
+| services | derived `ServiceIdentityRecord`, `CapabilityDescriptor` |
+| environment/targets | `SemanticEnvironment`, `DependencyObservationEnvironment`, `DependencyEnvironment`, `TrustEnvironment`, `Subject`, `RecordIdentity`, `CapabilityTarget`, `TrustTarget`, `ServiceUseSubject`, `LexicalBinding`, `ChoiceBindingEntry` |
 | requests | `ValueAdmissionRequest`, `FunctionRequest`, `PredicateRequest`, `ProfileRequest`, `PairAdmissionRequest`, `AuthorityAdmissionRequest`, `MigrationAdmissionRequest`, `CompatibilityAdmissionRequest`, `SemanticExtensionAdmissionRequest`, `DiscoveryRequest`, `ReasoningRequest` |
 | results | `ValueAdmissionResult`, `TermResult`, `Eval`, derived `FormulaResult`, `ProfileResult`, `PairValidationResult`, `AuthorityAdmissionResult`, `MigrationAdmissionResult`, `CompatibilityAdmissionResult`, `SemanticExtensionAdmissionResult`, `DiscoveryResult`, `ReasoningResult`, `InterfaceFailure` |
 | evidence | `CertificateEnvelope`, `CertificateAdmission`, `TrustRootRecord`, `TrustRootJudgment` |
@@ -329,12 +426,25 @@ EventPairBinding = (
   occurrence_binding_key : BindingKey,
   admission :
     DEFINITIONAL_T3_A1
-    | INDEPENDENT_COHERENCE_PROOF(
-        occurrence_meaning_contract : ContractSpec[Sigma],
+  | INDEPENDENT_COHERENCE_PROOF(
+        occurrence_contract_bundle : OccurrenceSemanticContractBundle,
         certificate_key : CertificateKey,
         validator_key : CapabilityKey),
   proper_semantic_dependencies : finset(DependencyKey),
   dependency_closure : finset(DependencyKey)
+)
+
+OccurrenceSemanticContractBundle = (
+  meaning_contract : ContractSpec[Sigma],
+  permitted_facet_inputs : sequence(finset(Facet)),
+  evidence_schema : ContractSpec[Sigma],
+  access_boundary : ContractSpec[Sigma],
+  unknown_contract : ContractSpec[Sigma],
+  evaluation_error_contract : ContractSpec[Sigma],
+  determinism_rule : SAME_SEMANTIC_INPUTS_SAME_COMPLETE_RESULT,
+  proper_semantic_dependencies : finset(DependencyKey),
+  dependency_closure : finset(DependencyKey),
+  model_contract : ModelContract
 )
 
 ProfileBinding = (
@@ -362,8 +472,13 @@ ModelContract = (
   explanatory_text?
 )
 AliasBinding = (
-  alias_namespace, alias_atom, exact_target_key,
+  alias_key : AliasKey, exact_target_key,
   target_kind, target_exact_version
+)
+ServiceIdentityRecord = (
+  service_key : ServiceKey,
+  abi_version : AbiVersion,
+  plugin_key : PluginKey
 )
 CapabilityDescriptor = (
   capability_key, abi_version, plugin_key,
@@ -410,14 +525,14 @@ SemanticEnvironment = (
   profile_bindings : finset(ProfileBinding),
   authority_facts : finite map AuthorityFactKey -> AuthorityFactBinding,
   semantic_extensions : finset(SemanticExtension),
-  trust_environment : TrustEnvironment,
   lexical_bindings : finite map LexicalBindingKey -> LexicalBinding,
   choice_bindings : finite map ChoiceBindingKey -> ChoiceBindingEntry,
-  mechanically_extracted_dependencies : finset(DependencyKey),
+  mechanically_extracted_dependencies : finset(K1SyntaxKey),
   chi_C : finite map ChoiceId -> Value
 )
 DependencyEnvironment = (
-  syntax_root_keys : finset(DependencyKey),
+  syntax_root_keys : finset(K1SyntaxKey),
+  subject_root_keys : finset(DependencyKey),
   binding_association_edges : finset(DependencyKey * DependencyKey),
   expanded_root_keys : finset(DependencyKey),
   proper_dependencies : finset(DependencyKey),
@@ -437,11 +552,15 @@ ChoiceBindingEntry = (
 )
 TrustRootRecord = (
   trust_root_key : TrustRootKey,
-  owner : ProducerIdentity,
+  owner : EMBEDDING_POLICY_PRODUCER(trust_root_key.trust_policy_key),
   trusted_validators : nonempty finset(CapabilityKey),
   permitted_certificate_kinds : nonempty finset(CertificateKind),
   permitted_targets : nonempty finset(TrustTarget),
   adoption : V0_EXTERNAL_TRUST_PREMISE
+)
+TrustPolicyRecord = (
+  trust_policy_key : TrustPolicyKey,
+  owner : EMBEDDING_POLICY_PRODUCER(trust_policy_key)
 )
 TrustRootJudgment =
     TRUST_ROOT_ADMITTED(TrustRootRecord)
@@ -453,7 +572,7 @@ TrustRootJudgment =
       TrustRootKey, nonempty finset(InterfaceFailureReason))
 TrustEnvironment = (
   trust_policy_key : TrustPolicyKey,
-  policy_owner : ProducerIdentity,
+  policy_owner : EMBEDDING_POLICY_PRODUCER(trust_policy_key),
   root_judgments : finite map TrustRootKey -> TrustRootJudgment
 )
 Diagnostics = (
@@ -490,6 +609,15 @@ nonempty unioned attestation-reference sets.
 an offered but unvalidated extension remains outside the environment and makes
 its target incompatible under section 8.
 
+`ServiceIdentityRecord` is the unique derived projection of one or more
+conformant `CapabilityDescriptor`s with the exact same `service_key`; its ABI
+and plugin fields must equal the corresponding descriptor fields and the key's
+plugin. It is absent when there is no such descriptor, and conflicting
+projections are malformed. It is never supplied as a second package field.
+`TrustPolicyRecord` is analogously the unique derived projection of the exact
+`TrustEnvironment.trust_policy_key` and its structurally fixed owner; it is not
+a plugin-supplied record.
+
 Trust is an independently owned embedding-policy input. `TrustRootKey` and
 `TrustPolicyKey` compare componentwise, including exact versions. For every
 root referenced by a descriptor, certificate, or admission record,
@@ -501,8 +629,10 @@ root referenced by a descriptor, certificate, or admission record,
 under `TRUST_ROOT_ADMITTED`. Certificate use requires a listed validator,
 certificate kind, and exact admission target; ordinary service use requires
 the exact `SERVICE_USE_TRUST_TARGET`. Either use additionally requires the root key's policy
-component to equal `TrustEnvironment.trust_policy_key`, the record owner to
-equal `policy_owner`, and `adoption=V0_EXTERNAL_TRUST_PREMISE`; mismatch is the
+component to equal `TrustEnvironment.trust_policy_key`, the derived record
+owner and `policy_owner` both to equal
+`EMBEDDING_POLICY_PRODUCER(trust_policy_key)`, and
+`adoption=V0_EXTERNAL_TRUST_PREMISE`; mismatch is the
 incompatible judgment. A listed validator is not thereby available or sound; all
 ordinary descriptor, fragment, support, and invocation checks still apply.
 `TrustTarget` equality is tag and payload equality. Its six admission tags
@@ -525,17 +655,15 @@ authorized by a root is never invoked to admit that root. A trust root has no
 `NormativeRole` and cannot `REQUIRE`, `AUTHORIZE`, or `BIND_CHOICE`.
 Bootstrap terminates at the adopted external input, not a plugin assertion.
 
-For pair, authority, migration, compatibility, and semantic-extension
-admission, `producerOf(validator_key)`, `producerOf(certificate_key)`, the
-root `owner`, and every producer of the admission subjects are exact
-`ProducerIdentity` values. Conformance requires the validator producer to be
-outside the subject-producer set, and the embedding policy/root owner to
-differ from every subject and validator producer. A certificate issuer may be
-a subject producer, but that fact grants no trust and cannot relax the
-independent validator/root checks. These
-independence inequalities, plus an already admitted exact root scoped to that
-validator, kind, and target, are mandatory. Equality between a
-producer-supplied trust claim and a descriptor is neither trust nor admission.
+Section 3.3 defines total structural `producerOf` and `subjectProducerSet`
+equations. For pair, authority, migration, compatibility, semantic-extension,
+and every other admission subject, conformance requires the validator producer
+to be outside that exact subject-producer set and requires the derived
+embedding-policy producer of the root to differ from every subject, validator,
+and plugin-certificate producer. A certificate issuer may otherwise also be a
+subject producer, but that fact grants no trust and cannot relax these checks.
+The inequalities and an already admitted exact root scoped to the validator,
+kind, and target are mandatory. No owner or producer is a free assertion.
 
 For literal bindings, `meaning_contract` returns one admitted value and
 `unknown_contract` is exactly `NOT_APPLICABLE`. For functions it maps
@@ -543,8 +671,10 @@ positional admitted values to `TermResult` and has
 `unknown_contract=NOT_APPLICABLE`. For predicates it maps positional
 admitted values to the exact K1 `Eval`. Evidence and access contracts may be
 the exact empty contract, but never omitted. A pair-derived occurrence meaning
-is owned only by `EventPairBinding`; a second ordinary predicate meaning for
-that occurrence key conflicts.
+is the total `OccurrenceBindingProjection` of §7.2, owned only by
+`EventPairBinding`; it contains every ordinary binding field and the exact
+model projection. A second ordinary predicate meaning for that occurrence key
+conflicts.
 
 `SemanticEnvironment.lexical_bindings` is the exact finite
 variable/type/value environment admitted for the request. Its mechanical
@@ -587,8 +717,8 @@ semantic-extension admission request.
 The target projection removes only the already separately bound environment
 identity; it preserves the exact binding, type, profile, pair, or
 environment-judgment subjects. Each descriptor root is usable for `r` only if
-`r.trust_environment` equals `r.semantic_environment.trust_environment`, has
-the descriptor root under `TRUST_ROOT_ADMITTED`, and that record permits the
+the separately carried `r.trust_environment` has the descriptor root under
+`TRUST_ROOT_ADMITTED`, and that record permits the
 exact capability, judgment, service-use subject, and environment identity.
 The root policy owner must differ from the capability producer and every
 non-trust producer represented in the target and
@@ -603,6 +733,26 @@ required root makes the capability incompatible for this request and yields
 `EVALUABILITY_UNKNOWN`; root discovery failure yields `DISCOVERY_FAILED` and
 no evaluability result. None yields a value, truth, profile, pair, admission,
 consistency, or relation conclusion.
+
+Equivalently, with `rootProducer(k)=producerOf(k)` and singleton capability
+producer sets, ordinary service use requires
+
+```text
+rootProducer(root) intersect
+  (subjectProducerSet(subjectOf(r),U) union producerOf(r.capability_key)) = {}
+```
+
+Certificate/admission use additionally requires
+
+```text
+producerOf(r.validator_key) intersect subjectProducerSet(subjectOf(r),U) = {}
+rootProducer(root) intersect
+  (subjectProducerSet(subjectOf(r),U) union producerOf(r.validator_key)
+   union producerOf(certificate_key)) = {}
+```
+
+These sets are recomputed structurally. A producer field, certificate claim,
+or target list cannot alter them.
 
 ### 2.4 Independent lifecycle state
 
@@ -704,10 +854,10 @@ skipped because the target itself needs no declaration or binding coordinate.
 | successful admission/reasoning invocation returns an admitted decisive conclusion permitted by its exact receiving rule | `COMPLETED(conformant_result)` replaces `INVOCABLE_FOR(r)` | exactly the named pair/admission/consistency/relation/internal conclusion |
 | compatible partial or out-of-complete-fragment service is invoked and conformantly completes inconclusively, including `*_NOT_ADMITTED`, pair rejection, reasoning inconclusive, or profile unknown | `COMPLETED(conformant_nondecisive_result)` replaces `INVOCABLE_FOR(r)` | applicable logical/profile unknown only where K1 defines it; an admission rejection grants no conclusion |
 | conformant denotational or admission error tag is returned | `COMPLETED(conformant_error_result)` replaces `INVOCABLE_FOR(r)` | exact evaluation/reasoning error family and no truth/profile/relation/admission conclusion |
-| complete in-fragment service completes inconclusively | `INVOCATION_FAILED(REASONING_PROTOCOL,...)` | `REASONING_ERROR`, never logical/profile unknown |
-| result carrier is malformed or shape-valid but semantically unequal to its exact expected result/receiving rule | `INVOCATION_FAILED(PROTOCOL,{MALFORMED_RESULT})` replaces `INVOCABLE_FOR(r)` | service-role mapping in §5.4; the returned value/truth/admission is discarded |
-| concrete invocation, transport, or protocol fails before a conformant result | `INVOCATION_FAILED(EVALUATION|PROTOCOL|TRANSPORT,...)` | `EVALUATION_ERROR`; no truth/profile/relation |
-| reasoning or admission invocation/validator fails before a conformant result | `INVOCATION_FAILED(REASONING|REASONING_PROTOCOL|ADMISSION|PROTOCOL|TRANSPORT,...)` | exact `REASONING_ERROR` or role-specific evaluation error; no consistency/profile/relation/admission |
+| complete in-fragment service completes inconclusively | construct the exact reasoning-role `PROTOCOL_FAILURE` with `NO_RESULT_SENTINEL`, then `INVOCATION_FAILED(REASONING_PROTOCOL,...)` | pointwise `REASONING_ERROR`, never logical/profile unknown |
+| result carrier is malformed or shape-valid but semantically unequal to its exact expected result/receiving rule | exact `resultFailure` yields `MALFORMED_RESULT(MALFORMED_CARRIER)` or `MALFORMED_RESULT(SEMANTIC_MISMATCH)` and replaces `INVOCABLE_FOR(r)` | total pointwise role projection in §5.4; the returned value/truth/admission is discarded |
+| one of the four evaluation roles fails before a conformant result | `INVOCATION_FAILED(EVALUATION|PROTOCOL|TRANSPORT,...)` with exact canonical interface reasons | §5.4 `evaluationReasons` and exact role carrier; no truth/profile/relation |
+| one of the seven reasoning/admission roles fails before a conformant result | `INVOCATION_FAILED(REASONING|REASONING_PROTOCOL|ADMISSION|PROTOCOL|TRANSPORT,...)` with exact canonical interface reasons | §5.4 `reasoningReasons` and exact role carrier; no consistency/profile/relation/admission |
 
 Completion classification is exhaustive over the result unions in §§5--6:
 
@@ -794,15 +944,17 @@ unambiguous abbreviation for `K2-Axx`.
 | `EventScopePairKey.{plugin_key,pair_namespace,local_name}` | `REQUIRED_SEMANTIC` | Delta | exact companion identity | declarer | pair binding/closure | exact equality | plugin version exact | malformed/open by layer | structure/closure | A13 |
 | `BindingKey` | `DERIVED` | Sigma | unique meaning per declaration | binding validator | all meaning consumers | equals declaration key | no independent version | impossible to omit separately | structure | A01 |
 | `ServiceKey.{plugin_key,service_namespace,local_name,exact_service_version,service_role}`; `CapabilityKey.{service_key,capability_name}` | `REQUIRED_SEMANTIC` | Service | exact capability identity | service declarer | discovery/request | component/kind equality | exact only | evaluability missing | evaluability | A02 |
-| `CertificateKey.{issuer_scope,certificate_namespace,local_identity}` | `REQUIRED_SEMANTIC` | Service | stable certificate identity | certificate issuer | admission validator | exact issuer-scoped equality | bound environment supplies version | malformed certificate | reasoning | A17 |
-| `MigrationKey.{owner_scope,migration_namespace,local_identity,exact_migration_version}` | `REQUIRED_SEMANTIC` | Sigma | explicit evolution identity | migration author | migration validator | component equality | exact source/target remain separate | no migration | compatibility | A20 |
+| `CertificateIssuer`; `CertificateKey.{issuer,certificate_namespace,local_identity}` | `REQUIRED_SEMANTIC` | Service/embedding policy | stable exactly owned certificate identity | typed certificate issuer | admission validator | exact issuer structural equality | issuer producer and bound environment exact | malformed certificate | reasoning | A17 |
+| `MigrationKey.{owner_plugin,migration_namespace,local_identity,exact_migration_version}` | `REQUIRED_SEMANTIC` | Sigma | explicit plugin-owned evolution identity | migration owner plugin | migration validator | component equality and derived owner | exact source/target remain separate | no migration | compatibility | A20 |
 | `SemanticExtensionKey.{owner_plugin,extension_namespace,local_name,exact_extension_version}` | `REQUIRED_SEMANTIC` | owning layer | namespaced semantic extension identity | extension owner | package validator | component equality | exact owner/version | no extension | compatibility | A20 |
-| `ProducerIdentity.{producer_namespace,producer_identity,exact_version}`; `TrustPolicyKey.{embedding_policy_namespace,local_policy_identity,exact_policy_version}`; `TrustRootKey.{trust_policy_key,root_namespace,local_root_identity,exact_root_version}` | `REQUIRED_SEMANTIC` | embedding policy | exact independent trust ownership/root identity | embedding policy | discovery/invocation/certificate/admission gates | component equality and use-specific producer independence | versions exact | root absent; no compatible service or admission | trust/evaluability/reasoning | A02,A17 |
+| `TrustPolicyKey.{embedding_policy_namespace,local_policy_identity,exact_policy_version}`; `TrustRootKey.{trust_policy_key,root_namespace,local_root_identity,exact_root_version}`; `IssuerScope` | `REQUIRED_SEMANTIC` | embedding policy/K1 carrier | exact typed issuer and independent trust identities | embedding policy or exact issuer | discovery/invocation/certificate/admission gates | component/tag equality | versions exact | root absent; no compatible service or admission | trust/evaluability/reasoning | A02,A14,A17 |
+| `ProducerIdentity`; `TrustPolicyRecord.{trust_policy_key,owner}`; `TrustRootRecord.owner`; `TrustEnvironment.policy_owner`; total `producerOf`; total `subjectProducerSet` | `DERIVED` | ownership validation | no producer/owner assertion and exact independence | structural key/record/subject recursion | all trust/service/admission gates | recompute total finite producer sets and exact inequalities | owner keys/versions exact | cannot be supplied; malformed/conflict on mismatch | structure/trust/reasoning | A13,A14,A17,A20 |
 | `AuthorityFactKey.{authority_ref,source_ref,principal,normative_role}` | `REQUIRED_SEMANTIC` | Sigma | exact four-tuple fact identity | authority subject former | closure/adoption/choice | tuple equality | referenced identities exact | open/no fact | closure/reasoning | A14 |
-| `ContractIdentity`; `SemanticEnvironmentIdentity`; `LexicalScopeIdentity.{judgment_or_binder_kind,subjects}`; `LexicalBindingKey.{scope_identity,variable,declared_type}`; `ChoiceBindingKey.{contract_identity,choice_id}` | `DERIVED` | K1 carrier | exact observable semantic-environment/subject/scope/choice coordinate identity | exact subject/environment derivation | support/closure/trust/reasoning | complete logical fields (excluding trust for the non-recursive environment identity), then component equality | subject/type exact | cannot be supplied | structure/closure/trust | A18 |
-| `ContractSpec.{contract_key,owner_layer,domain,codomain,logical_relation}`; `ModelContractKey.{target_semantic_identity,document_namespace,locale_identity,exact_document_version}`; `CompatibilityClaimKey.{owner_scope,claim_namespace,local_identity,exact_claim_version}` | `REQUIRED_SEMANTIC` | record-declared | exact logical contract and auxiliary identities | owning declarer | applicable validator | typed extensional equality | enclosing exact versions bind | malformed if required | structure | A05 |
-| `ContractSpec.dependency_support` | `DERIVED` | contract owner | total exact trust-free logical-relation dependencies | section 3.3 extensional rule | every dependency consumer | recompute `freeDependencies(logical_relation)` and require no trust coordinate | enclosing contract identity/version | cannot be producer-supplied | layer-specific structure/closure/evaluability | A06 |
-| `DependencyKey.{tag,exact_key}` | `DERIVED` | K1 carrier | kind-separated exact dependency | mechanical extraction | closure/request/certificate | tag and key equality | key version exact | cannot be supplied | structure/closure | A06 |
+| `ContractIdentity`; `SemanticEnvironmentIdentity`; `RequestIdentity`; `ResultIdentity`; `ExpectedResultContractIdentity`; `OffendingResultIdentity`; `LexicalScopeIdentity.{judgment_or_binder_kind,subjects}`; `LexicalBindingKey.{scope_identity,variable,declared_type}`; `ChoiceBindingKey.{contract_identity,choice_id}` | `DERIVED` | K1 carrier | exact finite non-recursive environment/subject/request/result/scope identities | exact structural derivation | support/closure/trust/reasoning/failure | complete logical fields and extensional ContractSpec relations, then component/tag equality | subject/type exact | cannot be supplied | structure/closure/trust/protocol | A10,A17,A18 |
+| `ContractSpec.{contract_key,owner_layer,primary_input_domain,codomain,observation_queries,logical_relation}`; `DependencyObservationKind`; `DependencyObservationQuery.{expected_kind,input_projection}`; `SemanticTargetIdentity`; `ModelContractKey.{target_semantic_identity,document_namespace,locale_identity,exact_document_version}`; `CompatibilityClaimKey.{owner_plugin,claim_namespace,local_identity,exact_claim_version}` | `REQUIRED_SEMANTIC` | record-declared | stratified exact logical contract and auxiliary identities | owning declarer | applicable validator | typed extensional equality; relation takes only explicit input plus lower observations | enclosing exact versions bind | malformed if required | structure | A05,A06 |
+| `ObservationInput`; `DependencyObservationValue`; `support(ContractSpec)`; `freeDependencies`; `DependencyObservationEnvironment`; topological `dependencyObservations` | `DERIVED` | contract validation | total exact finite lower-level support without environment/contract recursion | section 3.3 extensional/topological rule | every denotational consumer | query-domain equals extensional support; exact typed finite-map equality; acyclic predecessors | enclosing contract identity/version | cannot be producer-supplied; missing gives exact malformed/open/evaluability status | layer-specific structure/closure/evaluability | A06,A10 |
+| `DependencyKey.{tag,exact_key}`; `K1SyntaxKey.{tag,exact_key}` | `DERIVED` | K1 carrier | kind-separated semantic roots with frozen syntax facet retained | mechanical extraction/tag lift | closure/request/certificate | tag and key equality | key version exact | cannot be supplied | structure/closure | A06 |
+| `RecordIdentity`; `recordIdentity`; `rootKeys`; `subjectReferences`; `Subject`; `subjectOf`; `subjectRoots`; `required`; association/`recordAt` functions | `DERIVED` | K1/interface validation | exhaustive identity/root/subject algebra and exact missing/cycle status | structural equations in §3.3 | closure/request/certificate/trust | total tagged equations, singleton roots, exact references and least acyclic closure | all embedded versions exact | cannot be supplied; malformed/open/missing per root kind | structure/closure/evaluability | A06,A17,A20 |
 | `CapabilityTarget.{tag,payload}` | `REQUIRED_SEMANTIC` | Service | exact binding/type/profile/pair/environment target with non-recursive environment identity | service/request former | discovery/invocation/admission | tag-specific payload/environment-identity equality | every payload version exact | target/service absent | evaluability/protocol | A03 |
 | `TrustTarget.{tag,payload}`; `ServiceUseSubject.{tag,payload}` | `REQUIRED_SEMANTIC` | embedding policy | exact non-recursive certificate and ordinary-service use scope | embedding policy owner | discovery/invocation/certificate admission | tag/payload equality, exact capability/judgment/subject/environment identity, full request environment and producer-independence checks | subject versions exact | root unusable; capability incompatible/unknown/failure by root state | trust/evaluability/reasoning | A02,A17 |
 | `PluginPackage.{abi_version,plugin_key,declarations,pair_declarations,bindings,pair_bindings,profile_bindings,model_contracts,aliases,services,certificates,authority_facts,compatibility_claims,migrations,semantic_extensions}` | `REQUIRED_SEMANTIC` | projected | whole-package separation | package author | discovery/composition | package conformance | set members exact | empty sets mean absent roles | structure/conflict | A01 |
@@ -818,20 +970,23 @@ unambiguous abbreviation for `K2-Axx`.
 | `EventScopePairDeclaration.{scope_signature,occurrence_signature,scope_facets,occurrence_facets}` | `DERIVED` | Delta | frozen companion shapes | declaration validator | pair consumer | derive from member declarations | no identity contribution | cannot be supplied | structure | A13 |
 | `SemanticBinding.{binding_key,declaration_key,binding_kind,meaning_contract,permitted_facet_inputs,evidence_schema,access_boundary,unknown_contract,evaluation_error_contract,determinism_rule}` | `REQUIRED_SEMANTIC` | Sigma | exact meaning independent of service | meaning author | closure/evaluator/model contract | binding conformance | binding key derived, plugin exact | open | closure/structure | A05 |
 | `SemanticBinding.{proper_semantic_dependencies,dependency_closure}` | `DERIVED` | Sigma | exact proper support and well-founded transitive semantics | section 3.3/environment validator | closure/request | roots/proper edges then least closure | set exact; no self-edge | cannot be caller-omitted | structure/closure | A06 |
-| `EventPairBinding.{pair_key,scope_binding_key,occurrence_binding_key,admission}` | `REQUIRED_SEMANTIC` | Sigma | full-result pair coherence | meaning/proof author | closure/conditional forms | section 7 admission | exact pair bindings | open | closure/reasoning | A13 |
+| `EventPairBinding.{pair_key,scope_binding_key,occurrence_binding_key,admission.tag,admission.certificate_key,admission.validator_key}` | `REQUIRED_SEMANTIC` | Sigma | full-result pair coherence path and exact proof references | meaning/proof author | closure/conditional forms | section 7 admission | exact pair bindings/certificate/validator | open | closure/reasoning | A13 |
+| `OccurrenceSemanticContractBundle.{meaning_contract,permitted_facet_inputs,evidence_schema,access_boundary,unknown_contract,evaluation_error_contract,determinism_rule,model_contract}` | `REQUIRED_SEMANTIC` | Sigma | complete independent occurrence semantics before coherence proof | pair meaning author | pair admission/occurrence invocation/model projection | exact occurrence declaration/facets/contracts/model plus admitted universal full-Eval proof | pair/occurrence versions exact | missing/unequal bundle leaves no projection and is incompatible | structure/closure/reasoning | A13 |
 | `EventPairBinding.{proper_semantic_dependencies,dependency_closure}` | `DERIVED` | Sigma | pair/member/event/support proper dependencies | pair validator | closure/request | root excluded then least closure | set exact; no pair self-edge | cannot be omitted | structure/closure | A13 |
+| `OccurrenceSemanticContractBundle.{proper_semantic_dependencies,dependency_closure}`; `OccurrenceBindingProjection`; `occurrenceMeaningIdentity`; `occurrenceBindingIdentity`; `T3_A1_MEANING_LIFT`; `T3_A1_EVIDENCE_LIFT`; `T3_A1_ACCESS_LIFT`; `T3_A1_UNKNOWN_LIFT`; `T3_A1_ERROR_LIFT`; `T3_A1_DEPENDENCY_LIFT`; `T3_A1_MODEL_LIFT` | `DERIVED` | Sigma validation | complete pair-owned ordinary-binding projection with exact empty/multi-event T3/A1 semantics | §7.2 constructors | `recordAt(BINDING occurrence)`, invocation, closure, model consumer | derive every ordinary binding/model field; independent bundle must project to same shape and prove full-Eval coherence | pair/occurrence/scope versions exact | no projection/open or incompatible; never ordinary fallback | structure/closure/evaluation/reasoning | A13 |
 | `ProfileBinding.{profile_key,dimensions,coverage_meaning,evidence_schema,unknown_contract,evaluation_error_contract,reasoning_error_contract}` | `REQUIRED_SEMANTIC` | Sigma | exact profile-relative meaning | profile author | closure/checker | profile conformance | exact ProfileKey | open | closure/profile | A15 |
 | `ProfileBinding.{proper_semantic_dependencies,dependency_closure}` | `DERIVED` | Sigma | proper support and full profile dependencies | section 3.3/environment validator | closure/checker | root excluded then least closure | set exact; no profile self-edge | cannot be omitted | structure/closure | A06 |
 | `ModelContract.{model_contract_key,target_binding_key,exact_symbol_key,exact_signature,exact_facet_positions,evidence_contract,unknown_contract,error_contract,capability_summaries,semantic_contract_reference}` | `REQUIRED_SEMANTIC` | Sigma | same model/machine meaning | documentation author | binding analysis | exact projection match | target exact/versioned | stale/missing document is mismatch | structure | A05 |
 | `ModelContract.explanatory_text` | `OPTIONAL_DIAGNOSTIC` | Diagnostic | wording creates no denotation/authority | documentation author | human/model presentation | target noninterference | not identity | no semantic effect | none | A05 |
-| `AliasBinding.{alias_namespace,alias_atom,exact_target_key,target_kind,target_exact_version}` | `REQUIRED_SEMANTIC` | Sigma | explicit target-preserving alias | alias author | discovery/binding analysis | exact target validation | alias never substitutes version | no alias | structure | A04 |
+| `AliasKey.{owner_plugin,alias_namespace,alias_atom}`; `AliasBinding.{alias_key,exact_target_key,target_kind,target_exact_version}` | `REQUIRED_SEMANTIC` | Sigma | explicit owned target-preserving alias | alias owner plugin | discovery/binding analysis | exact owner/target validation | alias never substitutes version | no alias | structure | A04 |
 | `CapabilityDescriptor.{capability_key,abi_version,plugin_key,service_role,capability_class,supported_judgments,supported_targets,sound_fragment,complete_fragment,dependency_scope,required_evidence,required_trust_roots,failure_contract}` | `REQUIRED_SEMANTIC` | Service | capability-relative targeted admission and nonempty ordinary-use trust | service declarer | discovery/request/certificate | role/judgment/target/environment/fragment/scope/root-use conformance | exact service/plugin/ABI/targets/roots | evaluability missing/unknown/failure by root state | evaluability/reasoning/trust | A16 |
+| `ServiceIdentityRecord.{service_key,abi_version,plugin_key}` | `DERIVED` | Service | exact service-root presence separate from capability roots | conformant capability projections | dependency/discovery lookup | unique projection from one or more same-service descriptors | exact ServiceKey/ABI/PluginKey | absent service or malformed conflicting projection | evaluability/structure | A06,A16 |
 | `CapabilityDescriptor.{proper_semantic_dependencies,dependency_closure}` | `DERIVED` | Service | exact proper support of fragments/evidence/roots/failure | section 3.3 | discovery/request/certificate | roots/proper edges then least closure | target/key versions exact | cannot be supplied | capability incompatible/evaluability | A06 |
-| `SemanticEnvironment.{abi_version,declarations,pair_declarations,bindings,pair_bindings,profile_bindings,authority_facts,semantic_extensions,trust_environment,lexical_bindings}` | `REQUIRED_SEMANTIC` | projected | one fully typed exact Delta/Sigma/trust/scope | kernel request former plus embedding policy | closure/request/certificate | exact typed set/map equality, trust-free denotational support and closure | exact keys/versions | open/malformed or root absent/incompatible/uncertain/failure in independent service use | structure/closure/trust | A17 |
+| `SemanticEnvironment.{abi_version,declarations,pair_declarations,bindings,pair_bindings,profile_bindings,authority_facts,semantic_extensions,lexical_bindings}` | `REQUIRED_SEMANTIC` | projected | one fully typed exact non-recursive Delta/Sigma/scope environment | kernel request former | closure/request/certificate | exact typed set/map and extensional non-recursive ContractSpec equality | exact keys/versions | open/malformed; trust remains separate | structure/closure | A17 |
 | `SemanticEnvironment.{choice_bindings,mechanically_extracted_dependencies,chi_C}` | `DERIVED` | K1 carrier | choice records/dependencies/map cannot be overridden | kernel derivation | requests/certificates | recomputation equality | Contract-bound | cannot be supplied | structure/closure | A06 |
-| `DependencyEnvironment.{syntax_root_keys,binding_association_edges,expanded_root_keys,proper_dependencies,transitive_dependency_closure}` | `DERIVED` | K1 carrier | frozen K1 syntax roots plus non-overridable declaration/symbol-to-binding reachability and total proper-edge closure | kernel extraction/association | closure/service/admission | exact syntax roots, total `recordAt`, derived association, reachable proper edges and least closure; reject malformed declaration mapping/self/cycle | exact sets/edge pairs | cannot be supplied or reduced; reachable missing binding stays open | structure/closure | A06 |
+| `DependencyEnvironment.{syntax_root_keys,subject_root_keys,binding_association_edges,expanded_root_keys,proper_dependencies,transitive_dependency_closure}` | `DERIVED` | K1 carrier | frozen K1 syntax roots plus exhaustive subject/record roots, association reachability and proper closure | kernel extraction/association | closure/service/admission | exact K1 roots, total `subjectRoots`/`recordAt`, derived associations, reachable proper edges and least closure; reject malformed mapping/self/cycle | exact sets/edge pairs | cannot be supplied or reduced; reachable missing binding stays open | structure/closure | A06 |
 | `LexicalBinding.{lexical_binding_key,admitted_value}`; `ChoiceBindingEntry.{choice_binding_key,declared_type,admitted_value,controller,source_ref,authority_fact_key}` | `REQUIRED_SEMANTIC` | K1 carrier | exact typed scope and Contract choice records | subject/Contract former | environment/support/chi derivation | type, controller, source and authority checks | subject/key versions exact | malformed/open | structure/closure | A18 |
-| `TrustRootRecord.{trust_root_key,owner,trusted_validators,permitted_certificate_kinds,permitted_targets,adoption}`; `TrustEnvironment.{trust_policy_key,policy_owner}` | `REQUIRED_SEMANTIC` | embedding policy | independent exact v0 certificate and ordinary-service trust premise/scope | embedding policy owner | discovery/invocation/certificate/admission gates | exact versions, external adoption, use-specific scope and independence | policy/root versions exact | root absent; no compatible service or admission | trust/evaluability/reasoning | A02,A17 |
+| `TrustRootRecord.{trust_root_key,trusted_validators,permitted_certificate_kinds,permitted_targets,adoption}`; `TrustEnvironment.trust_policy_key` | `REQUIRED_SEMANTIC` | embedding policy | independent exact v0 certificate and ordinary-service trust premise/scope | embedding policy owner | discovery/invocation/certificate/admission gates | exact versions, external adoption, use-specific scope and independence | policy/root versions exact | root absent; no compatible service or admission | trust/evaluability/reasoning | A02,A17 |
 | `TrustRootJudgment.{TRUST_ROOT_ADMITTED.record,TRUST_ROOT_ABSENT.key,TRUST_ROOT_UNDECIDED.{key,reasons},TRUST_ROOT_FAILED.{key,failure},TRUST_ROOT_INCOMPATIBLE.{key,reasons}}`; `TrustEnvironment.root_judgments` | `DERIVED` | embedding policy validation | total root admission/absence/uncertainty/failure state | trust environment validator | discovery/invocation/certificate gates | exact map and judgment derivation for every referenced root | exact TrustRootKey | cannot be omitted/defaulted | trust/evaluability/reasoning | A02,A17 |
 | `ValueAdmissionRequest.{abi_version,type_key,value,semantic_environment,trust_environment,dependency_environment,capability_target,capability_key}` | `REQUIRED_SEMANTIC` | projected Delta/Service/embedding policy | typed contextual targeted value admission | request former | admission service | exact expected admission plus type, environments, support, target, role, fragment, root and scope together | exact type/environments/capability | malformed or evaluability missing/unknown/failure | protocol/evaluation/evaluability/trust | A07 |
 | `FunctionRequest.{abi_version,symbol_key,arguments}`; `PredicateRequest.{abi_version,symbol_key,arguments}` | `REQUIRED_SEMANTIC` | Delta | exact positional typed invocation | kernel request former | evaluator | signature/admission | exact symbol/version | malformed request | protocol | A07 |
@@ -883,7 +1038,7 @@ unambiguous abbreviation for `K2-Axx`.
 | `ReasoningResult.COMPLETED_INCONCLUSIVE.unknown_reasons` | `REQUIRED_SEMANTIC` | K1 carrier | invoked partial/outside-complete inconclusiveness | reasoner | kernel reasoning boundary | nonempty reasons plus compatible invoked capability | request-bound | malformed result | reasoning/protocol | A19 |
 | `ReasoningResult.EVALUATION_ERROR.evaluation_errors` | `REQUIRED_SEMANTIC` | K1 carrier | concrete validation failure | reasoner/admission | kernel reasoning boundary | nonempty stable errors | request-bound | malformed result | evaluation | A17 |
 | `ReasoningResult.REASONING_ERROR.reasoning_errors` | `REQUIRED_SEMANTIC` | K1 carrier | service/validator/protocol failure | reasoner/admission | kernel reasoning boundary | nonempty stable errors | request-bound | malformed result | reasoning | A16 |
-| `EvidenceRef.{issuer_scope,evidence_namespace,local_identity,schema_binding}`; all reason records `UnknownReason`, `EvaluationErrorReason`, `ReasoningErrorReason`, `CertificateRejectionReason`, and `InterfaceFailureReason` fields `{issuer_scope,taxonomy_key,semantic_parameters}` | `REQUIRED_SEMANTIC` | K1 carrier | stable set-member identities | meaning/service/validator | result/certificate validators | component equality against owning Sigma/Service contract | issuer and referenced contract exact | malformed result | evaluation/reasoning/protocol | A11 |
+| `EvidenceRef.{issuer_scope,evidence_namespace,local_identity,schema_binding}`; `UnknownReason`, `EvaluationErrorReason`, `ReasoningErrorReason`, and `CertificateRejectionReason` fields `{issuer_scope,taxonomy_key,semantic_parameters}`; `InterfaceFailureReason.{issuer_scope,reason_code,capability_identity,request_identity,expected_contract_identity,offending_result_identity}` | `REQUIRED_SEMANTIC` | K1 carrier | stable set-member identities and canonical ABI interface failures | meaning/service/validator or fixed ABI constructor | result/certificate validators/status mapper | component equality; interface reason requires total canonical constructor | issuer and referenced contract/request/result exact | malformed result/failure | evaluation/reasoning/protocol | A10,A11 |
 | `ConflictRef.{conflict_kind,involved_identities}` | `REQUIRED_SEMANTIC` | K1 carrier | exact order-independent conflict identity | composition validator | discovery/lifecycle | tag plus exact set equality | involved versions exact | no conflict | structure/compatibility | A20 |
 | `CertificateEnvelope.{certificate_key,certificate_kind,request_binding,subjects,environment,capability_key,fragment,dependencies,claimed_conclusion,validator_key,trust_root_key,abstraction_class,payload,evidence_refs}` | `REQUIRED_SEMANTIC` | Service | exact proof admission | certificate issuer | admission | kind-specific rule, exact root scope and producer independence | exact env/capability/root | no admission | trust/reasoning | A17 |
 | `CertificateAdmission.ADMITTED.{certificate_key,admitted_conclusion}` | `REQUIRED_SEMANTIC` | K1 carrier | admitted proof/witness/counterexample remains kind-specific | trusted validator | kernel judgment gate | exact certificate/kind/conclusion receiving rule | certificate-bound | no admission | reasoning | A17 |
@@ -892,7 +1047,7 @@ unambiguous abbreviation for `K2-Axx`.
 | `CertificateAdmission.EVALUATION_ERROR.{certificate_key,evaluation_errors}` | `REQUIRED_SEMANTIC` | K1 carrier | concrete validator failure proves nothing | trusted validator | kernel judgment gate | nonempty stable errors | certificate-bound | no admission | evaluation | A17 |
 | `CertificateAdmission.REASONING_ERROR.{certificate_key,reasoning_errors}` | `REQUIRED_SEMANTIC` | K1 carrier | validator/protocol failure proves nothing | trusted validator | kernel judgment gate | nonempty stable errors | certificate-bound | no admission | reasoning | A17 |
 | `EventValue.{event_key,payload}`; `TraceEvent.{event_value,actor?}` | `REQUIRED_SEMANTIC` | Delta | typed event and optional actor | outcome former | outcome/auth/pair | event admission | exact EventKey | malformed outcome | evaluation | A12 |
-| `SourceRef.{issuer_scope,source_kind,stable_source_identity,provenance_facts}`; `AuthorityRef.{authority_namespace,stable_attestation_identity}` | `REQUIRED_SEMANTIC` | Sigma | provenance separate from authority | binding/authority source | Origins/closure | self-contained/exact | issuer/attestation identity exact | source unresolved before Contract; authority open | representation/closure | A14 |
+| `SourceRef.{issuer,source_kind,stable_source_identity,provenance_facts}`; `AuthorityRef.{owner,authority_namespace,stable_attestation_identity}` | `REQUIRED_SEMANTIC` | Sigma | typed producer-owned provenance separate from authority | exact issuer/owner | Origins/closure/producer derivation | self-contained/exact owner and component equality | issuer/owner/attestation identity exact | source unresolved before Contract; authority open | representation/closure | A14 |
 | `AuthorityFactBinding.authority_fact_key` | `REQUIRED_SEMANTIC` | Sigma | exact adoption/choice fact identity | authority subject former | closure/adoption | exact admitted tuple | AuthorityFactKey exact | open/no fact | closure/reasoning | A14 |
 | `AuthorityFactBinding.admitted_attestation_refs` | `DERIVED` | Sigma admission | nonempty union of independently admitted evidence | authority validators/composition | closure/audit | group by fact key and union admitted certificate refs | certificate sets not identity | no fact if empty | closure/reasoning | A14 |
 | `CompatibilityClaim.{claim_key,source_abi,target_abi,source_keys,target_keys,compatibility_contract,certificate_key,validator_key,trust_root_key}` | `REQUIRED_SEMANTIC` | Service | protocol compatibility only | claimant | discovery/migration | exact request/result/certificate/root admission | versions remain distinct | no compatibility | compatibility/reasoning | A20 |
@@ -900,7 +1055,8 @@ unambiguous abbreviation for `K2-Axx`.
 | `MigrationDeclaration.{validator_key,trust_root_key}` | `REQUIRED_SEMANTIC` | Service | independently trusted migration validation | migration author | certificate gate | exact target/root scope and producer independence | exact capability/root version | no migration | compatibility/reasoning | A20 |
 | `SemanticExtension.{extension_key,target_record_identity,owner_layer,semantic_effect,payload}` | `REQUIRED_SEMANTIC` | declared owner | explicit semantic extension | extension owner | package validator | exact support, target and owner rule | exact namespace/version | no extension | compatibility | A20 |
 | `SemanticExtension.{certificate_key,validator_key,trust_root_key}` | `REQUIRED_SEMANTIC` | Service | independently trusted semantic-extension validation | extension owner | package validator | exact admission target/root scope and producer independence | exact certificate/capability/root versions | incompatible if absent/unadmitted | compatibility/reasoning | A20 |
-| `InterfaceFailure.{domain,kind,reasons}` | `REQUIRED_SEMANTIC` | K1 carrier | failure outside truth | interface boundary | lifecycle/status mapper | nonempty/domain mapping | request-bound | no logical result | protocol/transport | A10 |
+| `InterfaceFailure.{domain,kind,reasons}`; `InterfaceFailureCode` | `REQUIRED_SEMANTIC` | K1 carrier | exact domain/kind failure outside truth | interface boundary | lifecycle/status mapper | allowed tags and nonempty canonical reason set | request/expected-contract/offender-bound | no logical result | protocol/transport/trust/discovery | A10 |
+| `ABI_REASON_ISSUER`; `failureReason`; `resultFailure`; `expectedContract`; `toEvaluationReason`; `toReasoningReason`; `evaluationReasons`; `reasoningReasons`; total service-role failure projection | `DERIVED` | K1 interface boundary | deterministic nonempty evaluation/reasoning failure mapping with discarded unequal result | §5.4 fixed ABI constructors | lifecycle and result projection | recompute pointwise, deduplicate exact reasons, enforce all eleven role rows | request/capability/contract/offender exact | cannot be supplied; trust/discovery pre-invocation produces no K1 result | evaluation/reasoning/protocol/trust/discovery | A10,A15,A16,A17 |
 | challenge IDs, expected mappings/results, gold Contracts, hidden targets, undeclared outcome/evidence access, caller `chi_C`, caller replacement dependencies, caller event-class flags | `EXCLUDED` | Excluded | anti-oracle and frozen K1 ownership | none | none | presence rejects | never identity | always absent | malformed | A06 |
 | implicit aliases, wildcard/`latest` versions, discovery-order or first-found selection, silent shadowing, unrecognized fields | `EXCLUDED` | Excluded | exact identity/conflict behavior | none | none | presence/use rejects | no equality role | always absent | compatibility/protocol | A20 |
 | byte encoding, field serialization order, service endpoint as a semantic field, loader, repository, retry scheduler, deployment topology | `EXCLUDED` | Excluded | no K1 semantic role | none | none | outside v0 | no identity role | always absent | transport outside ABI | A03 |
@@ -908,8 +1064,8 @@ unambiguous abbreviation for `K2-Axx`.
 | independent occurrence meaning beside a pair-owned occurrence binding; bare pair-coherence claim | `EXCLUDED` | Excluded | non-circular exact coherence | none | none | conflict/reject | no valid identity | always absent | structure/reasoning | A13 |
 <!-- LEDGER-END -->
 
-Ledger counts: **94 `REQUIRED_SEMANTIC`; 20 `DERIVED`; 2
-`OPTIONAL_DIAGNOSTIC`; 5 `EXCLUDED`** (121 rows). The reproducible convention
+Ledger counts: **95 `REQUIRED_SEMANTIC`; 25 `DERIVED`; 2
+`OPTIONAL_DIAGNOSTIC`; 5 `EXCLUDED`** (127 rows). The reproducible convention
 counts each Markdown body row strictly between `LEDGER-BEGIN` and
 `LEDGER-END` once according to the exact disposition in its second cell; the
 header and separator are excluded. Grouped dot-qualified fields in one row
@@ -973,254 +1129,595 @@ or incompatible declaration.
 
 ### 3.3 Total semantic support and mechanical dependencies
 
-Every `ContractSpec.logical_relation` is interpreted over explicit primary
-inputs and an exact semantic-environment assignment `E` indexed by
-`DependencyKey`. Lookup is total over the typed environment: `ABI` selects the
-exact ABI coordinate; a plugin tag selects exact declared owner-identity
-presence; declaration, symbol, and event tags select exact Delta records;
-binding, profile, and extension tags select exact Sigma
-records; `PAIR(k)` selects the typed product of its Delta pair declaration and
-Sigma pair binding states; and
-`AUTHORITY_FACT(k)`, `LEXICAL_BINDING(k)`, `CHOICE_BINDING(k)`, and
-`TRUST_POLICY(k)` selects the trust-policy identity/owner and
-`TRUST_ROOT(k)` selects the exact correspondingly typed map value. A missing
-key has the exact absent coordinate value. No generic pair, untyped scope,
-attestation-certificate, or implicit-choice coordinate exists.
-
-Equality of relation observations is equality of the complete typed relation,
-including every result, evidence, reason, and error field, not sampled
-agreement. Define the following total operation for every logical relation
-`L`, including empty and constant relations:
+`ContractSpec` is stratified below every record that contains it. Let
+`Q=keys(c.observation_queries)`. Its relation is typed only as
 
 ```text
-freeDependencies(L) = {
-  d : DependencyKey |
-  there exist admitted primary inputs x and coordinate-typed candidate
-  assignments E1,E2 on the same exact key domain such that
-  E1 and E2 agree at every key except d, and
-  L(x,E1) and L(x,E2) are unequal complete logical relations
+c.logical_relation :
+  c.primary_input_domain * DependencyObservationEnvironment[Q]
+    -> c.codomain
+```
+
+and receives neither the containing binding nor any `ContractSpec`,
+`SemanticEnvironment`, `CapabilityTarget`, `TrustTarget`, request, or
+relation value. `DependencyObservationQuery.input_projection` receives only
+the explicit primary input. Query equality is extensional equality of this
+projection and exact equality of the expected observation kind. Relation
+equality is extensional equality for every admitted primary input and every
+well-typed finite observation map on `Q`, including complete values, result
+tags, evidence, unknown-reason, evaluation-error, and reasoning-error sets.
+This equality is mathematical; K2 claims neither an algorithm nor a byte
+representation for deciding it.
+
+For every relation, including a constant relation, define:
+
+```text
+freeDependencies(c) = {
+  d in keys(c.observation_queries) |
+  there exist an admitted primary input x and well-typed finite maps O1,O2
+  with the same exact key domain keys(c.observation_queries), differing only
+  at d, for which c.logical_relation(x,O1) != c.logical_relation(x,O2)
 }
 
-support(ContractSpec c) = freeDependencies(c.logical_relation)
+support(c) = freeDependencies(c)
+CONTRACT_SPEC_CONFORMANT(c) iff
+  c.contract_key.owner_plugin owns c, c.owner_layer is its enclosing layer,
+  keys(c.observation_queries) = support(c),
+  every query kind is valid for its exact key, and support(c) is finite
 ```
 
-Thus `freeDependencies` is empty for a constant contract. For every `L`, if
-two environments agree on `freeDependencies(L)`, `L` is extensionally
-invariant between them; conversely every key in the set has the displayed
-separating environments. This defines exact semantic support, rather than a
-producer-selected over-approximation. A `ContractSpec` is conformant only when
-this set is finite and its derived `dependency_support` field is exactly that
-set. The field is recomputed from the relation and cannot be supplied,
-certified, narrowed, or enlarged by its producer.
+Thus neither a stated dependency set nor an unused query can enlarge support,
+and omission cannot narrow it. `support(c)` is a derived projection, not a
+field or producer assertion. Extensional equality of two `ContractSpec`s is
+field equality of `contract_key`, owner layer, primary-domain and codomain
+identities, query map, and logical relation. Since none of those fields has a
+`ContractSpec` or semantic-environment type, this equality is finite and
+non-recursive even when a `SemanticEnvironment` contains finitely many
+bindings that contain such specifications.
 
-Candidate-assignment formation checks exact key kind/version and record type,
-and applies Delta admission to every embedded `Value`; it does not consult
-`L`, `dependency_support`, a semantic
-dependency list, any capability, or any certificate. The definition therefore
-has no support-validation or trust recursion.
-
-This rule is the logical ABI's non-self-asserted support validator. It is a
-total extensional conformance rule, not a capability, certificate, trust
-claim, or additional service. A later representation may use a separately
-trusted decision procedure or proof certificate to establish the equality,
-but that artifact must prove this fixed relation and cannot define its own
-support, validate itself, or introduce a new semantic dependency. Failure to
-establish the equality rejects the enclosing record in the layer-specific
-family below.
-
-Every logical contract-bearing field is typed `ContractSpec`, so support is
-total for value-admission domains; literal/function/predicate and occurrence
-meanings; profile coverage; evidence, access, unknown and failure contracts;
-sound and complete fragments; required evidence; compatibility; migration;
-and semantic-extension effect/payload contracts. Trust is instead an exact
-independently admitted `TRUST_ROOT` coordinate. No prose, bare list,
-diagnostic value, or producer trust assertion participates.
-
-Trust coordinates are admissible dependencies only for discovery,
-Service-layer root-use validation, and certificate/admission gates. Every
-`ContractSpec.logical_relation` in every layer must have support disjoint from
-`TRUST_POLICY` and `TRUST_ROOT`; descriptors carry their exact nonempty roots
-only through `required_trust_roots` and the derived service-use rule. A
-violation is incompatible in the ordinary layer-specific family. The externally admitted root decides whether a
-service may be used, never what value, truth, profile, pair relation, authority
-tuple, consistency, or public relation means. An authority fact may enter Sigma
-only after its separate admission rule, after which the fact's frozen tuple—not
-the root state—is observed.
-
-Record identity and outgoing dependency are disjoint. Define exact root sets:
+For a conformant record graph, derive observations rather than passing records
+to a relation. `observationAt(d,q,x,U)` is total by key tag and query kind:
 
 ```text
-rootKeys(declaration d)        = its DECLARATION key and any SYMBOL or EVENT
-                                 identity declared by d
-rootKeys(pair declaration d)   = {PAIR(d.pair_key)}
-rootKeys(semantic binding b)   = {BINDING(b.binding_key)}
-rootKeys(profile binding p)    = {PROFILE(p.profile_key)}
-rootKeys(pair binding p)       = {PAIR(p.pair_key)}
-rootKeys(authority fact a)     = {AUTHORITY_FACT(a.authority_fact_key)}
-rootKeys(lexical binding l)    = {LEXICAL_BINDING(l.lexical_binding_key)}
-rootKeys(choice binding c)     = {CHOICE_BINDING(c.choice_binding_key)}
-rootKeys(trust root t)         = {TRUST_ROOT(t.trust_root_key)}
-rootKeys(trust environment t)  = {TRUST_POLICY(t.trust_policy_key)}
-rootKeys(semantic extension x) = {SEMANTIC_EXTENSION(x.extension_key)}
+ABI, PLUGIN, SERVICE, CAPABILITY
+  -> exact IDENTITY_PRESENT or CAPABILITY_OBS
+DECLARATION, SYMBOL, EVENT, PAIR_DECLARATION
+  -> DECLARATION_OBS containing only exact types/signatures/facets/event class
+     and controlled-key identities, never a declaration ContractSpec
+DECLARATION(type) with TYPE_ADMISSION_FACT query
+  -> TYPE_ADMISSION_OBS for q.input_projection(x)
+BINDING
+  -> VALUE_OBS, TERM_OBS, or EVAL_OBS for the exact lower-level typed query
+PROFILE_BINDING -> PROFILE_OBS for the exact lower-level coverage query
+PAIR_BINDING    -> PAIR_OBS or EVAL_OBS for the exact pair/trace query
+AUTHORITY_FACT  -> AUTHORITY_FACT_OBS
+LEXICAL_BINDING -> LEXICAL_VALUE_OBS
+CHOICE_BINDING  -> CHOICE_VALUE_OBS
+MIGRATION       -> MIGRATION_OBS
+COMPATIBILITY_CLAIM -> COMPATIBILITY_OBS
+SEMANTIC_EXTENSION -> SEMANTIC_EXTENSION_OBS
+CERTIFICATE     -> CERTIFICATE_OBS
+RESULT          -> the exact lower-level VALUE/TERM/EVAL/PROFILE/PAIR/status
+                   observation selected by its result tag
 ```
 
-Lookup is total and kind-directed. For every exact environment `E`,
-`recordAt(k,E)` returns exactly `PRESENT(the unique typed record)`,
-`ABSENT(the exact expected coordinate)`, or
-`MALFORMED(nonempty reasons)`, by these exhaustive equations:
+`CONTRACT_SPEC`, `REQUEST`, `MODEL_CONTRACT`, `ALIAS`, `TRUST_POLICY`,
+`TRUST_ROOT`, and generic `CARRIER` roots are never valid observation-query
+keys. They may be dependency-graph roots or validation references, but a
+logical relation cannot inspect their records, contracts, trust permissions,
+or environments. A kind/query mismatch is
+`MALFORMED(contract observation kind)`.
+
+Let the finite proper-edge graph in the exact universe `U` be acyclic.
+For `(c,x)`, construct `dependencyObservations(c,x,U)` in its unique
+topological order: for each exact key in `support(c)`, apply its pure input
+projection and derive the typed lower-level observation only after every
+proper predecessor needed by that observation has been derived. The resulting
+map domain is exactly `support(c)`; finite-map equality is domain equality and
+complete value equality at every key, independent of topological traversal.
+The relation is then invoked as
+`c.logical_relation(x,dependencyObservations(c,x,U))`.
+
+A missing Delta declaration makes observation derivation malformed. A missing
+required binding/profile/pair meaning makes its owner open and the outer
+relation is not invoked. A missing service/capability makes evaluability
+missing; a missing certificate or admission record grants no admission. A
+lower `TERM_ERROR`, `Eval.ERROR`, profile error, or exact admission error is
+retained as the corresponding typed lower observation. An interface failure
+aborts observation construction and is projected by the total role mapping in
+§5.4; it is never an absent observation or an invented logical result. These
+rules are exact for empty support as well: the sole observation environment is
+the empty map.
+
+This is a well-founded semantic stratification, not an opaque handle. A
+relation may observe only results/values for its exact admitted support, and
+never equality or contents of the environment that contains it. Every
+logical-contract field uses this rule: type admission; literal/function/
+predicate and occurrence meanings; profile coverage; evidence, access,
+unknown and failure behavior; fragments and required evidence; compatibility;
+migration; and semantic-extension effects. Trust remains a separate exact
+admission premise and is forbidden from every `ContractSpec` support.
+
+Record identity, root ownership, and subject reference are three different
+total functions. `RecordIdentity` is the following disjoint finite algebra:
 
 ```text
-recordAt(ABI(a),E)         = the exact ABI coordinate
-recordAt(PLUGIN(p),E)      = exact declared owner-identity presence
-recordAt(DECLARATION(d),E) = the unique Declaration(d)
-recordAt(SYMBOL(s),E)      = the unique FunctionDeclaration or
-                              PredicateDeclaration whose symbol_key=s
-recordAt(EVENT(e),E)       = the unique EventDeclaration whose event_key=e
-recordAt(BINDING(d),E)     = the unique SemanticBinding(d), or the unique
-                              pair-owned occurrence-binding projection for d
-recordAt(PROFILE(p),E)     = the unique ProfileBinding(p)
-recordAt(PAIR(p),E)        = the typed product of the unique Delta pair
-                              declaration and the Sigma pair-binding coordinate
-recordAt(AUTHORITY_FACT(a),E) = E.authority_facts[a]
-recordAt(LEXICAL_BINDING(l),E) = E.lexical_bindings[l]
-recordAt(CHOICE_BINDING(c),E)  = E.choice_bindings[c]
-recordAt(TRUST_POLICY(t),E)    = E.trust_environment policy coordinate
-recordAt(TRUST_ROOT(t),E)      = E.trust_environment.root_judgments[t]
-recordAt(SEMANTIC_EXTENSION(x),E) = the unique admitted extension x
+RecordIdentity =
+    ABI_RECORD(AbiVersion) | PACKAGE_RECORD(AbiVersion,PluginKey)
+  | DECLARATION_RECORD(DeclarationKey)
+  | PAIR_DECLARATION_RECORD(EventScopePairKey)
+  | BINDING_RECORD(BindingKey) | PAIR_BINDING_RECORD(EventScopePairKey)
+  | PROFILE_BINDING_RECORD(ProfileKey)
+  | MODEL_CONTRACT_RECORD(ModelContractKey) | ALIAS_RECORD(AliasKey)
+  | SERVICE_RECORD(ServiceKey) | CAPABILITY_RECORD(CapabilityKey)
+  | CERTIFICATE_RECORD(CertificateKey)
+  | AUTHORITY_FACT_RECORD(AuthorityFactKey)
+  | MIGRATION_RECORD(MigrationKey)
+  | COMPATIBILITY_RECORD(CompatibilityClaimKey)
+  | SEMANTIC_EXTENSION_RECORD(SemanticExtensionKey)
+  | CONTRACT_SPEC_RECORD(ContractSpecKey)
+  | SEMANTIC_ENVIRONMENT_RECORD(SemanticEnvironmentIdentity)
+  | DEPENDENCY_ENVIRONMENT_RECORD(exact DependencyEnvironment identity)
+  | OBSERVATION_ENVIRONMENT_RECORD(
+      exact DependencyObservationEnvironment identity)
+  | TRUST_POLICY_RECORD(TrustPolicyKey) | TRUST_ROOT_RECORD(TrustRootKey)
+  | LEXICAL_BINDING_RECORD(LexicalBindingKey)
+  | CHOICE_BINDING_RECORD(ChoiceBindingKey)
+  | REQUEST_RECORD(RequestIdentity) | RESULT_RECORD(ResultIdentity)
+  | LIFECYCLE_RECORD(exact target/request identity)
+  | OUTCOME_RECORD(exact Outcome identity)
+  | EVENT_VALUE_RECORD(exact EventValue identity)
+  | TRACE_EVENT_RECORD(exact TraceEvent identity)
+  | SOURCE_RECORD(exact SourceRef identity)
+  | AUTHORITY_REF_RECORD(exact AuthorityRef identity)
+  | EVIDENCE_RECORD(EvidenceRef)
+  | REASON_RECORD(reason sort, exact reason identity)
+  | CONFLICT_RECORD(ConflictRef)
 ```
 
-For `DECLARATION`, `SYMBOL`, `EVENT`, and the Delta component of `PAIR`,
-missing or ambiguous lookup is `MALFORMED(missing/ambiguous declaration)`.
-For an exact semantic-bearing declaration with no binding,
-`recordAt(BINDING(d),E)=ABSENT(BINDING(d))`; for a profile with no binding or a
-declared pair with no admitted pair binding, the corresponding Sigma component
-is absent. These are reachable binding-absence/open states. A pair-owned
-occurrence projection is present only through its one `EventPairBinding`; an
-ordinary binding beside it remains the section 8 conflict. The equations are
-therefore total for literal, function, predicate, profile, and pair roots and
-never silently erase a missing meaning.
+`recordIdentity(r)` returns the matching constructor for every logical record
+listed in §2.1: declaration variants share `DECLARATION_RECORD(r.key)`;
+the derived service and trust-policy projections use respectively
+`SERVICE_RECORD(r.service_key)` and
+`TRUST_POLICY_RECORD(r.trust_policy_key)`; a `CapabilityDescriptor` uses
+`CAPABILITY_RECORD(r.capability_key)`;
+request variants share `REQUEST_RECORD(IDENTITY_OF(r))`; every result and
+certificate-admission variant uses
+`RESULT_RECORD(requestIdentity,tag,complete-payload-identity)`; every lifecycle
+variant uses the exact target/request identity; the remaining equations are
+the same-name constructors above. A bare key is already the finite identity of
+its named record kind. `DiagnosticExtension`, `Diagnostics`, every diagnostic
+field, and every excluded item have `recordIdentity=NONE`. There is no fallback
+or producer-selected record identity.
 
-For other records, `rootKeys` is the exact semantic subject identities in the
-record target; identity-only keys outside `DependencyKey`, such as a
-certificate or service key, anchor no semantic-environment edge.
-`subjectReferences(r)` contains every typed semantic coordinate named by a
-non-identity field. A binding references its declaration and contract
-supports; a profile references dimensions and contract supports but not its
-own profile key; a pair references member bindings, event/type coordinates,
-and independent occurrence support but not its own pair key; an authority
-fact's attestation references are evidence rather than fact dependencies; and
-a capability references targets, fragments, required evidence, required trust
-roots, and failure support.
-For a `TrustRootRecord`, `subjectReferences` and proper dependencies are empty:
-validator/kind/target lists are embedding-policy permissions, not claims whose
-semantics are supplied by those services or subjects. This is the
-well-founded bootstrap base.
+Here every `IDENTITY_OF(r)` is definitionally the finite tuple of all and only
+that record's required and derived semantic fields under their displayed exact
+equalities: sequences positionally, finite sets by membership, maps by domain
+and value, `ContractSpec` relations extensionally, and diagnostics omitted.
+It is not an opaque handle, digest, serialization, or equality oracle.
+
+`dependencyRoot` maps each identity to exactly one same-kind tagged key:
 
 ```text
-rawProperDependencies(r) =
-  subjectReferences(r) union
-  UNION(support(c) for every ContractSpec c in r)
+ABI_RECORD(a)              -> ABI(a)
+PACKAGE_RECORD(_,p)        -> PLUGIN(p)
+DECLARATION_RECORD(d)      -> DECLARATION(d)
+PAIR_DECLARATION_RECORD(p) -> PAIR_DECLARATION(p)
+BINDING_RECORD(b)          -> BINDING(b)
+PAIR_BINDING_RECORD(p)     -> PAIR_BINDING(p)
+PROFILE_BINDING_RECORD(p)  -> PROFILE_BINDING(p)
+MODEL_CONTRACT_RECORD(m)   -> MODEL_CONTRACT(m)
+ALIAS_RECORD(a)            -> ALIAS(a)
+SERVICE_RECORD(s)          -> SERVICE(s)
+CAPABILITY_RECORD(c)       -> CAPABILITY(c)
+CERTIFICATE_RECORD(c)      -> CERTIFICATE(c)
+AUTHORITY_FACT_RECORD(a)   -> AUTHORITY_FACT(a)
+MIGRATION_RECORD(m)        -> MIGRATION(m)
+COMPATIBILITY_RECORD(c)    -> COMPATIBILITY_CLAIM(c)
+SEMANTIC_EXTENSION_RECORD(x) -> SEMANTIC_EXTENSION(x)
+CONTRACT_SPEC_RECORD(c)    -> CONTRACT_SPEC(c)
+TRUST_POLICY_RECORD(t)     -> TRUST_POLICY(t)
+TRUST_ROOT_RECORD(t)       -> TRUST_ROOT(t)
+LEXICAL_BINDING_RECORD(l)  -> LEXICAL_BINDING(l)
+CHOICE_BINDING_RECORD(c)   -> CHOICE_BINDING(c)
+REQUEST_RECORD(q)          -> REQUEST(q)
+RESULT_RECORD(q)           -> RESULT(q)
+every other non-diagnostic constructor
+  -> CARRIER(its exact CarrierRecordKind, its complete finite identity)
+NONE                       -> no root
+```
 
+For every logical record `r`, `rootKeys(r)` is the singleton containing
+`dependencyRoot(recordIdentity(r))`; it is empty exactly for diagnostics and
+excluded items. In particular, a capability root is
+`CAPABILITY(capability_key)`. Its `BINDING_TARGET`, `PROFILE_TARGET`, pair, or
+environment target is a subject reference and never a capability root, so a
+target cannot create a false self-edge. A declaration has only its declaration
+root; its `SymbolKey` or `EventKey` is a separately derived syntax facet, not a
+second record root. Pair declaration and pair binding likewise have distinct
+roots.
+
+`subjectReferences(r)` is also total. The exhaustive equations, grouped only
+where field types are identical, are:
+
+```text
+declaration -> referenced result/argument/payload type DECLARATION roots and
+               CONTRACT_SPEC(admitted_value_domain.contract_key), as present
+pair declaration -> member DECLARATION/SYMBOL and controlled EVENT roots
+SemanticBinding -> its DECLARATION plus CONTRACT_SPEC roots for meaning,
+                   evidence, access, unknown, and error contracts
+EventPairBinding -> PAIR_DECLARATION, scope BINDING, occurrence BINDING,
+                    and, for independent proof, every occurrence-bundle
+                    CONTRACT_SPEC/MODEL_CONTRACT plus CERTIFICATE/validator
+ProfileBinding -> CONTRACT_SPEC roots for coverage/evidence/unknown/errors
+ModelContract -> exact target semantic root, its four CONTRACT_SPEC roots,
+                 and every summarized CAPABILITY
+AliasBinding -> the one exact target root
+ServiceIdentityRecord -> ABI(abi_version) and PLUGIN(plugin_key)
+CapabilityDescriptor -> SERVICE(capability.service_key), every target's exact
+                        subject roots, fragment/evidence/failure CONTRACT_SPEC
+                        roots, and every required TRUST_ROOT
+SemanticEnvironment -> ABI plus roots of every displayed member and every
+                       lexical/choice entry; never a TrustEnvironment root
+DependencyEnvironment -> its subject roots, association endpoints, and proper
+                         closure; DependencyObservationEnvironment -> map keys
+TrustEnvironment -> TRUST_POLICY plus every referenced TRUST_ROOT
+TrustPolicyRecord -> empty; TrustRootRecord -> empty
+  (owners are structural and validator/kind/target lists are permissions)
+LexicalBinding -> its declared type; ChoiceBindingEntry -> declared type,
+                  `CARRIER(SOURCE_REF,...)`, authority fact, and admitted-value
+                  declaration roots
+every request -> subjectRoots(subjectOf(request)), CAPABILITY(capability_key),
+                 SERVICE(capability_key.service_key), its environment root,
+                 dependency-environment root, fragment CONTRACT_SPEC if any,
+                 and every separately carried TRUST_ROOT used by the service
+every result/admission/lifecycle -> REQUEST(its exact request identity)
+CertificateEnvelope -> CERTIFICATE(requested certificate), request roots,
+                       subject roots, CAPABILITY(capability_key),
+                       CAPABILITY(validator_key), TRUST_ROOT(trust_root_key),
+                       fragment CONTRACT_SPEC, and dependency roots
+CompatibilityClaim -> ABI/source/target key sets, compatibility CONTRACT_SPEC,
+                      CERTIFICATE, validator CAPABILITY, and TRUST_ROOT
+MigrationDeclaration -> source/target environment roots, relation CONTRACT_SPEC,
+                        CERTIFICATE, validator CAPABILITY, and TRUST_ROOT
+SemanticExtension -> its exact target, effect/payload CONTRACT_SPEC,
+                     CERTIFICATE, validator CAPABILITY, and TRUST_ROOT
+AuthorityFactBinding -> its `CARRIER(AUTHORITY_REF,...)` and
+                        `CARRIER(SOURCE_REF,...)` subject roots plus admitted
+                        CERTIFICATE evidence roots
+Outcome/EventValue/TraceEvent -> exact type/event declaration roots of their
+                                 admitted values and events
+SourceRef/AuthorityRef/EvidenceRef/reasons/ConflictRef and key-only carriers
+  -> exact typed identities embedded in their fields, otherwise empty
+PluginPackage -> ABI, PLUGIN, and roots of every non-diagnostic member
+```
+
+No row treats a record's own identity as a subject reference. Each
+`ContractSpec c` is its own record with
+`subjectReferences(c)=support(c)`, so a containing record points to the
+contract-spec root and the contract-spec node points only to lower-level
+observation roots. This is what makes the graph stratified.
+
+```text
+rawProperDependencies(r) = subjectReferences(r)
 properDependencies(r) = rawProperDependencies(r)
   provided rawProperDependencies(r) intersect rootKeys(r) = {}
+properEdges(U) = {
+  (a,b) | r is a record in finite exact universe U,
+          a in rootKeys(r), b in properDependencies(r)
+}
 ```
 
-A nonempty intersection is an invalid self-edge; it is rejected rather than
-included, subtracted, or treated as mandatory. Each displayed
-`proper_declaration_dependencies` or `proper_semantic_dependencies` is a
-derived view and must equal `properDependencies(r)`. A producer-supplied
-smaller, larger, or self-containing set is rejected even if signed.
+A nonempty intersection is an invalid self-edge. Every displayed
+`proper_declaration_dependencies` or `proper_semantic_dependencies` must equal
+the exact applicable projection of `properDependencies`; no producer supplies
+it. The graph must be finite and acyclic. `dependency_closure(r)` is the unique
+least set reachable by one or more proper edges from `rootKeys(r)`, excluding
+the roots. Cycle rejection precedes closure. A definitional occurrence lift is
+ownership, not a back-edge.
 
-The proper-edge graph contains exactly `(a,b)` for `a in rootKeys(r)` and
-`b in properDependencies(r)`. Roots anchor records but are not themselves
-producer proper dependencies. The graph over the exact environment must be
-finite; every missing target receives its exact `recordAt` outcome (declaration
-absence malformed, required semantic-coordinate absence open); and
-every directed proper-edge cycle is invalid. `dependency_closure(r)` is the
-unique least set of proper targets reachable by one or more proper edges from
-`rootKeys(r)` and excludes those roots. Cycle rejection precedes closure, so
-the definition is total and well-founded over proper edges only. A definitional
-occurrence construction is ownership, not a back-edge.
+Lookup is total in an exact universe `U=(E,T,packages,request?,result?)`:
+`recordAt(k,U)` selects the unique record whose singleton root is `k`.
+`SYMBOL(s)` and `EVENT(e)` select the unique declaration having that exact
+facet; `PLUGIN(p)` selects exact declared owner presence; `PROFILE(p)` and
+`PAIR(p)` are frozen K1 syntax facets and associate respectively to
+`PROFILE_BINDING(p)` and both `PAIR_DECLARATION(p)`/`PAIR_BINDING(p)`.
+`BINDING(d)` selects the ordinary binding or the unique pair-owned occurrence
+projection of §7.2, never both. Every other tag selects its same-name record.
+`SERVICE(s)` selects the unique derived `ServiceIdentityRecord`; `TRUST_POLICY(t)`
+selects the unique derived `TrustPolicyRecord`. Neither lookup accepts a
+producer-supplied projection.
+The result is exactly `PRESENT(record)`, `ABSENT_REQUIRED_RECORD(kind,key)`, or
+`MALFORMED(nonempty exact conflicts)`.
 
-Support, proper-edge, or closure mismatch has an exact outcome: in a value-admission/type
-declaration it is `DECLARATION_INVALID`/`MALFORMED`; in a Sigma meaning,
-profile, pair, authority, or migration it is
-`BINDING_INCOMPATIBLE`/`MALFORMED(incompatible semantic binding)`; in a
-capability or compatibility claim it is `CAPABILITY_INCOMPATIBLE` and therefore
-`EVALUABILITY_MISSING` for that request; in a request it is
-`MALFORMED_REQUEST`; and in a certificate envelope it is malformed-certificate
-rejection with no claimed conclusion. A semantic extension follows its
-declared owner layer: Delta invalid, Sigma binding-incompatible, or Service
-capability-incompatible. A smaller producer list, even one signed by that
-producer, establishes none of these conformance judgments.
+Missing `DECLARATION`/`SYMBOL`/`EVENT` or pair-declaration records are
+malformed. Missing reachable `BINDING`, `PROFILE_BINDING`, or `PAIR_BINDING`
+records are open. Missing `SERVICE`/`CAPABILITY` records give evaluability
+missing; an undecided lookup remains discovery/evaluability unknown. Missing
+`CERTIFICATE`, authority admission, migration, compatibility claim, or
+semantic-extension admission grants no admission. Missing model contracts make
+the required model projection malformed. Missing lexical/choice/authority
+coordinates are respectively malformed or open under K1 closure. No producer
+can override a missing-status tag. Duplicate equal records coalesce and any
+same-root unequal record is the exact conflict of §8.3.
 
-K2 uses K1's recursive syntax `deps` equations unchanged. Syntax-derived keys
-remain a separately frozen subject-root facet, not producer-declared outgoing
-edges. The kernel then derives a total, non-producer-controlled association
-from syntax identity to semantic-binding identity:
+Equivalently, the missing function is total by tag:
 
 ```text
-bindingAssociation(DECLARATION(d),E) =
-  {(DECLARATION(d),BINDING(d))} when d.kind in {LITERAL,FUNCTION,PREDICATE}
-bindingAssociation(SYMBOL(s),E) =
-  {(SYMBOL(s),BINDING(d))} where recordAt(SYMBOL(s),E) uniquely declares d
-bindingAssociation(k,E) = {} for every other DependencyKey
+missingStatus(ABI | PLUGIN | DECLARATION | SYMBOL | EVENT |
+              PAIR_DECLARATION | required Delta CARRIER) = MALFORMED
+missingStatus(BINDING | PROFILE_BINDING | PAIR_BINDING |
+              AUTHORITY_FACT | required CHOICE_BINDING) = OPEN_BINDINGS
+missingStatus(LEXICAL_BINDING) = MALFORMED_REQUEST or OPEN_BINDINGS according
+                                 to the exact K1 closure premise
+missingStatus(SERVICE | CAPABILITY) = EVALUABILITY_MISSING
+missingStatus(TRUST_POLICY | TRUST_ROOT) = TRUST_ROOT_ABSENT and no use
+missingStatus(CERTIFICATE) = NO_CERTIFICATE_ADMISSION
+missingStatus(MIGRATION) = NO_MIGRATION
+missingStatus(COMPATIBILITY_CLAIM) = NO_COMPATIBILITY
+missingStatus(SEMANTIC_EXTENSION) = NO_EFFECT, or INCOMPATIBLE when the
+                                    extension was offered as required semantic
+missingStatus(MODEL_CONTRACT) = MALFORMED(model/machine contract mismatch)
+missingStatus(ALIAS) = NO_ALIAS unless an exact alias reference required it,
+                       in which case MALFORMED(missing alias)
+missingStatus(CONTRACT_SPEC) = enclosing owner-layer incompatibility
+missingStatus(REQUEST | RESULT) = MALFORMED_REQUEST or protocol failure
+missingStatus(non-Delta CARRIER) = its exact formation/closure/protocol family
 ```
 
-The `SYMBOL` equation is malformed if its exact declaration mapping is missing
-or ambiguous. The `DECLARATION` equation does not require the binding to be
-present: its target remains in the graph as an exact open coordinate. These
-association edges are derived identity bridges, never producer
-`properDependencies`; their tags make them non-self-edges, they do not
-participate in proper-edge cycle rejection, and no record, request, descriptor,
-or certificate can supply, remove, replace, or override one.
+Support, edge, observation, or closure mismatch has the owner-layer outcome:
+Delta is `DECLARATION_INVALID`/`MALFORMED`; Sigma is
+`BINDING_INCOMPATIBLE`/`MALFORMED(incompatible semantic binding)`; Service is
+`CAPABILITY_INCOMPATIBLE` and `EVALUABILITY_MISSING`; a request is
+`MALFORMED_REQUEST`; and a certificate is malformed with no conclusion. A
+semantic extension follows its declared owner layer. A smaller, larger, cyclic,
+or self-containing producer view establishes nothing.
 
-The interface projection `DependencyEnvironment` is then derived as follows:
+K2 uses K1's recursive syntax `deps` equations unchanged, but exposes them as
+the separate `K1SyntaxKey` facet. The total subject algebra is:
 
 ```text
-required(C) =
-  UNION(deps(attributed_clause) for every attributed clause in C)
-  UNION(deps(choice) for every choice in C)
-  UNION(deps(profile) for every explicit ProfileKey requirement)
-  UNION(deps(pair) for every explicit EventScopePair requirement)
+Subject =
+    CONTRACT_SUBJECT(Contract)
+  | FORMULA_SUBJECT(finset(Formula), LexicalScopeIdentity)
+  | VALUE_ADMISSION_SUBJECT(DeclarationKey[TYPE], Value)
+  | FUNCTION_SUBJECT(SymbolKey[FUNCTION], BindingKey, sequence(Value))
+  | PREDICATE_SUBJECT(SymbolKey[PREDICATE], BindingKey, sequence(Value))
+  | PROFILE_SUBJECT(ProfileKey, exact typed coverage subject)
+  | PAIR_ADMISSION_SUBJECT(EventScopePairKey)
+  | PAIR_OCCURRENCE_SUBJECT(EventScopePairKey, Trace)
+  | AUTHORITY_SUBJECT(AuthorityFactKey)
+  | MIGRATION_SUBJECT(MigrationDeclaration)
+  | COMPATIBILITY_SUBJECT(CompatibilityClaim)
+  | SEMANTIC_EXTENSION_SUBJECT(SemanticExtension)
+  | DISCOVERY_SUBJECT(CapabilityTarget, JudgmentTag)
+  | REASONING_SUBJECT(ReasoningJudgment, exact judgment-specific subject tuple)
+  | JOINT_SUBJECT(ReasoningJudgment, nonempty exact subject tuple)
+  | CERTIFICATE_ADMISSION_SUBJECT(CertificateKey, Subject)
+  | MODEL_CONTRACT_SUBJECT(ModelContractKey)
+  | PACKAGE_SUBJECT(AbiVersion, PluginKey)
+```
 
-required(F) =
-  UNION(deps(formula) for every formula in F)
+There is no other request subject. `subjectOf` is exhaustive:
 
-DependencyEnvironment(subject) = (
-  syntax_root_keys = required(subject),
-  binding_association_edges = every bindingAssociation(k,E) edge whose source
-    is in the least set reachable from required(subject) through derived
-    association and proper edges,
-  expanded_root_keys = required(subject) union
-    RANGE(binding_association_edges),
-  proper_dependencies = every target of a proper edge whose source is
-    in that same least reachable set,
-  transitive_dependency_closure = every non-syntax-root target reachable from
-    syntax_root_keys through any finite interleaving of derived association and
-    proper edges
+```text
+ValueAdmissionRequest -> VALUE_ADMISSION_SUBJECT(type_key,value)
+FunctionRequest       -> FUNCTION_SUBJECT(symbol_key,binding_key,arguments)
+PredicateRequest      -> PREDICATE_SUBJECT(symbol_key,binding_key,arguments)
+ProfileRequest        -> PROFILE_SUBJECT(profile_key,coverage_subject)
+PairAdmissionRequest  -> PAIR_ADMISSION_SUBJECT(pair_key)
+AuthorityAdmissionRequest -> AUTHORITY_SUBJECT(authority_fact_key)
+MigrationAdmissionRequest -> MIGRATION_SUBJECT(migration)
+CompatibilityAdmissionRequest -> COMPATIBILITY_SUBJECT(claim)
+SemanticExtensionAdmissionRequest ->
+  SEMANTIC_EXTENSION_SUBJECT(extension)
+DiscoveryRequest -> DISCOVERY_SUBJECT(target,judgment)
+ReasoningRequest -> REASONING_SUBJECT(judgment,subjects), or JOINT_SUBJECT
+                    exactly when the judgment tuple spans multiple producers
+CertificateEnvelope ->
+  CERTIFICATE_ADMISSION_SUBJECT(certificate_key,subjectOf(request_binding))
+```
+
+`required(s)` is total and returns only frozen K1 keys:
+
+```text
+required(CONTRACT_SUBJECT(C)) = the exact K1 Dependencies(C) equations
+required(FORMULA_SUBJECT(F,_)) = UNION(deps(f) for f in F)
+required(VALUE_ADMISSION_SUBJECT(t,v)) = declDeps_Delta(t,v)
+required(FUNCTION_SUBJECT(q,_,args)) =
+  sigDeps_Delta(q) union UNION(declDeps_Delta(v) for v in args)
+required(PREDICATE_SUBJECT(q,_,args)) =
+  sigDeps_Delta(q) union UNION(declDeps_Delta(v) for v in args)
+required(PROFILE_SUBJECT(p,x)) = {K1_PROFILE(p)} union deps(x)
+required(PAIR_ADMISSION_SUBJECT(p)) = deps(the exact pair p)
+required(PAIR_OCCURRENCE_SUBJECT(p,T)) =
+  deps(the exact pair p) union deps(e) for every event e in T
+required(REASONING_SUBJECT(_,subjects)) = UNION(required(s) for typed subjects)
+required(JOINT_SUBJECT(_,subjects)) = UNION(required(s) for every member)
+required(CERTIFICATE_ADMISSION_SUBJECT(_,s)) = required(s)
+required(DISCOVERY_SUBJECT(target,_)) = required(target's exact subject)
+required(AUTHORITY_SUBJECT(a)) = deps(a.source_ref) union deps(a.principal)
+required(MIGRATION_SUBJECT(m)) = required(m.source_environment subjects)
+  union required(m.target_environment subjects)
+required(COMPATIBILITY_SUBJECT(c)) = syntax facets of
+  c.source_keys union c.target_keys
+required(SEMANTIC_EXTENSION_SUBJECT(x)) = required(x.target_record_identity)
+required(MODEL_CONTRACT_SUBJECT(m)) = required(m.target_semantic_identity)
+required(PACKAGE_SUBJECT(a,p)) = K1 syntax facets of all package members
+```
+
+Every K1 `deps` result is lifted tag-for-tag from `K1SyntaxKey` to the matching
+`PLUGIN`/`DECLARATION`/`SYMBOL`/`EVENT`/`PROFILE`/`PAIR` dependency key only
+for K2 graph traversal; the unlifted set remains visible as
+`syntax_root_keys`. Define semantic roots separately:
+
+```text
+semanticSubjectRoots(CONTRACT_SUBJECT(_) | FORMULA_SUBJECT(_,_)) = {}
+semanticSubjectRoots(value admission) = {DECLARATION(type_key)}
+semanticSubjectRoots(function/predicate) = {BINDING(binding_key)}
+semanticSubjectRoots(profile) = {PROFILE_BINDING(profile_key)}
+semanticSubjectRoots(pair admission/occurrence) =
+  {PAIR_DECLARATION(pair_key),PAIR_BINDING(pair_key)}
+semanticSubjectRoots(authority) = {AUTHORITY_FACT(authority_fact_key)}
+semanticSubjectRoots(MIGRATION_SUBJECT(m)) = {MIGRATION(m.migration_key)}
+semanticSubjectRoots(COMPATIBILITY_SUBJECT(c)) =
+  {COMPATIBILITY_CLAIM(c.claim_key)}
+semanticSubjectRoots(SEMANTIC_EXTENSION_SUBJECT(x)) =
+  {SEMANTIC_EXTENSION(x.extension_key)}
+semanticSubjectRoots(model contract) = {MODEL_CONTRACT(model_contract_key)}
+semanticSubjectRoots(package) = {ABI(abi_version),PLUGIN(plugin_key)}
+semanticSubjectRoots(reasoning/joint) = union over the exact typed subjects
+semanticSubjectRoots(certificate admission) =
+  {CERTIFICATE(certificate_key)} union semanticSubjectRoots(inner subject)
+semanticSubjectRoots(discovery) = targetReferences(target)
+
+subjectRoots(s) = lift(required(s)) union semanticSubjectRoots(s)
+requestRoots(r) = subjectRoots(subjectOf(r)) union
+  ({CAPABILITY(r.capability_key),SERVICE(r.capability_key.service_key)}
+   when r has capability_key)
+certificateRoots(c) = subjectRoots(subjectOf(c.request_binding)) union
+  {CERTIFICATE(c.certificate_key), CAPABILITY(c.capability_key),
+   SERVICE(c.capability_key.service_key), CAPABILITY(c.validator_key),
+   SERVICE(c.validator_key.service_key), TRUST_ROOT(c.trust_root_key)}
+```
+
+`targetReferences` is total: binding, type, profile, and pair targets map to
+their exact semantic roots; an environment-judgment target maps to the union
+of `subjectRoots` for its typed subjects plus the semantic-environment carrier
+root. Capability producers cannot override any of these equations.
+
+The total, non-asserted producer relation returns a finite set:
+
+```text
+producerOf(PluginKey p) = {PLUGIN_PRODUCER(p)}
+producerOf(DeclarationKey/SymbolKey/EventKey/ProfileKey/EventScopePairKey/
+           BindingKey k)
+  = {PLUGIN_PRODUCER(k.plugin_key)}
+producerOf(ProfileDimensionKey d) = producerOf(d.profile_key)
+producerOf(ServiceKey s) = producerOf(s.plugin_key)
+producerOf(CapabilityKey c) = producerOf(c.service_key)
+producerOf(CertificateKey c) =
+  {PLUGIN_PRODUCER(p)} for PLUGIN_CERTIFICATE_ISSUER(p), or
+  {EMBEDDING_POLICY_PRODUCER(t)} for EMBEDDING_POLICY_CERTIFICATE_ISSUER(t)
+producerOf(MigrationKey m) = producerOf(m.owner_plugin)
+producerOf(CompatibilityClaimKey c) = producerOf(c.owner_plugin)
+producerOf(SemanticExtensionKey x) = producerOf(x.owner_plugin)
+producerOf(ModelContractKey m) = producerOf(m.target_semantic_identity)
+producerOf(AliasKey a) = producerOf(a.owner_plugin)
+producerOf(ContractSpecKey c) = producerOf(c.owner_plugin)
+producerOf(TrustPolicyKey t) = {EMBEDDING_POLICY_PRODUCER(t)}
+producerOf(TrustRootKey r) = producerOf(r.trust_policy_key)
+producerOf(AuthorityRef a) = producerOf(a.owner)
+producerOf(SourceRef s) = producerOf(s.issuer)
+producerOf(AuthorityFactKey a) =
+  producerOf(a.authority_ref) union producerOf(a.source_ref)
+producerOf(SemanticEnvironment E) =
+  UNION(producerOf(r) for every non-diagnostic record r in E)
+producerOf(Contract/Formula/Value/finite tuple/set/map x) =
+  structural union over every exact owned key, SourceRef, AuthorityRef,
+  declaration, binding, profile, pair, service, certificate, migration,
+  compatibility, extension, model-contract, trust-policy, and trust-root
+  identity occurring in x
+producerOf(AbiVersion a) = {ABI_PRODUCER(a)}
+producerOf(kernel-owned atom with no owned identity) = {}
+producerOf(record r) = producerOf(recordIdentity(r)) union
+  structural union of producerOf over its subjectReferences
+```
+
+For `IssuerScope`, `CertificateIssuer`, `SemanticTargetIdentity`,
+`DependencyKey`, `CapabilityTarget`, `TrustTarget`, `ServiceUseSubject`,
+`RecordIdentity`, requests, results, admissions, lifecycle records, and every
+other tagged union, `producerOf` is structural recursion over the tag payload.
+Finite tuple recursion is positional, finite-set/map recursion is union over
+all members/keys/values, and the base equations above terminate. Therefore it
+is total for every relevant identity and record, not a plugin claim.
+
+For independence, validation machinery is not part of the thing it validates.
+Define `semanticPayload(s)` as the complete Subject payload after removing only
+certificate, validator-capability, service, and trust-root fields: migration
+retains its key, source/target environments, named relation and relation
+contract; compatibility retains its key, ABI/key sets and compatibility
+contract; extension retains its key, target, owner layer, semantic effect and
+payload; pair retains the declaration, scope and complete occurrence bundle;
+certificate admission retains its inner semantic subject; all other Subjects
+retain their complete payload. `producerSubjectReferences(r)` likewise equals
+`subjectReferences(r)` minus only `CERTIFICATE`, validation `CAPABILITY`/
+`SERVICE`, and `TRUST_ROOT` edges. Those excluded producers are checked
+separately and can never vanish from request/certificate roots.
+
+```text
+producerSubjectRoots(CERTIFICATE_ADMISSION_SUBJECT(_,inner)) =
+  producerSubjectRoots(inner)
+producerSubjectRoots(s) = semanticSubjectRoots(s)
+  for every other Subject variant
+
+subjectProducerSet(s,U) = producerOf(semanticPayload(s)) union
+  UNION(producerOf(recordAt(k,U)) for every PRESENT semantic record at k
+        reachable from producerSubjectRoots(s) through association and
+        producerSubjectReferences edges)
+```
+
+This includes exact Contract/formula, value-admission, function, predicate,
+profile, pair, authority/source, migration, compatibility, extension,
+reasoning/joint, certificate/admission, model-contract, discovery, and package
+subjects. A plugin-owned key with a missing/inconsistent owner component is
+malformed, never an owner-unknown fallback. If the same record identity derives
+different producer sets, composition conflicts. A validator capability must
+derive exactly one `PLUGIN_PRODUCER`; otherwise it is malformed. Trust-policy
+and root owners always derive the same embedding-policy producer, remain
+distinct from plugin producers and `ABI_PRODUCER`, and cannot be asserted by a
+package field.
+
+The derived association algebra is exhaustive:
+
+```text
+association(K1_DECLARATION(d),U) =
+  {(DECLARATION(d),BINDING(d))} when d.kind is LITERAL/FUNCTION/PREDICATE
+association(K1_SYMBOL(s),U) =
+  {(SYMBOL(s),DECLARATION(d)),(SYMBOL(s),BINDING(d))}
+  where recordAt(SYMBOL(s),U) uniquely declares d
+association(K1_EVENT(e),U) = {(EVENT(e),DECLARATION(d))}
+  where d is the unique event declaration
+association(K1_PROFILE(p),U) = {(PROFILE(p),PROFILE_BINDING(p))}
+association(K1_PAIR(p),U) =
+  {(PAIR(p),PAIR_DECLARATION(p)),(PAIR(p),PAIR_BINDING(p))}
+association(K1_PLUGIN(p),U) = {(PLUGIN(p),PLUGIN(p)) as identity presence only}
+association(k,U) = {} for no other K1SyntaxKey
+```
+
+The plugin identity-presence equation adds no graph self-edge; it only checks
+presence. Missing or ambiguous symbol/event/pair declaration mapping is
+malformed. Binding/profile/pair-binding association targets remain present in
+the graph even when their record is absent, producing the exact open state.
+Associations are derived bridges, never producer proper edges, and cannot be
+supplied, removed, or replaced.
+
+For every `Subject s`, the total environment is:
+
+```text
+R = subjectRoots(s)
+A = least association edges reachable from lift(required(s))
+P = least proper-edge targets reachable from R union RANGE(A)
+
+DependencyEnvironment(s,U) = (
+  syntax_root_keys = required(s),
+  subject_root_keys = R,
+  binding_association_edges = A,
+  expanded_root_keys = R union RANGE(A),
+  proper_dependencies = targets of proper edges from reachable sources,
+  transitive_dependency_closure =
+    every non-root target reachable through any finite association/proper-edge
+    interleaving
 )
 ```
 
-`recordAt` is applied at every reachable source; a reachable absent binding is
-retained in `transitive_dependency_closure` and gives the exact binding-open
-state, while malformed declaration lookup rejects the subject. For each syntax
-root, declaration proper dependencies and every associated binding's proper
-dependencies are thus closed transitively. A literal declaration root reaches
-its same-key binding. A function/predicate `SYMBOL` root first reaches its
-unique exact declaration's binding. A pair root's closure includes both symbols
-and their associated bindings, owners, controlled events/declarations,
-payload/signature types, and coherence binding without a pair self-edge. A
-profile root selects the exact `ProfileBinding` directly and includes dimensions,
-coverage-meaning dependencies, and their closure without a profile self-edge.
-Authority, lexical, choice, and semantic-extension coordinates enter the same
-closure whenever the subject observes them. Trust coordinates enter only the
-separate discovery/Service/certificate-admission dependency projection just
-specified; they cannot enter a denotational result relation.
-This expansion is a K2 closure/evaluability projection only. The frozen K1
-`Dependencies` facet, its composition equality, and full-Contract-equivalence
-comparison remain exactly `syntax_root_keys=required(subject)`; association
-targets and binding proper closure do not rewrite or enlarge that K1 facet.
+`recordAt` is applied at every reachable source. Cycle rejection and the
+missing-status rules above precede closure. Requests derive this environment
+from `subjectOf(request)` and add `requestRoots`; certificates add
+`certificateRoots`. The frozen K1 `Dependencies` facet, composition equality,
+and full-Contract equivalence remain exactly `syntax_root_keys=required(s)`;
+K2 semantic roots, associations, services, certificates, and proper closure do
+not rewrite it.
 
 A descriptor may carry derived proper dependencies, but validation recomputes
 roots, proper edges, and closure. The carried statement must equal the
@@ -1278,8 +1775,10 @@ For every literal, function, or predicate declaration, at most one
 - for predicates, explicit stable unknown and evaluation-error contracts; for
   literals/functions, `NOT_APPLICABLE` unknown behavior and explicit term
   error behavior;
-- the same complete result for the same exact declaration, semantic inputs,
-  `Delta`, `Sigma`, derived `chi_C`, and lexical scope.
+- the same complete result for the same explicit primary inputs and exact
+  finite lower-level `DependencyObservationEnvironment`; the containing
+  `Delta`, `Sigma`, binding set, and `SemanticEnvironment` are never relation
+  inputs.
 
 The meaning is independent of evaluator availability. An absent binding leaves
 closure open; an incompatible present binding is malformed. A service cannot
@@ -1314,9 +1813,15 @@ Package conformance requires at least one matching `ModelContract` for every
 literal, function, and predicate binding and every pair-owned occurrence
 binding. `exact_symbol_key` is absent exactly for a literal binding and
 present with the exact symbol otherwise. For an occurrence binding,
-`semantic_contract_reference` is its exact `EventScopePairKey`; for an
-ordinary binding it is the exact `BindingKey`. Additional translated records
-are optional and must retain the same exact target.
+`model_contract_key.target_semantic_identity` is
+`BINDING_IDENTITY(occurrence_binding_key)`,
+`semantic_contract_reference` is its exact `EventScopePairKey`, and every
+signature/facet/evidence/unknown/error field equals
+`OccurrenceBindingProjection`; for an ordinary binding the target and
+reference are the exact `BindingKey`. In the definitional path the required
+record is exactly `T3_A1_MODEL_LIFT`; in the independent path it is exactly the
+bundle's model contract. Additional translated records are optional and must
+retain the same exact target.
 
 Missing required structured information, a stale target version, an unequal
 signature/facet/evidence/error statement, or a capability from another meaning
@@ -1438,7 +1943,7 @@ DiscoveryRequest = (
 ```
 
 For `ValueAdmissionRequest`, `semantic_environment` must contain the exact type
-declaration, trust environment, lexical and choice coordinates relevant to the
+declaration and lexical and choice coordinates relevant to the
 value, and every declaration coordinate observed by
 `admitted_value_domain`. Its dependency environment has that type declaration
 as a root and exactly the proper-edge closure of the admission contract. The
@@ -1446,12 +1951,12 @@ type-admission descriptor must cover the same environment target and complete
 closure. A context-free target, missing support, extra scope entry, or smaller
 producer dependency set is malformed and no admission service is invoked.
 
-Every request's `trust_environment` must equal its
-`semantic_environment.trust_environment`; for the extension request it must
-equal `environment_without_extension.trust_environment`. Its target's embedded
-environment identity, where present, must equal `semanticIdentity` of that
-exact semantic environment. These repeated exact equalities prevent discovery
-under one trust/semantic environment and invocation under another.
+Every request carries one exact `semantic_environment` and one separate exact
+`trust_environment`; neither contains the other. Discovery and invocation
+must repeat both records exactly. The target's embedded environment identity,
+where present, must equal `semanticIdentity` of that exact semantic
+environment. These equalities prevent discovery under one semantic/trust pair
+and invocation under another without a recursive type.
 
 The argument sequence length, positions, and admitted types must equal the
 exact declaration. `symbol_key` and `binding_key` must name that same
@@ -1558,41 +2063,48 @@ SemanticExtensionAdmissionResult =
 
 Result conformance is relative to the exact request and semantic environment,
 not merely to these carrier shapes. After positional input admission, derive
-the unique denotational result by these total equations:
+`D(c,x,U)=dependencyObservations(c,x,U)` in proper-edge topological order and
+then the unique denotational result by these total equations:
 
 ```text
 expectedAdmission(r,E) =
   VALUE_ADMITTED(r.type_key,r.value) iff
     TypeDeclaration(r.type_key).admitted_value_domain.logical_relation(
-      r.value,E)=admitted;
+      r.value,D(admitted_value_domain,r.value,U))=admitted;
   otherwise VALUE_NOT_ADMITTED(r.type_key,r.value)
 
 expectedLiteral(d,b,E) =
-  b.meaning_contract.logical_relation(d.literal_identity,E) : TermResult
+  b.meaning_contract.logical_relation(
+    d.literal_identity,D(b.meaning_contract,d.literal_identity,U)) : TermResult
 
 expectedFunction(r,E) =
   SemanticBinding(r.binding_key).meaning_contract.logical_relation(
-    r.arguments,E) : TermResult
+    r.arguments,D(meaning_contract,r.arguments,U)) : TermResult
 
 expectedPredicate(r,E) =
-  ordinary SemanticBinding(r.binding_key).meaning_contract.logical_relation(
-    r.arguments,E) : Eval
+  recordAt(BINDING(r.binding_key),U).meaning_contract.logical_relation(
+    r.arguments,D(meaning_contract,r.arguments,U)) : Eval
 
 expectedPairOccurrence(r,E,T) =
   DEFINITIONAL_T3_A1:
     ANY_RESULT({expectedPredicate(scope request for e.event_value,E)
                 | e occurs in T});
   INDEPENDENT_COHERENCE_PROOF:
-    occurrence_meaning_contract.logical_relation((T),E), which the admitted
+    OccurrenceBindingProjection(pair declaration,pair binding,scope binding)
+      .meaning_contract.logical_relation(
+        (T),D(meaning_contract,(T),U)), which the admitted
     proof establishes equal to that same complete T3/A1 aggregate for every T
 
 expectedProfile(r,E) =
   ProfileBinding(r.profile_key).coverage_meaning.logical_relation(
-    r.coverage_subject,E) : decisive or unknown ProfileResult
+    r.coverage_subject,
+    D(coverage_meaning,r.coverage_subject,U)) : decisive or unknown ProfileResult
 ```
 
-The applicable `E` is exactly the request's `semantic_environment`; every
-lookup uses the unique reachable binding established by section 3.3. For a
+The universe `U` contains exactly the request's semantic environment, separate
+trust environment, and request-bound records; it is never passed to a logical
+relation. Every lookup uses the unique reachable binding established by
+section 3.3. For a
 pair-owned occurrence `PredicateRequest`, `expectedPredicate` is replaced by
 `expectedPairOccurrence` and the trace is the admitted sole positional value.
 Thus definitional and independently proved pair meanings have the same
@@ -1616,11 +2128,12 @@ An exact expected `TERM_ERROR` or `Eval.ERROR` is conformant and is preserved;
 it is not repaired into a value or truth.
 
 A carrier-valid but unequal admission, `TermResult`, `Eval`, or profile result
-is `MALFORMED_RESULT` and an invocation protocol failure. The claimed value,
+is `MALFORMED_RESULT(SEMANTIC_MISMATCH)` and an invocation protocol failure. The claimed value,
 truth, metadata, or admission is discarded. A returned admission-service
 `ADMISSION_ERROR`, concrete/symbolic profile error, or other declared
 failure-result tag is governed by the descriptor's exact `failure_contract` and
-maps as section 5.4; it is never a substitute expected denotation.
+maps by the total section 5.4 role function; it is never a substitute expected
+denotation.
 Pair, authority, migration, compatibility, semantic-extension, certificate,
 and reasoning results are not denotational evaluator results: their conformance
 is instead exact request/environment equality plus the kind-specific admitted
@@ -1653,7 +2166,8 @@ For `PAIR_INCOHERENCE_ADMITTED`, both `Eval` records are complete values of
 the exact K1 algebra, including truth/evidence/unknown/error sets. The trace
 must be admitted under the exact request Delta; `scope_aggregate_eval` must be
 the exact T3/A1 aggregate of the scope predicate over every event in that
-trace; `occurrence_eval` must be the occurrence predicate on that same trace;
+trace; `occurrence_eval` must be the exact
+`OccurrenceBindingProjection.meaning_contract` result on that same trace;
 and the two records must be unequal. Any missing field, non-admitted trace,
 different environment, or equal result records makes the result malformed.
 The other admission-result tags echo their request identity and certificate;
@@ -1663,29 +2177,39 @@ their `NOT_ADMITTED` variants are nondecisive and grant no admission.
 
 ```text
 EvidenceRef = (
-  issuer_scope, evidence_namespace, local_identity, schema_binding
+  issuer_scope : IssuerScope, evidence_namespace, local_identity,
+  schema_binding : ContractSpecKey
 )
 UnknownReason = (
-  issuer_scope, taxonomy_key, semantic_parameters
+  issuer_scope : IssuerScope, taxonomy_key, semantic_parameters
 )
 EvaluationErrorReason = (
-  issuer_scope, taxonomy_key, semantic_parameters
+  issuer_scope : IssuerScope, taxonomy_key, semantic_parameters
 )
 ReasoningErrorReason = (
-  issuer_scope, taxonomy_key, semantic_parameters
+  issuer_scope : IssuerScope, taxonomy_key, semantic_parameters
 )
 CertificateRejectionReason = (
-  issuer_scope, taxonomy_key, semantic_parameters
+  issuer_scope : IssuerScope, taxonomy_key, semantic_parameters
 )
 InterfaceFailureReason = (
-  issuer_scope, taxonomy_key, semantic_parameters
+  issuer_scope : exactly ABI_REASON_ISSUER,
+  reason_code : InterfaceFailureCode,
+  capability_identity : CapabilityKey | NO_CAPABILITY,
+  request_identity : RequestIdentity | NO_REQUEST,
+  expected_contract_identity :
+    ExpectedResultContractIdentity | NO_EXPECTED_CONTRACT,
+  offending_result_identity : OffendingResultIdentity
 )
 ```
 
 The six sorts are disjoint. Equality is exact component equality. Parameters
 are typed finite logical records whose equality is defined by their declared
-schema; an untyped message is diagnostic only and cannot be an identity
-parameter. Finite sets deduplicate equal members and have no order. Reordering
+schema; they may contain exact keys, values, result identities, and request or
+contract-spec keys, but never a `ContractSpec`, logical relation,
+`SemanticEnvironment`, `DependencyObservationEnvironment`, or
+`TrustEnvironment` record. An untyped message is diagnostic only and cannot be
+an identity parameter. Finite sets deduplicate equal members and have no order. Reordering
 or repeating a transport occurrence therefore cannot change a result; two
 unequal stable identities never coalesce because their prose looks similar.
 
@@ -1704,10 +2228,25 @@ InterfaceFailure = (
            CERTIFICATE_ADMISSION | PAIR_ADMISSION |
            AUTHORITY_ADMISSION | MIGRATION_ADMISSION |
            COMPATIBILITY_ADMISSION | SEMANTIC_EXTENSION_ADMISSION,
-  kind : MALFORMED_REQUEST | MALFORMED_RESULT |
-         PROTOCOL_FAILURE | TRANSPORT_FAILURE,
+  kind : MALFORMED_REQUEST |
+         MALFORMED_RESULT(MALFORMED_CARRIER | SEMANTIC_MISMATCH) |
+         PROTOCOL_FAILURE | TRANSPORT_FAILURE |
+         TRUST_FAILURE | DISCOVERY_FAILURE,
   reasons : nonempty finset(InterfaceFailureReason)
 )
+
+InterfaceFailureCode = INTERFACE_FAILURE_CODE(
+  exact InterfaceFailure.domain, exact InterfaceFailure.kind)
+
+ExpectedResultContractIdentity =
+    DENOTATIONAL_CONTRACT(ContractSpecKey)
+  | RECEIVING_RULE(AbiVersion, JudgmentTag, exact Subject identity)
+  | DISCOVERY_RULE(AbiVersion, CapabilityTarget, JudgmentTag)
+
+OffendingResultIdentity =
+    RESULT_OFFENDER(ResultIdentity)
+  | MALFORMED_RESULT_SENTINEL
+  | NO_RESULT_SENTINEL
 ```
 
 `InterfaceFailure` is not a `Truth`, `Eval`, profile result, consistency
@@ -1715,31 +2254,138 @@ result, or relation result. A malformed declaration, binding, or request is
 rejected before invocation. A malformed completed result is not repaired,
 defaulted, partially accepted, or treated as unknown.
 
-`MALFORMED_RESULT` includes a carrier-shape violation and a shape-valid result
-unequal to the unique semantic result derived in section 5.2. In either case
-the lifecycle leaves `INVOCABLE_FOR` for
-`INVOCATION_FAILED(PROTOCOL,{MALFORMED_RESULT})`; it never remains invocable.
-For value admission this maps to `ADMISSION_ERROR`; for a function it maps to
-`TERM_ERROR`, which A2 projects to `ERROR`/`EVALUATION_ERROR` in any containing
-atom; for a predicate or pair-owned occurrence it maps to
-`ERROR`/`EVALUATION_ERROR`; for a concrete profile it maps to
-`EVALUATION_ERROR`; and for a symbolic profile or reasoning role it maps to
-`REASONING_ERROR`. Pair, migration, or certificate validation uses its exact
-bound modality: a concrete witness/counterexample/equality check maps to its
-declared `EVALUATION_ERROR`, while a symbolic validator or reasoning/admission
-protocol maps to `REASONING_ERROR`. Authority, compatibility, and semantic-
-extension validators expose only the latter failure tag. The semantically
-unequal returned value or truth is never observable as the result.
+Failure-domain selection is total and fixed:
 
-At the K1 boundary, a concrete evaluator's protocol or transport failure maps
-to the applicable nonempty `EvaluationErrorReason`: at a function boundary
-it yields `TERM_ERROR`, and at a predicate or concrete-profile boundary it
-yields `EVALUATION_ERROR`. A reasoning service, symbolic profile service, or
-certificate validator failure maps to nonempty `ReasoningErrorReason` and
-`REASONING_ERROR`. A discovery protocol/transport failure remains
-`DISCOVERY_FAILURE` and yields no evaluability result. Thus transport and
-protocol failures remain distinguishable from logical unknown, ordinary
-absence, and completed inconclusiveness.
+```text
+domainOf(VALUE_ADMISSION | FUNCTION_EVALUATION |
+         PREDICATE_EVALUATION | PROFILE_CONCRETE) = CONCRETE_INVOCATION
+domainOf(PROFILE_SYMBOLIC | REASONING) = REASONING_INVOCATION
+domainOf(PAIR_VALIDATION) = PAIR_ADMISSION
+domainOf(AUTHORITY_VALIDATION) = AUTHORITY_ADMISSION
+domainOf(MIGRATION_VALIDATION) = MIGRATION_ADMISSION
+domainOf(COMPATIBILITY_VALIDATION) = COMPATIBILITY_ADMISSION
+domainOf(SEMANTIC_EXTENSION_VALIDATION) = SEMANTIC_EXTENSION_ADMISSION
+malformed certificate envelope or certificate receiving-rule failure
+  = CERTIFICATE_ADMISSION
+pre-invocation declaration, binding, discovery, and trust validation
+  = respectively DECLARATION, BINDING, DISCOVERY, and DISCOVERY
+```
+
+Every displayed domain accepts every `InterfaceFailure.kind`; the
+`INTERFACE_FAILURE_CODE(domain,kind)` product is therefore a stable total code.
+Kinds that occur before invocation retain their pre-invocation projection
+below rather than being forced through a service role.
+
+The exact expected-contract function is total over requests:
+
+```text
+expectedContract(value admission r) =
+  DENOTATIONAL_CONTRACT(TypeDeclaration(r.type_key)
+                         .admitted_value_domain.contract_key)
+expectedContract(function/predicate r) =
+  DENOTATIONAL_CONTRACT(recordAt(BINDING(r.binding_key),U)
+                         .meaning_contract.contract_key)
+expectedContract(profile r) =
+  DENOTATIONAL_CONTRACT(ProfileBinding(r.profile_key)
+                         .coverage_meaning.contract_key)
+expectedContract(discovery r) =
+  DISCOVERY_RULE(r.abi_version,r.target,r.judgment)
+expectedContract(every reasoning/admission r) =
+  RECEIVING_RULE(r.abi_version,judgmentOf(r),subjectOf(r))
+```
+
+`failureReason(domain,kind,r,offender)` is the sole constructor for an
+invocation-bound interface reason. It sets issuer to `ABI_REASON_ISSUER`, code
+to `INTERFACE_FAILURE_CODE(domain,kind)`, capability to the exact request
+capability (or `NO_CAPABILITY` for discovery), request identity to
+`IDENTITY_OF(r)`, expected contract to `expectedContract(r)`, and offender to
+the supplied exact identity. Pre-request declaration/binding failures use the
+same constructor with `NO_CAPABILITY`, `NO_REQUEST`,
+`NO_EXPECTED_CONTRACT`, and `NO_RESULT_SENTINEL`. No message text, traversal
+order, service-selected taxonomy, or omitted parameter can alter the reason.
+
+For a malformed result `x`, the constructor is total:
+
+```text
+resultFailure(r,x) =
+  InterfaceFailure(domainOf(roleOf(r)),
+    MALFORMED_RESULT(MALFORMED_CARRIER),
+    {failureReason(domainOf(roleOf(r)),that-kind,r,
+                   MALFORMED_RESULT_SENTINEL)})
+  when x lacks a conforming carrier identity
+
+resultFailure(r,x) =
+  InterfaceFailure(domainOf(roleOf(r)),
+    MALFORMED_RESULT(SEMANTIC_MISMATCH),
+    {failureReason(domainOf(roleOf(r)),that-kind,r,
+                   RESULT_OFFENDER(IDENTITY_OF(x)))})
+  when x has a carrier identity but differs from the unique denotational
+  result or exact receiving rule
+```
+
+The returned value, truth, metadata, admission, or logical conclusion is
+discarded in both branches. There is no result identity for malformed carrier
+bytes/logical shape, so the fixed sentinel is mandatory; a stable exact result
+identity is mandatory for semantic mismatch.
+
+Map every individual interface reason pointwise, then deduplicate by exact K1
+reason equality:
+
+```text
+toEvaluationReason(role,h) = EvaluationErrorReason(
+  ABI_REASON_ISSUER, ABI_INTERFACE_EVALUATION_FAILURE,
+  (role,h.reason_code,h.capability_identity,h.request_identity,
+   h.expected_contract_identity,h.offending_result_identity))
+
+toReasoningReason(role,h) = ReasoningErrorReason(
+  ABI_REASON_ISSUER, ABI_INTERFACE_REASONING_FAILURE,
+  (role,h.reason_code,h.capability_identity,h.request_identity,
+   h.expected_contract_identity,h.offending_result_identity))
+
+evaluationReasons(role,F) = {toEvaluationReason(role,h) | h in F.reasons}
+reasoningReasons(role,F)  = {toReasoningReason(role,h) | h in F.reasons}
+```
+
+Because `F.reasons` is nonempty and both constructors are total, each mapped
+set is nonempty; equal mapped reasons coalesce and no unequal reason is removed.
+The complete service-role projection is:
+
+| Service role | Exact projection of any invocation-bound `InterfaceFailure F` |
+|---|---|
+| `VALUE_ADMISSION` | `ADMISSION_ERROR(evaluationReasons(role,F))` |
+| `FUNCTION_EVALUATION` | `TERM_ERROR(evaluationReasons(role,F))`; only A2 later projects it at an atom |
+| `PREDICATE_EVALUATION` | `Eval.ERROR(evaluationReasons(role,F),{},{})` |
+| `PROFILE_CONCRETE` | `ProfileResult.EVALUATION_ERROR(evaluationReasons(role,F))` |
+| `PROFILE_SYMBOLIC` | `ProfileResult.REASONING_ERROR(reasoningReasons(role,F))` |
+| `REASONING` | `ReasoningResult.REASONING_ERROR(reasoningReasons(role,F))` |
+| `PAIR_VALIDATION` | `PairValidationResult.REASONING_ERROR(reasoningReasons(role,F))` |
+| `AUTHORITY_VALIDATION` | `AuthorityAdmissionResult.REASONING_ERROR(reasoningReasons(role,F))` |
+| `MIGRATION_VALIDATION` | `MigrationAdmissionResult.REASONING_ERROR(reasoningReasons(role,F))` |
+| `COMPATIBILITY_VALIDATION` | `CompatibilityAdmissionResult.REASONING_ERROR(reasoningReasons(role,F))` |
+| `SEMANTIC_EXTENSION_VALIDATION` | `SemanticExtensionAdmissionResult.REASONING_ERROR(reasoningReasons(role,F))` |
+
+The same reasoning set is first recorded as
+`CertificateAdmission.REASONING_ERROR` when the failed invocation is a
+certificate-validator step, then projected only to the request binding's
+role-specific reasoning-error tag. A conformant explicit concrete validation
+result may still carry its declared `EVALUATION_ERROR`; this is a semantic
+result tag, not an interface-failure mapping and cannot be invented for an
+interface failure.
+
+`PROTOCOL_FAILURE` and `TRANSPORT_FAILURE` use the same role table with their
+distinct codes. `MALFORMED_RESULT(MALFORMED_CARRIER)` and
+`MALFORMED_RESULT(SEMANTIC_MISMATCH)` therefore deterministically become K1
+evaluation errors for the four evaluation roles and K1 reasoning errors for
+the seven reasoning/admission roles. A trust failure before invocation remains
+the exact root/discovery lifecycle failure and produces no K1 result; root
+absence/incompatibility maps to `EVALUABILITY_MISSING`, root uncertainty to
+`EVALUABILITY_UNKNOWN`, and trust protocol/transport failure to
+`DISCOVERY_FAILED`. A discovery failure likewise remains
+`DiscoveryResult.DISCOVERY_FAILURE`, with no evaluability or K1 result. If a
+trust/discovery/protocol failure occurs after an exact role is already
+invocable, it is invocation-bound and the role table applies. Thus every
+domain/kind and service role has exactly one projection without converting
+absence, uncertainty, malformedness, or failure into logical unknown.
 
 ## 6. Capabilities, reasoning requests, and certificate admission
 
@@ -1867,8 +2513,9 @@ validation.
 A complete in-fragment request must return an admitted decisive judgment.
 `COMPLETED_INCONCLUSIVE`, “no result,” an omitted certificate, or an
 inadmissible certificate is a complete-fragment protocol violation that yields
-`REASONING_ERROR`, never logical/profile unknown. Service failure is also
-reasoning error and yields no judgment. A concrete evaluator error encountered
+the canonical `NO_RESULT_SENTINEL` §5.4 `REASONING_ERROR`, never logical/profile
+unknown. Service/interface failure is pointwise mapped to canonical reasoning
+reasons and yields no judgment. A concrete evaluator error encountered
 while validating a concrete subject yields `EVALUATION_ERROR` and no
 judgment; it is neither inconclusive reasoning nor a counterexample.
 
@@ -2002,7 +2649,9 @@ alone is never sufficient.
 yields no logical conclusion, including no negation of the claim. Concrete
 witness/counterexample validation that encounters a K1
 `ERROR` yields `EVALUATION_ERROR`; validator/service/protocol failure is
-`REASONING_ERROR`. Both yield no conclusion. A proof-system identity or integrity signature can
+the exact §5.4 role-projected `REASONING_ERROR` with canonical ABI reasons.
+Malformed/unequal validator output is discarded before this projection. Both
+families yield no conclusion. A proof-system identity or integrity signature can
 identify bytes in a later representation, but never proves semantic validity
 by itself.
 
@@ -2072,6 +2721,83 @@ A1/T2/T3 and may be false, unknown, or error.
 
 K2 v0 admits a pair by either of two exact paths.
 
+First derive one complete ordinary-binding-shaped view. In the equations below,
+`pd` is the exact pair declaration, `pb` the exact pair binding, `sb` the
+ordinary scope `SemanticBinding`, and `od` is the unique predicate declaration
+selected by `pd.occurrence_symbol`. Failure to find exactly these records, or
+any key/signature mismatch, is pair-binding incompatibility.
+
+```text
+OccurrenceBindingProjection(pd,pb,sb) = (
+  binding_key = od.key,
+  declaration_key = od.key,
+  binding_kind = PREDICATE,
+  meaning_contract = occurrenceBundle(pd,pb,sb).meaning_contract,
+  permitted_facet_inputs = occurrenceBundle(pd,pb,sb).permitted_facet_inputs,
+  proper_semantic_dependencies =
+    occurrenceBundle(pd,pb,sb).proper_semantic_dependencies,
+  dependency_closure = occurrenceBundle(pd,pb,sb).dependency_closure,
+  evidence_schema = occurrenceBundle(pd,pb,sb).evidence_schema,
+  access_boundary = occurrenceBundle(pd,pb,sb).access_boundary,
+  unknown_contract = occurrenceBundle(pd,pb,sb).unknown_contract,
+  evaluation_error_contract =
+    occurrenceBundle(pd,pb,sb).evaluation_error_contract,
+  determinism_rule = SAME_SEMANTIC_INPUTS_SAME_COMPLETE_RESULT
+)
+
+occurrenceMeaningIdentity(pd,pb,sb) =
+  OccurrenceBindingProjection(pd,pb,sb).meaning_contract.contract_key
+occurrenceBindingIdentity(pd,pb,sb) =
+  IDENTITY_OF(every displayed field of OccurrenceBindingProjection(pd,pb,sb))
+
+occurrenceBundle(pd,pb,sb) when pb.admission=DEFINITIONAL_T3_A1 = (
+  meaning_contract = T3_A1_MEANING_LIFT(pd,sb.meaning_contract),
+  permitted_facet_inputs = ({trace}),
+  evidence_schema = T3_A1_EVIDENCE_LIFT(pd,sb.evidence_schema),
+  access_boundary = T3_A1_ACCESS_LIFT(pd,sb.access_boundary),
+  unknown_contract = T3_A1_UNKNOWN_LIFT(pd,sb.unknown_contract),
+  evaluation_error_contract =
+    T3_A1_ERROR_LIFT(pd,sb.evaluation_error_contract),
+  determinism_rule = SAME_SEMANTIC_INPUTS_SAME_COMPLETE_RESULT,
+  proper_semantic_dependencies = T3_A1_DEPENDENCY_LIFT(pd,sb),
+  dependency_closure = least acyclic proper closure of that exact set,
+  model_contract = T3_A1_MODEL_LIFT(pd,sb)
+)
+
+occurrenceBundle(pd,pb,sb) when pb.admission=
+  INDEPENDENT_COHERENCE_PROOF(bundle,certificate,validator) = bundle
+```
+
+Every named lift has an exact, non-configurable meaning. Its
+`ContractSpecKey` is derived from `(pd.pair_key,od.key,the displayed lift tag)`
+under `pd.pair_key.plugin_key`; its observation queries and support are derived
+by §3.3 and cannot be supplied. `T3_A1_MEANING_LIFT` has primary domain
+`Trace`, observes only the exact scope binding through one
+`EVAL_RESULT_SEQUENCE` query, and maps the resulting finite sequence to
+`ANY_RESULT` under frozen T3/A1. `T3_A1_EVIDENCE_LIFT` specifies exact union of
+all scope evidence. `T3_A1_UNKNOWN_LIFT` specifies exact union/retention of all
+scope unknown reasons and the nonempty invariant for an unknown result.
+`T3_A1_ERROR_LIFT` specifies exact union and dominance of all scope evaluation
+errors. `T3_A1_ACCESS_LIFT` exposes only the sole trace-derived positional
+value; it permits the observation derivation to pass each event's
+`event_value` to the scope meaning and exposes no actor, full `Outcome`,
+Contract, authority context, or undeclared evidence. `T3_A1_DEPENDENCY_LIFT`
+is exactly `{PAIR_DECLARATION(pd.pair_key),BINDING(sb.binding_key)}` plus the
+roots of the five lifted `ContractSpec`s and their derived supports, with the
+occurrence binding root excluded. `T3_A1_MODEL_LIFT` has the required exact
+`ModelContractKey(BINDING_IDENTITY(od.key),...)`, occurrence signature,
+`{trace}` facets, and lifted evidence/unknown/error contract identities.
+Empty trace therefore yields `VALUE(FALSE,{},{})`; multi-event equality covers
+truth, evidence, unknowns, and errors.
+
+The projection has every `SemanticBinding` field exactly once. Its declaration
+must satisfy `od.symbol_key=pd.occurrence_symbol`, and its binding and
+declaration keys must both equal `pb.occurrence_binding_key=od.key`; hence its
+predicate kind, symbol, exact meaning-contract identity, and complete derived
+binding identity are structural rather than pair-producer assertions. Two
+projections are equal iff every displayed ordinary field is equal under the
+exact `ContractSpec` and finite-collection equalities of §3.3.
+
 **Definitional path.** `DEFINITIONAL_T3_A1` makes the occurrence meaning
 definitionally equal to:
 
@@ -2082,8 +2808,8 @@ occurrence(T) =
   })
 ```
 
-The ABI owns this construction; the producer supplies no independent
-occurrence denotation. The exact frozen T3/A1 rule gives empty trace
+The ABI owns the displayed lift construction; the producer supplies no
+occurrence field. The exact frozen T3/A1 rule gives empty trace
 `VALUE(FALSE,{},{})`, unions evidence/unknown/error sets over every event,
 lets any error dominate, otherwise lets TRUE decide while retaining collected
 unknown metadata, and handles multi-event traces without traversal-order
@@ -2091,8 +2817,15 @@ effects. `scope` must return `VALUE(FALSE,{},{})` for every event key
 outside `controlled_keys`.
 
 **Independent-proof path.** `INDEPENDENT_COHERENCE_PROOF` permits distinct
-scope and occurrence meanings only with an admitted
-`EVENT_PAIR_COHERENCE_PROOF`. Its `PAIR_VALIDATION` capability must cover
+scope and occurrence meanings only when its
+`OccurrenceSemanticContractBundle` is complete: it must have the exact
+occurrence declaration/key/kind, sole trace facet/access boundary, evidence,
+unknown, error, determinism, derived support/closure, and required exact
+model-contract projection shown above. Omission or inequality of any field
+leaves no projection and makes the pair binding incompatible. An admitted
+`EVENT_PAIR_COHERENCE_PROOF` must establish full-`Eval` equality between this
+bundle's relation and `T3_A1_MEANING_LIFT` for every admitted trace. Its
+`PAIR_VALIDATION` capability must cover
 every admitted trace and complete `Eval` field, bind the exact pair/members/
 controlled keys/environment, and use an already admitted exact trust root and
 producer-independent validator under sections 2.3 and 6.5. Neither validator
@@ -2100,6 +2833,13 @@ soundness nor trust may depend on the pair producer, its claim, the unadmitted
 pair, or a service supplied by that producer.
 
 Successful admission binds the exact pair meanings. A bare claim is malformed.
+For either path, the bundle's `model_contract` must equal the unique package
+`ModelContract` for the occurrence projection; missing or conflicting records
+are `MALFORMED(model/machine contract mismatch)`. `recordAt(BINDING(od.key),U)`
+then returns exactly `OccurrenceBindingProjection(pd,pb,sb)`, and every
+occurrence `PredicateRequest`, result-equality check, dependency closure, and
+model-facing lookup uses that record. An ordinary `SemanticBinding(od.key)` is
+forbidden even if extensionally equal and conflicts under §8.3.
 Missing binding/proof/validator leaves the coherence binding open; a missing
 validator capability may additionally yield `EVALUABILITY_MISSING`, and
 undecided discovery yields `EVALUABILITY_UNKNOWN`. Validator/protocol failure
@@ -2119,7 +2859,7 @@ unequal complete `Eval` records described in section 5.2. That typed negative
 sets `BINDING_INCOMPATIBLE` and makes the pair semantic binding malformed.
 By contrast, an ordinary occurrence invocation whose returned carrier is
 shape-valid but unequal to the already bound definitional or independent
-meaning is only `MALFORMED_RESULT`/evaluation error under §5.4; its returned
+meaning is only `MALFORMED_RESULT(SEMANTIC_MISMATCH)`/evaluation error under §5.4; its returned
 truth is discarded and it is not a pair-incoherence certificate.
 Every generic `REJECTED_NONDECISIVE`, unavailable validator, undecided
 discovery, or validation failure instead leaves the pair open; none is a
@@ -2144,7 +2884,7 @@ For an exact closed request:
 The first three tags are conformant only when the complete record equals the
 unique `coverage_meaning.logical_relation` result under the exact request
 subject/environment. Shape alone cannot choose complete, incomplete, or
-unknown; mismatch is `MALFORMED_RESULT` and no profile judgment.
+unknown; mismatch is `MALFORMED_RESULT(SEMANTIC_MISMATCH)` and no profile judgment.
 An absent profile meaning is `OPEN_BINDINGS`, not unknown. An absent
 compatible/root-usable checker is `EVALUABILITY_MISSING`, and undecidable checker/root
 discovery is `EVALUABILITY_UNKNOWN`; neither is `PROFILE_UNKNOWN` and neither
@@ -2156,10 +2896,10 @@ satisfiability, or authority.
 
 ```text
 SourceRef = (
-  issuer_scope, source_kind, stable_source_identity, provenance_facts
+  issuer : IssuerScope, source_kind, stable_source_identity, provenance_facts
 )
 AuthorityRef = (
-  authority_namespace, stable_attestation_identity
+  owner : IssuerScope, authority_namespace, stable_attestation_identity
 )
 AuthorityFactBinding = (
   authority_fact_key : AuthorityFactKey,
@@ -2180,7 +2920,10 @@ authority.
 Certificate references are admission evidence, never a fifth fact-identity or
 normative field. Closure/adoption accepts a fact only after an
 `AUTHORITY_FACT_ATTESTATION` certificate validates that exact tuple under an
-already admitted scoped trust root and a producer-independent validator. A missing
+already admitted scoped trust root. The exact validator producer is disjoint
+from `subjectProducerSet(AUTHORITY_SUBJECT(authority_fact_key),U)`; the root's
+derived embedding-policy producer is disjoint from that set, the validator,
+and certificate producer. These sets are structural, not fact fields. A missing
 certificate or validator leaves the fact open. A malformed or rejected
 attestation may make its envelope/package nonconformant but proves no invalid
 authority fact and produces no `AuthorityFactBinding`; it is retained only as
@@ -2314,7 +3057,7 @@ After discovery, invocation/result transitions remain distinct:
 | concrete evaluator returns conformant error | `EVALUATION_ERROR` |
 | reasoner returns conformant failure | `REASONING_ERROR` |
 | invocation transport/protocol failure | `InterfaceFailure`, mapped by service role as section 5.4 |
-| malformed or semantically unequal result | `MALFORMED_RESULT`, invocation protocol failure, and service-role error mapping; returned semantics discarded |
+| malformed or semantically unequal result | exact malformed-carrier or semantic-mismatch result failure, invocation protocol failure, and total role mapping; returned semantics discarded |
 
 Discovery is only a logical interface. No process manager, protocol
 implementation, dynamic loader, package source, service endpoint, scheduler,
@@ -2369,7 +3112,11 @@ migration uses `MIGRATION_VALIDATION`, `MIGRATION_RELATION_ADMISSION`, and
 full exact subject and environment. `source_keys` and `target_keys` are finite
 exact sets, and both semantic environments are complete typed records from
 section 2. The exact already admitted `trust_root_key` must authorize that
-validator, kind, and target and satisfy producer independence; no record owns,
+validator, kind, and target. For each of the migration, compatibility, and
+extension Subjects, the validator producer is disjoint from its exact
+`subjectProducerSet`, and the root embedding-policy producer is disjoint from
+that set plus the validator/certificate producers. All are derived from typed
+keys; no record owns,
 redefines, or self-validates trust.
 
 A `CompatibilityClaim` names exact source/target ABI and key sets, the
@@ -2487,15 +3234,15 @@ representation-only and grant no semantic work to a later stage.
 |---:|---|---|---|---|---|
 | 1 | `Delta` type/value/literal/signature/facet/event/pair declarations remain distinct from meanings/services; ill-typed choices are malformed | six declaration records, `EventScopePairDeclaration`, targeted `ValueAdmissionRequest/Result` | declaration/support validation precedes independent binding/discovery coordinates | A01,A07,A12,A13 | byte representation excluded |
 | 2 | model-facing and machine-facing contracts share one exact semantic key | `SemanticBinding`, `ModelContract`, `AliasBinding` | exact projection equality; stale/mismatched document is malformed | A05 | presentation rendering excluded |
-| 3 | function/atom meanings match `Delta`, return the exact bound `TermResult/Eval`, receive only declared facets, and retain mechanically extracted dependencies | `SemanticBinding`, environment-bound function/predicate requests, `ContractSpec`, `DependencyEnvironment` syntax roots/association edges/expanded closure | total `recordAt`; declaration/symbol-to-binding association; extensional support; complete expected-result equality; access/request conformance | A06,A08,A09,A10 | invocation transport excluded |
-| 4 | every `EventScopePair` has typed members, immutable controlled keys, and exact empty/multi-event full-result coherence | pair declaration/binding, pair request/result, positive proof and typed incoherence certificate | definitional T3/A1 or independently rooted complete proof; generic rejection stays open, only typed admitted trace/full-`Eval` inequality is incompatible | A12,A13 | certificate byte form excluded |
+| 3 | function/atom meanings match `Delta`, return the exact bound `TermResult/Eval`, receive only declared facets, and retain mechanically extracted dependencies | `SemanticBinding`, stratified `ContractSpec`, finite lower-level `DependencyObservationEnvironment`, exhaustive `Subject`/record roots, and `DependencyEnvironment` frozen syntax facet/association/closure | total `recordAt`; exhaustive root algebra; topological lower observations; extensional nonrecursive support; complete expected-result equality; access/request conformance | A06,A08,A09,A10 | invocation transport excluded |
+| 4 | every `EventScopePair` has typed members, immutable controlled keys, and exact empty/multi-event full-result coherence | pair declaration/binding, complete `OccurrenceBindingProjection`, named T3/A1 lifts, pair request/result, positive proof and typed incoherence certificate | every ordinary occurrence field/model contract is derived or present in a complete independent bundle; full-Eval proof is producer-independent; generic rejection stays open and only typed admitted inequality is incompatible | A12,A13 | certificate byte form excluded |
 | 5 | concrete evaluators preserve the exact bound `Eval`, stable evidence/reason identities, and declared dependencies | semantic/trust-environment-bound `PredicateRequest`, `Eval`, evidence/reason records | exact algebra, nonempty invariants, complete equality to the bound/derived logical relation, and malformed-result failure | A09,A10,A11,A13 | evidence storage excluded |
 | 6 | capabilities bind exact targets, sound/complete fragments, dependencies, independently admitted nonempty ordinary-use trust roots, and concrete/partial/complete class | `CapabilityDescriptor`, `CapabilityTarget`, non-recursive `ServiceUseSubject`/`SemanticEnvironmentIdentity`, `TrustEnvironment`, `DiscoveryRequest/Result` | role, judgment, target, exact environments, fragment, scope, external root scope, and producer independence validate together; complete in-fragment decisiveness | A02,A09,A15,A16,A19 | service location excluded |
 | 7 | witnesses/proofs/models/counterexamples/relations bind exact typed closure/environment and never override `chi_C`; internal `==Eval` remains separate | `ReasoningRequest/Result`, `CertificateEnvelope/Admission`, typed `SemanticEnvironment` | §6 kind-specific admission; strong proof/decisive countermodel; derived choice map and exact lexical/choice/authority/trust coordinates | A17,A18 | proof payload encoding excluded |
-| 8 | evaluator failures and reasoning failures remain distinct and yield no logical/profile conclusion | `InterfaceFailure`, `TermResult`, `Eval`, `ProfileResult`, `ReasoningResult` | service-role mapping; no unknown/default conversion | A10,A15,A16 | transport error representation excluded |
+| 8 | evaluator failures and reasoning failures remain distinct and yield no logical/profile conclusion | canonical `InterfaceFailureReason`, exact expected/offending identities, `TermResult`, `Eval`, `ProfileResult`, `ReasoningResult` | total pointwise eleven-role mapping; carrier malformed and semantic mismatch distinct; returned semantics discarded; trust/discovery pre-invocation maps to no K1 result | A10,A15,A16,A17 | transport error representation excluded |
 | 9 | exact profiles, pairs, syntax-associated semantic bindings, and recursive dependencies participate in closure/composition/full equivalence; profile unknown and errors remain distinct | profile/pair bindings and targets, expanded dependency environment, environment-bound exact profile result | recomputed syntax/association/proper closure; profile declaration is not required but binding absence is open; invoked checker alone can yield exact profile unknown | A01,A06,A13,A15 | checker transport excluded |
 | 10 | joint claims need one capability covering the whole cross-plugin dependency set | joint environment/judgment target, `CapabilityDescriptor`, reasoning request/certificate | absent/undecidable target yields evaluability missing/unknown simultaneously with logical unknown absent decisive evidence; invoked/failure branches remain distinct | A19 | service orchestration excluded |
-| 11 | `SourceRef` is self-contained provenance; only validated `AuthorityRef` tuples adopt or bind choice | `SourceRef`, `AuthorityRef`, `AuthorityFactKey`, coalesced `AuthorityFactBinding` | source adds no authority; producer-independent root admission validates the exact tuple; multiple admitted attestations union as evidence | A14,A18 | attestation encoding excluded |
+| 11 | `SourceRef` is self-contained provenance; only validated `AuthorityRef` tuples adopt or bind choice | typed-owner `SourceRef`, `AuthorityRef`, `AuthorityFactKey`, coalesced `AuthorityFactBinding`, structural `subjectProducerSet` | source adds no authority; producer/root owners derive from key structure; independent validator/root admission validates the exact tuple; multiple admitted attestations union as evidence | A14,A18 | attestation encoding excluded |
 
 Coverage count: **11 of 11 K1 §8 rows**, with no frozen semantic obligation
 left unresolved.
@@ -2517,21 +3264,21 @@ are abstract typed values. Greek labels are not display-name binding rules.
 | K2-A03 | exact valid declaration and bound meaning `Pα@1/qα`; v1 discovery reports service absent, failure, or undecided; separate v2 exposes `Pα@2/qα/Sβ` | absent, exact `DISCOVERY_FAILED(failure)`, and undecided are distinct total states; v2 target unequal | missing, no evaluability status on failure, or evaluability unknown; no truth and no v2 substitution | exact version, absence, failure, and uncertainty | latest/range/display/v2 fallback or failure-as-unknown | exact version/discovery |
 | K2-A04 | two keys share display label but differ in owner namespace, plugin, or function/predicate kind | two distinct declared identities or kind conflict if forced under one key | coexist when keys differ; `MALFORMED` on kind collision | owner and kind | display-name equality or shadowing | namespacing/kind |
 | K2-A05 | exact conformant `qα` binding; model contract names old signature or `Pα@2` | binding is bound; document mismatch prevents package conformance | `MALFORMED(model/machine contract mismatch)`; no rebind | compiler-visible contract versus denotation | trust prose/alias to select meaning | matching identity |
-| K2-A06 | frozen syntax roots are `{SYMBOL(qα),DECLARATION(Tα),PLUGIN(Pα@1)}`; `qα` uniquely declares `dα`, whose binding depends on `dβ`; producer omits `BINDING(dα/dβ)`, substitutes `Tβ`, or adds an association/self-edge | kernel preserves syntax roots, derives `SYMBOL(qα)->BINDING(dα)` and every reachable declaration-to-binding edge, then closes binding proper dependencies; absent exact binding remains reachable/open | missing/ambiguous symbol declaration malformed; missing binding `OPEN_BINDINGS`; unequal producer dependency view malformed; no association edge is producer proper dependency | frozen syntax identity versus exact Sigma reachability and binding closure | caller-maintained smaller support, omitted binding bridge, overridden association, or mandatory self-edge | mechanical dependencies |
+| K2-A06 | frozen K1 syntax roots are `{K1_SYMBOL(qα),K1_DECLARATION(Tα),K1_PLUGIN(Pα@1)}`; `qα` uniquely declares `dα`, whose binding observes lower `dβ`; producer omits `BINDING(dα/dβ)`, substitutes `Tβ`, or adds an association/self-edge | kernel retains frozen roots, derives exhaustive subject roots and `SYMBOL(qα)->DECLARATION(dα)/BINDING(dα)`, constructs exact lower observations topologically, and closes proper edges; absent binding remains reachable/open | missing/ambiguous declaration malformed; missing binding `OPEN_BINDINGS`; unequal query/support/dependency view or any cycle malformed; no association is a producer edge | frozen syntax identity versus semantic roots, stratified observations, Sigma reachability and closure | caller-maintained smaller support, environment-consuming relation, omitted/overridden association, or mandatory self-edge | mechanical dependencies |
 | K2-A07 | admitted `v0:Tα`; non-admitted `v1` used as choice alternative, argument, payload, or result | type declaration has `BINDING_NOT_REQUIRED`; contextual admission validates first and invalidates every use of second | well typed versus `MALFORMED` or evaluation protocol error; all later coordinates explicit | typed membership versus Sigma binding | ignore unused ill-typed value, require a meaning binding, or coerce | type/value admission |
 | K2-A08 | predicate declaration has final-derived value at position 1 and evidence-derived value at 2; exact rooted service attempts full Outcome/extra evidence access | exact environment/root-bound declared request is invocable; attempted access violates boundary | exact expected `Eval` versus `EVALUATION_ERROR`/package malformed | explicit facets and evidence schema | implicit Outcome/context channel | facet/access boundary |
-| K2-A09 | broad `qα:(Tα,State,EvidenceStore)->Bool` with explicit reusable meaning, exact semantic/trust environments and admitted service-use root; variants request an oracle or return a shape-valid `Eval` unequal to the bound logical relation | legitimate request is root-compatible/invocable and only its exact expected `Eval` completes; oracle excluded; unequal result fails protocol | legitimate exact truth/error versus package/request malformed or `MALFORMED_RESULT` mapped to evaluation error | abstraction and exact meaning versus privileged lookup or evaluator-selected truth | expected-answer/challenge branch, unrooted use, or accept any shape-valid Eval | anti-oracle and exact result binding |
-| K2-A10 | bound `fα` expects `TERM_ERROR({te})`; bound `qα` expects `VALUE(UNKNOWN,{}, {u})`; another expects `ERROR({ee},{},{})`; adversary returns a shape-valid unequal value/metadata record | first three exact expected results replace invocable with conformant completed tags; mismatch replaces it with invocation protocol failure | term evaluation error (projected in containing atom); factual truth unknown; predicate evaluation error; mismatch `MALFORMED_RESULT`/evaluation error with returned semantics discarded | exact denotation, term failure, truth, metadata, and predicate failure | encode term error as unknown/error as false, or accept carrier shape without equality | exact result algebra/meaning |
+| K2-A09 | broad `qα:(Tα,State,EvidenceStore)->Bool` with explicit reusable meaning over finite lower observations, exact semantic/trust environments and admitted service-use root; variants request an oracle or return a shape-valid unequal `Eval` | legitimate request is root-compatible/invocable and only its topologically derived exact expected `Eval` completes; oracle excluded; unequal result produces canonical semantic-mismatch failure | legitimate exact truth/error versus package/request malformed or `MALFORMED_RESULT(SEMANTIC_MISMATCH)` pointwise mapped to evaluation error | abstraction and exact meaning versus privileged lookup or evaluator-selected truth | expected-answer/challenge branch, environment-consuming relation, unrooted use, or accept any shape-valid Eval | anti-oracle and exact result binding |
+| K2-A10 | bound `fα` expects `TERM_ERROR({te})`; bound `qα` expects `VALUE(UNKNOWN,{}, {u})`; another expects `ERROR({ee},{},{})`; adversary returns malformed carrier or shape-valid unequal metadata | exact results complete; each failure binds ABI issuer, code, capability/request/expected contract, and sentinel or result identity before total role projection | term evaluation error (A2 at atom); factual unknown; predicate error; malformed carrier/semantic mismatch maps deterministically to evaluation error and discards returned semantics | exact denotation, term failure, truth, metadata, interface-failure kind and predicate failure | encode term error as unknown/error as false, accept carrier shape, choose prose reason, or expose unequal result | exact result/failure algebra |
 | K2-A11 | `VALUE(TRUE,{e1,e2},{u1})` represented with repeated/reordered references | one logical set-valued result | exact equality after deduplication; unequal identities remain | stable support/reason identity | list order or message-text equality | A1/A2 set semantics |
 | K2-A12 | exact controlled `eα` declaration and payload; traces with matching actor, absent actor, wrong actor; attempted caller flag `OBSERVATIONAL` | events admitted; actor affects matching grants; flag rejected | matching grant may authorize; absent/wrong actor has no match; flag malformed | immutable class versus actor matching | witness/caller control flag | event/authorization |
-| K2-A13 | pair with empty/multi-event full-`Eval` branches; definitional/admitted proof and exact service-use root; malformed/stale/rejected proof, missing/failed validator; a shape-valid occurrence result unequal to its exact definitional/proved meaning; or exact typed incoherence counterexample | pair uses actual Delta declaration; positive binds; generic rejection/missing/failure stays open; unequal invocation result is protocol/evaluation failure; only typed `PAIR_INCOHERENCE_ADMITTED` sets binding incompatible | bound; `OPEN_BINDINGS` plus evaluability; `REASONING_ERROR`/evaluation error with no admission; or `MALFORMED(incompatible semantic binding)` only for typed negative | result mismatch/generic rejection versus complete pair incoherence | infer pair falsity from mismatch/rejection/assertion/sample or accept occurrence shape without equality | EventScopePair coherence/result equality |
-| K2-A14 | self-contained source `srcα`; exact `AuthorityFactKey`; two independent admitted attestations `{ca1}` and `{ca2}`; source alone/unadmitted attestation variants | provenance is separate; equal fact keys coalesce evidence to `{ca1,ca2}`; invalid evidence produces no fact | origin retained; one normative fact can adopt/bind only after independent trust-root admission | origin, fact identity, and admission evidence | fifth-field identity, evidence-set conflict, or authority from wording/signature/evaluation | provenance/authority |
+| K2-A13 | pair with empty/multi-event full-`Eval` branches; definitional lift or complete independent occurrence bundle/proof; derived producer sets and exact service-use root; incomplete bundle, malformed/stale/rejected proof, missing/failed validator, unequal invocation result, or typed incoherence counterexample | `OccurrenceBindingProjection` supplies every ordinary field/model contract; producer/root independence is structural; generic rejection/missing/failure stays open; unequal invocation is canonical evaluation failure; only typed `PAIR_INCOHERENCE_ADMITTED` sets incompatible | bound; `OPEN_BINDINGS` plus evaluability; `REASONING_ERROR`/evaluation error with no admission; or `MALFORMED(incompatible semantic binding)` only for typed negative | complete occurrence semantics/model projection and producer ownership versus result mismatch/generic rejection/incoherence | ordinary second binding, partial bundle, asserted owner, or pair falsity from mismatch/rejection/sample | EventScopePair coherence/result equality |
+| K2-A14 | typed-owner self-contained source `srcα`; typed-owner `AuthorityRef`; exact `AuthorityFactKey`; two independent admitted attestations `{ca1}` and `{ca2}`; source alone/unadmitted variants | structural `producerOf` derives source/authority/subject producers; policy root is a distinct embedding-policy producer; equal fact keys coalesce evidence | origin retained; one normative fact can adopt/bind only after exact producer-independent root admission | origin, typed ownership, fact identity, and admission evidence | free issuer/owner, fifth-field identity, evidence-set conflict, or authority from wording/signature/evaluation | provenance/authority |
 | K2-A15 | Sigma-only profile `Rα` with dimensions `{d1,d2}` and no invented Delta; exact semantic/trust environments; checker with admitted service-use root: exact full evidence, missing `d2`, unresolved coverage, concrete failure, or symbolic failure | declaration-not-required+bound; every exact result/failure replaces invocable with a completed/failure state; absent/incompatible/uncertain root is separate discovery/evaluability only | complete, incomplete, profile unknown, evaluation error, reasoning error; binding absence is open and service/root absence gives no profile result | target applicability, exact coverage status, trust, failure and availability | invent profile declaration or treat absence/root failure/result mismatch as incomplete/unknown | profile boundary/total lifecycle |
 | K2-A16 | concrete-only, partial-symbolic, and complete-fragment descriptors with exact environments/nonempty service-use roots; in/out-of-fragment requests; complete in-fragment “no result” | root-qualified capability-specific invocability and every completion replaces invocable | concrete exact result only; partial/outside may be relation unknown; forbidden completion is `REASONING_ERROR`; root incompatibility is evaluability missing | trust-qualified soundness versus completeness | unknown from complete in-fragment or descriptor root list as admission | capability relativity |
-| K2-A17 | exact witness/proof/counterexample/internal `==Eval` certificate with validator service-use scope and certificate-admission scope; stale environment or relation relabel | first admitted only for own kind after both root uses and exact environments validate; stale/relabel rejected | named SAT/UNSAT/relation/internal conclusion or no judgment | evidence kind/environment/trust use | reuse stale proof, root admitted for only another scope, or expose internal equality as public proof | certificate admission |
+| K2-A17 | exact witness/proof/counterexample/internal `==Eval` certificate with explicit certificate/capability/service/subject roots, structural producer sets, both root scopes, and stratified exact environment; stale environment, owner assertion, or relation relabel | first admitted only for own kind after exact roots/observations and validator/subject/policy independence validate; stale/relabel rejected; interface failure uses canonical reasoning mapping | named SAT/UNSAT/relation/internal conclusion or no judgment/error | evidence kind, exhaustive roots, nonrecursive environment, ownership, trust use, and failure identity | reuse stale proof, omit certificate root, assert producer, root another scope, or expose internal equality publicly | certificate admission |
 | K2-A18 | closed Contract has exact `ChoiceBindingKey(c)` referencing admitted `AuthorityFactKey` and derives `chi_C(c)=v0`; request/witness supplies `v1`; duplicate attestations support the same fact | typed choice/authority coordinates validate and attestations coalesce; override malformed | closure and judgments use only `v0`; evidence multiplicity does not change choice | controller/authority choice binding versus attestation evidence | request-selected choice or certificate-set-selected fact | mechanical `chi_C` |
 | K2-A19 | one closed joint consistency subject depending on `{qα,qβ,Tγ}` with no decisive core evidence; only local/root-local targets, joint root undecided, exact rooted joint partial/complete targets, or invocation failure | absent/incompatible/undecided trust-qualified joint discovery does not invoke; invoked branches bind the same complete environment identity/root scope and every completion replaces invocable | missing root/target gives `EVALUABILITY_MISSING+CONSISTENCY_UNKNOWN`; undecided root gives `EVALUABILITY_UNKNOWN+CONSISTENCY_UNKNOWN`; partial completion keeps logical unknown; admitted witness gives SAT; failure gives reasoning error/no invocation conclusion | exact joint trust/evaluability, logical evidence, completion history, and failure | conjoin/trust local results, omit joint environment root scope, or make logical unknown invocation-only | cross-plugin scope/trust |
-| K2-A20 | explicit migration `Pα@1` to `Pα@2`; exact compatibility and semantic-extension subjects with their admission targets/certificates; aliases/latest/first-found and unvalidated extension variants | each validator is discoverable/invocable only through its exact judgment/target and independent root; migration yields a new explicit binding | admitted named relation/claim/extension only; rejected proof grants none; unknown/unvalidated extension is incompatible | identity, protocol compatibility, semantic relation, and extension effect | mutate original, discovery-order substitute, or silently ignore extension | migration/version/extension |
+| K2-A20 | plugin-owned migration `Pα@1` to `Pα@2`; plugin-owned compatibility/extension keys, exact subject/capability/service/certificate roots and structural producer sets; aliases/latest/first-found and unvalidated variants | exhaustive subject roots and owner equations make each validator invocable only through its exact judgment/target and distinct policy root; migration yields a new explicit binding | admitted named relation/claim/extension only; rejected proof grants none; missing roots and unknown/unvalidated extension have exact no-effect/incompatible status | typed ownership, identity, protocol compatibility, semantic relation, roots and extension effect | free owner scope, omit certificate/capability root, mutate original, discovery-order substitute, or ignore extension | migration/version/extension |
 
 Case count: **20** (`K2-A01`--`K2-A20`).
 
@@ -2585,8 +3332,9 @@ Case count: **20** (`K2-A01`--`K2-A20`).
    capability, predicate judgment, binding-use subject, and environment
    identity. A conformant request exposes to the meaning only the three
    positional values.
-4. The returned `Eval` must equal the unique complete result of the exact
-   binding logical relation, including evidence/unknown/error sets. It replaces
+4. The returned `Eval` must equal the unique complete result obtained from the
+   binding relation's finite lower-level observation map, including
+   evidence/unknown/error sets. It replaces
    `INVOCABLE_FOR` with `COMPLETED(exact Eval)` and yields only the matching K1
    truth/error status.
 5. In the adversarial variant, the binding or request asks for an expected
@@ -2594,9 +3342,11 @@ Case count: **20** (`K2-A01`--`K2-A20`).
    field/access is detected before or during invocation.
 6. Final status for that variant is package/request malformed or
    `EVALUATION_ERROR(undeclared access)`, with no logical conclusion.
-7. A shape-valid but unequal `Eval` instead produces `MALFORMED_RESULT`, leaves
-   no returned truth observable, and replaces `INVOCABLE_FOR` with invocation
-   protocol failure mapped to `EVALUATION_ERROR`.
+7. A shape-valid but unequal `Eval` instead produces
+   `MALFORMED_RESULT(SEMANTIC_MISMATCH)`. The canonical ABI reason binds the
+   predicate capability, request, expected meaning-contract identity, and
+   offending result identity; pointwise role projection gives a nonempty
+   evaluation-error set. No returned truth is observable.
 
 #### Trace K2-A10 — term error, factual unknown, and predicate error
 
@@ -2613,10 +3363,13 @@ Case count: **20** (`K2-A01`--`K2-A20`).
 4. A third predicate's expected `ERROR({ee},{},{})` validates by complete
    equality, replaces invocable with completed `Eval.ERROR`, and renders
    `EVALUATION_ERROR` with no truth.
-5. A shape-valid returned value, truth, evidence, unknown, or error set unequal
-   to its expected record is `MALFORMED_RESULT`; its semantics are discarded,
-   invocation becomes protocol-failed, and the correct evaluation-error family
-   is emitted (a function mismatch projects through a containing atom).
+5. A malformed carrier uses `MALFORMED_RESULT(MALFORMED_CARRIER)` and the fixed
+   sentinel. A shape-valid unequal value, truth, evidence, unknown, or error
+   set uses `MALFORMED_RESULT(SEMANTIC_MISMATCH)` and the offending-result
+   identity. Both reasons bind the canonical ABI issuer, exact capability,
+   request, and expected contract; pointwise deduplication stays nonempty and
+   the total role table emits the exact evaluation-error carrier (a function
+   error is projected only by a containing atom). Returned semantics vanish.
 6. The final families remain distinct; no state stays invocable and no
    conversion, default, or connective-local plugin aggregation occurs.
 
@@ -2624,26 +3377,34 @@ Case count: **20** (`K2-A01`--`K2-A20`).
 
 1. The exact pair declaration validates distinct typed scope/occurrence
    predicates, nonempty immutable controlled keys, and derived facets.
-2. In the definitional branch, the scope binding validates and the ABI derives
-   the occurrence result by T3/A1 for every trace. Empty, multi-event, true,
-   false, unknown, evidence, and error branches are therefore bound exactly.
-3. In the independent branch, discovery finds a separately trusted complete
+2. In the definitional branch, the ABI constructs
+   `OccurrenceBindingProjection` with exact occurrence key/declaration/kind,
+   trace-only facet/access, named meaning/evidence/unknown/error/dependency and
+   model lifts, then derives T3/A1 for every trace. Empty, multi-event, truth,
+   evidence, unknown, and error branches are bound exactly.
+3. In the independent branch, a complete `OccurrenceSemanticContractBundle`
+   supplies those same ordinary fields and required model projection; any
+   omission/conflict is incompatible. Discovery then finds a separately trusted complete
    pair validator for the exact `PAIR_TARGET`; an independently owned, already
    admitted root set covers both the validator's exact ordinary
    capability/judgment/pair/environment use and its producer-independent
-   certificate kind/admission target. The certificate binds the whole pair/environment and is
+   certificate kind/admission target. Structural `producerOf` makes the
+   validator disjoint from `subjectProducerSet(PAIR_ADMISSION_SUBJECT(pair),U)` and the embedding-policy
+   root producer distinct from both. The certificate binds the whole pair/environment and is
    admitted before `SEMANTICALLY_BOUND`.
-4. Every occurrence invocation binds the same exact semantic/trust environments
-   and an admitted ordinary service-use root, and its returned `Eval` must equal
-   the unique definitional result or independent occurrence logical relation;
-   the admitted proof makes the latter equal to the same T3/A1 aggregate.
+4. `recordAt(BINDING occurrence)` returns only the exact projection. Every
+   occurrence invocation and required `ModelContract` uses it under the same
+   semantic/trust environments and admitted service-use root; its relation
+   consumes only the topologically derived scope-`Eval` sequence. The admitted
+   independent proof makes its complete result equal to the T3/A1 aggregate.
 5. A bare claim or malformed envelope is nonconformant but proves no
    incoherence. A stale, incomplete, or `REJECTED_NONDECISIVE` proof and a
    missing proof/validator leave `OPEN_BINDINGS`, with applicable
    missing/unknown evaluability. Validator failure yields `REASONING_ERROR`
    and no admission, again leaving the pair open.
 6. A shape-valid occurrence `Eval` unequal to the bound meaning is only
-   `MALFORMED_RESULT`/evaluation error with no returned truth or pair-negative
+   `MALFORMED_RESULT(SEMANTIC_MISMATCH)` with canonical predicate-role
+   evaluation reasons, no returned truth, and no pair-negative
    admission. A typed `EVENT_PAIR_INCOHERENCE_COUNTEREXAMPLE`, or the same complete
    equality validator's typed negative result, binds one exact admitted trace
    plus its unequal complete scope-aggregate and occurrence `Eval` records.
@@ -2671,7 +3432,8 @@ Case count: **20** (`K2-A01`--`K2-A20`).
    failure yields `REASONING_ERROR`.
 5. Each returned exact tag replaces `INVOCABLE_FOR` with its completed state;
    failures replace it with their exact failure/completed-error state. A
-   shape-valid unequal coverage result is `MALFORMED_RESULT`, not profile truth.
+   shape-valid unequal coverage result is the canonical semantic-mismatch
+   failure and maps by checker role, not to profile truth.
 6. Each is a distinct final family, and none changes acceptance,
    satisfiability, or intent completeness.
 
@@ -2692,26 +3454,32 @@ Case count: **20** (`K2-A01`--`K2-A20`).
    yields its named judgment.
 6. Every decisive or permitted nondecisive result replaces `INVOCABLE_FOR`.
    If that service instead returns “no result,” result validation converts the
-   protocol violation to `REASONING_ERROR`, never logical/profile unknown.
+   protocol violation to a canonical no-result-sentinel reasoning reason and
+   `REASONING_ERROR`, never logical/profile unknown.
    An out-of-complete-fragment request may be inconclusive under the sound
    fragment.
 
 #### Trace K2-A17 — certificate kind and exact environment
 
-1. Exact declarations, meanings, closure, capability, subject, and mechanical
-   dependency environment validate.
+1. Exact declarations, meanings, stratified observations, closure, exhaustive
+   subject/certificate/capability/service roots, and dependency environment
+   validate.
 2. A certificate envelope binds them, one kind, claimed conclusion,
    validator, exact semantic/trust environments, one already admitted exact
    certificate-scoped trust root, and abstraction class. Ordinary discovery
    also requires every descriptor root to permit the validator's exact
-   service-use target; both producer-independence checks pass before invocation.
+   service-use target. Structural `producerOf` derives the validator,
+   certificate, subject, and embedding-policy producers; both exact
+   independence checks pass before invocation.
 3. Kind-specific admission checks the strong proof or decisive counterexample
    rule. If admitted, only the matching named judgment is emitted.
 4. An internal `==Eval` derivation instead emits only
    `INTERNAL_EVAL_EQUAL`.
-5. A stale environment, missing dependency, `UNKNOWN` offered as a logical
+5. A stale environment, missing root/dependency, producer assertion, `UNKNOWN` offered as a logical
    counterexample, evaluator/reasoning error, or relabeled certificate is
-   rejected or errors and produces no relation/consistency conclusion.
+   rejected or errors and produces no relation/consistency conclusion. An
+   interface failure maps pointwise to canonical reasoning reasons for the
+   validator role.
 
 #### Trace K2-A19 — joint dependency scope
 
@@ -2742,8 +3510,10 @@ Case count: **20** (`K2-A01`--`K2-A20`).
 
 1. Source and target declarations and bindings validate, and environments
    `Pα@1` and `Pα@2` remain distinct exact identities.
-2. A migration names both, one semantic relation, its exact certificate,
-   validator, and already admitted producer-independent trust root. Exact
+2. A plugin-owned migration names both, one semantic relation, its exact
+   `MIGRATION`, `CERTIFICATE`, validator `CAPABILITY`/`SERVICE`, and trust-root
+   roots. `producerOf` derives every owner and the already admitted
+   embedding-policy root is producer-independent. Exact
    compatibility and semantic-extension variants form their own environment
    targets and discover their required validator roles.
 3. Certificate admission establishes only that named relation. Migration
@@ -2812,9 +3582,13 @@ the design conflict to main.
   projectable; total target-kind applicability includes
   `DECLARATION_NOT_REQUIRED`, and every completion/failure leaves no coordinate
   omitted or invocable.
+- [x] `producerOf` and `subjectProducerSet` are total structural finite-set
+  functions for every key, record, environment, request, certificate, and
+  admission subject; typed plugin/policy owners are never free assertions,
+  conflicts fail, and trust-policy/root producers remain distinct.
 - [x] The exhaustive ledger assigns every logical record/field exactly one of
   `REQUIRED_SEMANTIC`, `DERIVED`, `OPTIONAL_DIAGNOSTIC`, or
-  `EXCLUDED`; its 121 rows count 94/20/2/5 respectively under the stated body-row
+  `EXCLUDED`; its 127 rows count 95/25/2/5 respectively under the stated body-row
   convention, and diagnostics affect
   no K1 judgment or semantic duplicate equality.
 - [x] Declarations cover types/value admission, literals, typed functions and
@@ -2822,14 +3596,21 @@ the design conflict to main.
 - [x] Dependencies and `chi_C` are mechanical derived views and cannot be
   omitted, replaced, or overridden; frozen K1 syntax roots are retained
   separately, every semantic declaration/symbol has a total non-overridable
-  association to its exact reachable binding, missing bindings remain open,
-  producer proper edges stay separate, self-edges/cycles are invalid, and every
-  logical contract has total exact support and expanded well-founded closure.
+  association to its exact reachable binding; exhaustive record/subject roots
+  include services, capabilities, certificates, migrations, compatibility,
+  model contracts, and aliases; missing bindings remain open; producer proper
+  edges stay separate; and every self-edge/cycle has its exact failure.
+- [x] Every `ContractSpec` is a finite exact non-recursive specification whose
+  relation consumes only explicit primary inputs and a finite lower-level
+  `DependencyObservationEnvironment`; support is extensional, observations are
+  derived topologically, and neither bindings nor `SemanticEnvironment` nor
+  another contract/relation can enter the relation domain.
 - [x] Meanings, model contracts, typed invocation, results, evidence/reasons,
   failures, capabilities, and discovery preserve all K1 boundaries; every
   invocation binds exact semantic/trust environments, every denotational result
-  equals its unique complete bound logical relation, semantic mismatch is
-  `MALFORMED_RESULT`, and every descriptor/query/result validates one exact
+  equals its unique complete bound logical relation through its lower-level
+  observation projection, semantic mismatch is
+  `MALFORMED_RESULT(SEMANTIC_MISMATCH)`, and every descriptor/query/result validates one exact
   binding/type/profile/pair/environment target with role, judgment, fragment,
   dependency and trust scope.
 - [x] Complete in-fragment reasoning is decisive or a reasoning error;
@@ -2845,14 +3626,22 @@ the design conflict to main.
   incompatibility, uncertainty, or failure produces only its evaluability/
   discovery state.
 - [x] Event-pair admission is non-circular and covers empty/multi-event truth,
-  evidence, unknown, and error behavior; malformed/rejected evidence leaves it
-  open and only a typed admitted trace with two unequal complete `Eval`
-  records can establish incompatibility.
+  evidence, unknown, and error behavior; `OccurrenceBindingProjection` derives
+  every ordinary binding/model field through named lifts or a complete
+  independently proved bundle, a second ordinary binding is forbidden,
+  malformed/rejected evidence leaves it open, and only a typed admitted trace
+  with two unequal complete `Eval` records establishes incompatibility.
+- [x] Every interface failure has a canonical ABI-issued domain/kind reason
+  binding capability, request, expected contract, and exact offender or fixed
+  sentinel; pointwise deduplicated mappings are total/nonempty for all eleven
+  roles, discard malformed/unequal results, and preserve evaluation versus
+  reasoning versus pre-invocation trust/discovery boundaries.
 - [x] Profiles preserve complete/incomplete/unknown/evaluation-error/reasoning-
   error distinctions and cannot certify intent completeness.
-- [x] Provenance grants no authority; `AuthorityFactKey` is the exact semantic
-  tuple, and independently admitted attestations coalesce as evidence without
-  changing or duplicating the normative fact.
+- [x] Provenance grants no authority; `SourceRef` and `AuthorityRef` have exact
+  typed producers, `AuthorityFactKey` is the exact semantic tuple, and
+  independently admitted attestations coalesce as evidence without changing
+  or duplicating the normative fact.
 - [x] Joint reasoning requires one capability covering the whole exact
   cross-plugin dependency and ordinary-use trust environment; for valid closed logical judgments,
   absence/undecidable discovery yields evaluability missing/unknown together
