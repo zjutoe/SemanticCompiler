@@ -1,6 +1,6 @@
 # Contract IR kernel and plugin design process
 
-> Status: K0 through K2 are accepted and complete. The K3-S handoff is a review candidate and grants no dispatch or mutation authority; K3-X and K4 remain roadmap-only.
+> Status: K0 through K2 are accepted and complete. The K3-S handoff is accepted and `READY_TO_BIND`, but is not dispatched and grants no mutation authority; K3-X and K4 remain roadmap-only.
 
 The accepted semantic authority is the [Contract IR Minimal Kernel and Coding Plugin Research Plan](../docs/plans/Contract_IR_Kernel_and_Coding_Plugin_Research_Plan.md), exact blob `01f959bc55f644a376f8ffa6059e9e77936be77c`, plus the [K3-S/K3-X plan amendment](../docs/plans/K3_Semantics_and_Executable_Spike_Amendment.md), exact blob `7f1c3627245ec0c0fc86df64f77e374d104649a0`. Their acceptance records are the [original plan review](../docs/reviews/kernel_plugin/Contract_IR_Kernel_Plugin_Plan_3f7fc69_review.md) and [amendment review](../docs/reviews/kernel_plugin/K3_SX_Plan_19379b3_review.md).
 
@@ -25,7 +25,7 @@ The [K2 versioned plugin ABI and reasoning interface](K2_Versioned_Plugin_ABI_an
 | K0 | Scope, statuses, seed challenges, held-out procedure, anti-oracle rules | Accepted and complete |
 | K1 | Kernel calculus and denotational semantics | Accepted and complete |
 | K2 | Versioned plugin ABI and reasoning interface | [Accepted and complete](../docs/reviews/kernel_plugin/K2_Plugin_ABI_5b6f157_review.md) |
-| K3-S | Minimal coding-plugin semantics | [Handoff review candidate](handoffs/K3_S_minimal_coding_plugin_semantics.md); no mutation authority |
+| K3-S | Minimal coding-plugin semantics | [Handoff accepted](../docs/reviews/kernel_plugin/K3_S_Handoff_bcfbde8_review.md); `READY_TO_BIND`, not dispatched |
 | K3-X | Finite in-memory toy kernel and accepted toy coding plugin | Roadmap only; requires accepted K3-S |
 | K4 | Held-out semantic closure and manual binding assessment | Roadmap only |
 

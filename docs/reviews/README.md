@@ -14,10 +14,7 @@ Current accepted stage handoffs:
 - [K0 handoff independent review and acceptance record](kernel_plugin/K0_Handoff_59d2799_review.md), handoff blob `914f1bb56792e20765b63b4a63f3db2a244cf560`; consumed by the accepted K0 stage
 - [K1 handoff independent review and acceptance record](kernel_plugin/K1_Handoff_dd87c79_review.md), handoff blob `ded68369ecc2d06ac2e3ddcf9ca20cb9e928b058`; consumed by the accepted K1 stage
 - [K2 handoff independent review and acceptance record](kernel_plugin/K2_Handoff_2b5aa0c_review.md), handoff blob `f308543b4c252d739840a96df88abedcde893bbb`; consumed by the accepted K2 stage
-
-Current stage handoff candidate:
-
-- [K3-S minimal coding-plugin semantics handoff](../../KernelPlugin/handoffs/K3_S_minimal_coding_plugin_semantics.md); `REVIEW_CANDIDATE`, not accepted or dispatched
+- [K3-S handoff independent review and acceptance record](kernel_plugin/K3_S_Handoff_bcfbde8_review.md), handoff blob `f3019df041df07da1bfef6f92858bacdc7f4ab9d`; `READY_TO_BIND`, not dispatched
 
 Current held-out gate receipt:
 
@@ -29,7 +26,7 @@ Current accepted stage result:
 - [K1 kernel calculus review and acceptance record](kernel_plugin/K1_Kernel_Calculus_f3418a6_review.md), deliverable blob `d928010319c2c3bd08a94e1856cfca24dc2ae39e`
 - [K2 plugin ABI review and acceptance record](kernel_plugin/K2_Plugin_ABI_5b6f157_review.md), deliverable blob `1ea0d9fb014bf983c4c84f35e0c88590bd9e9ab4`
 
-K2 is accepted and complete. The K3-S handoff is only a review candidate and grants no dispatch or mutation authority. K3-X and K4 have no handoff or authority.
+K2 is accepted and complete. The K3-S handoff is accepted and `READY_TO_BIND`; it grants no mutation authority until main issues a separate exact dispatch. K3-X and K4 have no handoff or authority.
 
 Historical inputs:
 
