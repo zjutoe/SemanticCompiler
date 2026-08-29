@@ -76,8 +76,8 @@ It may implement only a finite reference profile needed to execute the accepted
 K3-S fixtures. The permitted vertical slice is:
 
 - direct in-memory construction of the required K2 ABI records;
-- exact structural identities and exact version matching for the selected
-  records;
+- exact structural identities, including owner namespace and declaration kind,
+  and exact version matching for the selected records;
 - declaration, binding, semantic-dependency, validation-reference, lookup,
   lifecycle, capability, trust, invocation, result, and failure checks used by
   the selected fixtures;
@@ -108,20 +108,32 @@ the following:
 
 1. a well-formed, closed, evaluable coding Contract whose final-state and test
    evidence constraints evaluate `TRUE`;
-2. the same semantic meaning with exact identity/version agreement and a
+2. independently constructed, structurally equal identities must coalesce;
+   identities with identical display/local atoms but different owner/plugin
+   namespaces or declaration kinds must remain distinct; forcing two kinds
+   under one exact key must reject as a kind conflict;
+3. the same semantic meaning with exact version agreement and a
    version-mismatch rejection with no fallback;
-3. declaration present versus binding absent versus capability absent;
-4. semantic proper dependencies separated from mandatory validation
+4. declaration present versus binding absent versus capability absent;
+5. semantic proper dependencies separated from mandatory validation
    references, including rejection of a genuine semantic cycle;
-5. an admitted service/trust path and a distinct absent, undecided,
-   incompatible, or failed trust path;
-6. plugin result `FALSE`, logical `UNKNOWN`, evaluation error, reasoning error,
+6. five separate trust fixtures: admitted, absent, undecided, incompatible,
+   and failed. They must project respectively to usable service, exact missing
+   status, `EVALUABILITY_UNKNOWN`, `EVALUABILITY_MISSING`, and the matching
+   discovery protocol/transport failure, with no fabricated logical, profile,
+   or reasoning result;
+7. plugin result `FALSE`, logical `UNKNOWN`, evaluation error, reasoning error,
    and malformed result kept distinct where the selected profile supports them;
-7. forbidden versus authorized trace events without converting evaluability
+8. forbidden versus authorized trace events without converting evaluability
    into authority;
-8. conflicting duplicate records and exact missing-record statuses;
-9. deterministic replay of every fixture from a clean committed source tree;
-10. a negative fixture proving that undeclared repository, evidence, or hidden
+9. at least two valid dependency topological orders must produce identical
+   complete observation maps, results, and statuses; at least two package and
+   record permutations must do the same;
+10. independently constructed equal duplicates must coalesce, while unequal
+    records at one exact identity must conflict, independent of input order;
+11. exact missing-record statuses for the selected record kinds;
+12. deterministic replay of every fixture from a clean committed source tree;
+13. a negative fixture proving that undeclared repository, evidence, or hidden
     expected-answer access is rejected.
 
 No fixture may special-case its challenge ID in production logic. Expected
@@ -146,7 +158,8 @@ K3-X is accepted only if:
   selection, undeclared access, or embedded expected result;
 - an independent implementation review finds no mismatch with accepted K2 and
   K3-S;
-- its report states exactly which K2/K3-S branches were not implemented.
+- every check in section 5 is implemented; its report separately states exactly
+  which other K2/K3-S branches were not implemented.
 
 Stop K3-S and return to K2 if the coding profile requires a new kernel meaning,
 redefines a K1 status, or cannot use the accepted ABI without ambiguity. Stop
@@ -170,8 +183,17 @@ a benefit over another IR. Held-out adequacy remains reserved for K4.
 
 - Versioned plans, handoffs, source, fixtures, tests, reports, and review
   records are committed to Git without rewriting reviewed history.
-- Every review binds an exact commit or range. K3-X evidence is produced only
-  from a clean committed source commit named by its handoff and report.
+- Every review binds an exact commit or range. The accepted K3-X mutation
+  handoff binds the exact accepted base commit and sole allowed mutation paths;
+  it cannot name the future implementation commit.
+- After the implementation is frozen in a new commit and passes independent
+  read-only implementation review, main must issue a separate exact execution
+  binding before acceptance evidence is generated. That binding names the
+  clean implementation commit, exact test commands, committed fixtures,
+  permitted output/report destinations, and expected non-side-effect boundary.
+  The final report and result review bind that same execution commit. Developer
+  test runs before this gate are diagnostic only and cannot support the stage
+  acceptance claim.
 - Only one delegated writer may hold a mutation lease. Main freezes changes
   before independent review and owns acceptance and commit gates.
 - No untracked or ignored input may affect a K3-X result. No external artifact
