@@ -6,6 +6,8 @@ Current accepted plan:
 
 - [Contract IR Kernel and Coding Plugin Research Plan](../plans/Contract_IR_Kernel_and_Coding_Plugin_Research_Plan.md), plan blob `01f959bc55f644a376f8ffa6059e9e77936be77c`
 - [Independent plan review and acceptance record](kernel_plugin/Contract_IR_Kernel_Plugin_Plan_3f7fc69_review.md)
+- [K3-S/K3-X plan amendment](../plans/K3_Semantics_and_Executable_Spike_Amendment.md), amendment blob `7f1c3627245ec0c0fc86df64f77e374d104649a0`
+- [Independent amendment review and acceptance record](kernel_plugin/K3_SX_Plan_19379b3_review.md)
 
 Current accepted stage handoffs:
 
@@ -23,7 +25,7 @@ Current accepted stage result:
 - [K1 kernel calculus review and acceptance record](kernel_plugin/K1_Kernel_Calculus_f3418a6_review.md), deliverable blob `d928010319c2c3bd08a94e1856cfca24dc2ae39e`
 - [K2 plugin ABI review and acceptance record](kernel_plugin/K2_Plugin_ABI_5b6f157_review.md), deliverable blob `1ea0d9fb014bf983c4c84f35e0c88590bd9e9ab4`
 
-K2 is accepted and complete. K3 is now only the next stage eligible for just-in-time handoff design; no K3 handoff, dispatch, or mutation authority exists.
+K2 is accepted and complete. K3-S is now only the next stage eligible for just-in-time handoff design; no K3-S, K3-X, or K4 handoff, dispatch, or mutation authority exists.
 
 Historical inputs:
 

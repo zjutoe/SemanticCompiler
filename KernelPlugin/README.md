@@ -1,8 +1,8 @@
 # Contract IR kernel and plugin design process
 
-> Status: K0 through K2 are accepted and complete. K3 remains roadmap-only; no K3 handoff, dispatch, or mutation authority exists.
+> Status: K0 through K2 are accepted and complete. K3-S is next eligible for just-in-time handoff design; no K3-S, K3-X, or K4 mutation authority exists.
 
-The accepted semantic authority is the [Contract IR Minimal Kernel and Coding Plugin Research Plan](../docs/plans/Contract_IR_Kernel_and_Coding_Plugin_Research_Plan.md), exact blob `01f959bc55f644a376f8ffa6059e9e77936be77c`. Its [acceptance record](../docs/reviews/kernel_plugin/Contract_IR_Kernel_Plugin_Plan_3f7fc69_review.md) binds reviewed range `787378d3763e584c9e9cc66aa699154641975a6b..3f7fc69a55a526c2dd8298dd9b3966738a5654bb`.
+The accepted semantic authority is the [Contract IR Minimal Kernel and Coding Plugin Research Plan](../docs/plans/Contract_IR_Kernel_and_Coding_Plugin_Research_Plan.md), exact blob `01f959bc55f644a376f8ffa6059e9e77936be77c`, plus the [K3-S/K3-X plan amendment](../docs/plans/K3_Semantics_and_Executable_Spike_Amendment.md), exact blob `7f1c3627245ec0c0fc86df64f77e374d104649a0`. Their acceptance records are the [original plan review](../docs/reviews/kernel_plugin/Contract_IR_Kernel_Plugin_Plan_3f7fc69_review.md) and [amendment review](../docs/reviews/kernel_plugin/K3_SX_Plan_19379b3_review.md).
 
 ## Accepted K0 result
 
@@ -25,7 +25,8 @@ The [K2 versioned plugin ABI and reasoning interface](K2_Versioned_Plugin_ABI_an
 | K0 | Scope, statuses, seed challenges, held-out procedure, anti-oracle rules | Accepted and complete |
 | K1 | Kernel calculus and denotational semantics | Accepted and complete |
 | K2 | Versioned plugin ABI and reasoning interface | [Accepted and complete](../docs/reviews/kernel_plugin/K2_Plugin_ABI_5b6f157_review.md) |
-| K3 | Minimal coding plugin | Roadmap only |
+| K3-S | Minimal coding-plugin semantics | Next eligible for just-in-time handoff design; no handoff yet |
+| K3-X | Finite in-memory toy kernel and accepted toy coding plugin | Roadmap only; requires accepted K3-S |
 | K4 | Held-out semantic closure and manual binding assessment | Roadmap only |
 
-Execution requires an accepted handoff plus a separate main-thread binding of the exact clean source commit, handoff blob, allowed mutation path, verification commands, and output roots. Only one writer may hold the mutation lease, and the writer does not commit. K2 completion grants no K3 mutation authority; K3 requires its own just-in-time handoff and independent review.
+Execution requires an accepted handoff plus a separate main-thread binding of the exact clean source commit, handoff blob, allowed mutation path, verification commands, and output roots. Only one writer may hold the mutation lease, and the writer does not commit. K2 completion and the plan amendment grant no K3-S or K3-X mutation authority; each stage requires its own just-in-time handoff and independent review.
