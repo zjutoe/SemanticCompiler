@@ -15,6 +15,10 @@ Current accepted stage handoffs:
 - [K1 handoff independent review and acceptance record](kernel_plugin/K1_Handoff_dd87c79_review.md), handoff blob `ded68369ecc2d06ac2e3ddcf9ca20cb9e928b058`; consumed by the accepted K1 stage
 - [K2 handoff independent review and acceptance record](kernel_plugin/K2_Handoff_2b5aa0c_review.md), handoff blob `f308543b4c252d739840a96df88abedcde893bbb`; consumed by the accepted K2 stage
 
+Current stage handoff candidate:
+
+- [K3-S minimal coding-plugin semantics handoff](../../KernelPlugin/handoffs/K3_S_minimal_coding_plugin_semantics.md); `REVIEW_CANDIDATE`, not accepted or dispatched
+
 Current held-out gate receipt:
 
 - [K1 held-out gate receipt](../../KernelPlugin/K1_Held_Out_Gate_Receipt.md), receipt `K1-HO-GATE-20260828-A`; passed, with content-confidential evidence reserved for K4
@@ -25,7 +29,7 @@ Current accepted stage result:
 - [K1 kernel calculus review and acceptance record](kernel_plugin/K1_Kernel_Calculus_f3418a6_review.md), deliverable blob `d928010319c2c3bd08a94e1856cfca24dc2ae39e`
 - [K2 plugin ABI review and acceptance record](kernel_plugin/K2_Plugin_ABI_5b6f157_review.md), deliverable blob `1ea0d9fb014bf983c4c84f35e0c88590bd9e9ab4`
 
-K2 is accepted and complete. K3-S is now only the next stage eligible for just-in-time handoff design; no K3-S, K3-X, or K4 handoff, dispatch, or mutation authority exists.
+K2 is accepted and complete. The K3-S handoff is only a review candidate and grants no dispatch or mutation authority. K3-X and K4 have no handoff or authority.
 
 Historical inputs:
 
