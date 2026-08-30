@@ -79,8 +79,9 @@ K3-S packet:
 
 The module does not implement every K1/K2 constructor. Unsupported constructors
 fail loudly with an explicit `NotImplementedError` or a typed finite-profile
-rejection before a semantic judgment is returned. It contains no fixture ID,
-challenge ID, expected-status table, or branch on test names.
+rejection before a semantic judgment is returned. Production references mean
+`reference.py`, `coding_plugin.py`, and exports from `__init__.py`; these contain
+no fixture ID, challenge ID, expected-status table, or branch on test names.
 
 `coding_plugin.py` implements only the accepted K3-S closed value algebra and
 the exact finite meanings exercised by the packet:
@@ -223,19 +224,23 @@ test-discovery-only use with no semantic visibility. Prefer not to import them.
 The writer must run, from the clean bound base plus its one-path-set diff:
 
 ```text
-python -m unittest KernelPlugin.k3x.test_reference -v
-python -m compileall -q KernelPlugin/k3x
+python -B -m unittest KernelPlugin.k3x.test_reference -v
+python -B -c "import ast, pathlib; paths = ('KernelPlugin/k3x/__init__.py', 'KernelPlugin/k3x/reference.py', 'KernelPlugin/k3x/coding_plugin.py', 'KernelPlugin/k3x/fixtures.py', 'KernelPlugin/k3x/test_reference.py'); [ast.parse(pathlib.Path(path).read_text(encoding='utf-8'), filename=path) for path in paths]"
 git diff --check
 git diff --name-only
 git status --short
 ```
+
+The first two commands are read-only and must create no `__pycache__`, `.pyc`,
+or other generated path.
 
 It must also report:
 
 - exactly 13 required test methods and their pass count;
 - exactly 102 fixture IDs and 102 expected-output keys;
 - exactly 42 missing-base and 42 missing-variant entries;
-- zero production references to fixture IDs, challenge IDs, or expected maps;
+- zero references from `reference.py`, `coding_plugin.py`, or `__init__.py` to
+  fixture IDs, challenge IDs, or expected maps;
 - zero forbidden imports/calls;
 - exact line/byte counts and Git blob IDs for every allowed file;
 - no untracked or ignored input outside the six allowed paths.
@@ -271,7 +276,8 @@ create and commit a separate exact K3-X execution binding that names:
 
 - the accepted clean implementation commit and every implementation/test blob;
 - the exact Python executable identity available in the repository environment;
-- the exact two test/compile commands;
+- the exact unittest and in-memory, non-writing syntax-check commands from
+  section 8;
 - the committed fixture and expected-output constructors;
 - the sole report destination
   `docs/reports/kernel_plugin/K3_X_Executable_Spike_Report.md`;
@@ -321,4 +327,3 @@ The writer returns:
 7. any ambiguity or stop condition;
 8. confirmation of no commit, external artifact, held-out access, or
    unauthorized mutation.
-
