@@ -353,6 +353,23 @@ TaskSpec = TASK(
   criteria : finset(Criterion),
   required_verifications : finset(VerificationSpec))
 
+PairTraceDomain = ALL_ADMITTED_TRACES
+PairComparedFields = COMPLETE_EVAL_RECORD
+AuthorityClauseTag = BOUNDS_CLAUSE | CONFLUENCE_OBSERVATION_CLAUSE |
+  CONFLUENCE_CHANGE_CLAUSE | ADAPTER_PRESERVATION_CLAUSE |
+  ADAPTER_ACCEPTANCE_CLAUSE
+AuthorityAttestationSubjectIdentity =
+    CLAUSE_ATTESTATION_SUBJECT(contract_identity : ContractIdentity,
+                               clause_tag : AuthorityClauseTag)
+  | CHOICE_ATTESTATION_SUBJECT(contract_identity : ContractIdentity,
+                               choice_id : ChoiceId)
+AuthorityAttestationValue = AUTHORITY_ATTESTATION_VALUE(
+  authority_ref : AuthorityRef,
+  source_ref : SourceRef,
+  principal : Principal,
+  normative_role : NormativeRole,
+  subject_identity : AuthorityAttestationSubjectIdentity)
+
 ServiceAdmissionSubject =
     FUNCTION_CALL_SUBJECT(binding : BindingKey,
                           arguments : finite sequence(Value))
@@ -375,11 +392,11 @@ ServiceAdmissionSubject =
   | PAIR_COHERENCE_SUBJECT(pair : EventScopePairKey,
                            scope_binding : BindingKey,
                            occurrence_binding : BindingKey,
-                           trace_domain : PAIR_TRACE_DOMAIN,
-                           compared_fields : PAIR_COMPLETE_EVAL_FIELDS)
+                           trace_domain : PairTraceDomain,
+                           compared_fields : PairComparedFields)
   | AUTHORITY_ATTESTATION_SUBJECT(
       authority_fact_key : AuthorityFactKey,
-      attestation : exact finite typed attestation subject value,
+      attestation : AuthorityAttestationValue,
       offered_evidence_refs : finset(EvidenceRef))
 
 EvolutionAdmissionSubject =
@@ -400,13 +417,25 @@ EvolutionAdmissionSubject =
       owner_layer : Delta | Sigma | Service)
 ```
 
-These two admitted value sorts are only the finite, field-explicit subjects
-needed by Service fragments and the evolution relation fixture.  They contain
-no `ContractSpec`, `OccurrenceSemanticContractBundle`, `SemanticEnvironment`,
-`AliasBinding`, trust record, request, result, or relation value.  The
-environment identity in a migration subject is the finite K2 identity already
-derived from the separately carried environments; it is not the environment
-record and is never dereferenced by a `ContractSpec`.
+These seven admitted value sorts are closed first-order algebras.  A
+`PairTraceDomain` value is admitted iff it is the literal tag
+`ALL_ADMITTED_TRACES`; a `PairComparedFields` value is admitted iff it is the
+literal tag `COMPLETE_EVAL_RECORD`.  An `AuthorityClauseTag` value is admitted
+iff it is one of its five displayed nullary tags.  An
+`AuthorityAttestationSubjectIdentity` is admitted iff it is one of its two
+displayed tags and every field has its displayed frozen K1/K2 sort.  An
+`AuthorityAttestationValue` is admitted iff it has the displayed record tag
+and all five fields are admitted at their displayed sorts.  A
+`ServiceAdmissionSubject` or `EvolutionAdmissionSubject` is admitted iff it
+has one displayed tag and every field is admitted at its displayed sort.
+Equality for all six sorts is tag equality followed by exact componentwise
+field equality; there is no raw field-name, prose sort, open map, subtyping, or
+coercion rule.  They contain no `ContractSpec`,
+`OccurrenceSemanticContractBundle`, `SemanticEnvironment`, `AliasBinding`,
+trust record, request, result, or relation value.  The environment identity in
+a migration subject is the finite K2 identity already derived from the
+separately carried environments; it is not the environment record and is
+never dereferenced by a `ContractSpec`.
 
 A `VerificationRecord` is admitted only when its observation has exact
 `spec.subject` identity, its evidence references bind the displayed evidence
@@ -676,7 +705,12 @@ arguments to these constructors.
 | `T(CodingEvidenceEntry)` | exact reference/payload entries | `{DECLARATION(T(CodingEvidencePayload))}` |
 | `T(AbstractCoverageResult)` | no result or one exact K2 reasoning-result carrier | `{}` |
 | `T(ImplementationCoverageSubject)` | exact profile subject fields | `{DECLARATION(T(TaskSpec)),DECLARATION(T(RepositorySnapshot)),DECLARATION(T(AbstractCoverageResult))}` |
-| `T(ServiceAdmissionSubject)` | exact eight field-explicit service-subject constructors; no contract, bundle, environment, alias, trust, request, or result record | `{DECLARATION(T(TaskSpec)),DECLARATION(T(RepositorySnapshot)),DECLARATION(T(ObservationSpec)),DECLARATION(T(ArtifactSelector)),DECLARATION(T(ImplementationCoverageSubject))}` |
+| `T(PairTraceDomain)` | exactly the literal tag `ALL_ADMITTED_TRACES` | `{}` |
+| `T(PairComparedFields)` | exactly the literal tag `COMPLETE_EVAL_RECORD` | `{}` |
+| `T(AuthorityClauseTag)` | exactly the five displayed authority-clause tags | `{}` |
+| `T(AuthorityAttestationSubjectIdentity)` | exact clause/choice subject-identity constructors and fields | `{DECLARATION(T(AuthorityClauseTag))}` |
+| `T(AuthorityAttestationValue)` | exact five-field attestation record | `{DECLARATION(T(AuthorityAttestationSubjectIdentity))}` |
+| `T(ServiceAdmissionSubject)` | exact eight field-explicit service-subject constructors; no contract, bundle, environment, alias, trust, request, or result record | `{DECLARATION(T(TaskSpec)),DECLARATION(T(RepositorySnapshot)),DECLARATION(T(ObservationSpec)),DECLARATION(T(ArtifactSelector)),DECLARATION(T(ImplementationCoverageSubject)),DECLARATION(T(PairTraceDomain)),DECLARATION(T(PairComparedFields)),DECLARATION(T(AuthorityAttestationValue))}` |
 | `T(EvolutionAdmissionSubject)` | exact migration/compatibility/extension subject-value constructors containing only finite K2 identities, keys, relation tag, and owner tag | `{}` |
 | `T(Criterion)` | exactly the eight criterion constructors and fields | `{DECLARATION(T(ObservationSpec)),DECLARATION(T(ObservationResult)),DECLARATION(T(ArtifactSelector)),DECLARATION(T(ByteSize)),DECLARATION(T(Format)),DECLARATION(T(ObservationRelation))}` |
 | `T(TaskSpec)` | finite typed task specifications | `{DECLARATION(T(Criterion)),DECLARATION(T(VerificationSpec))}` |
@@ -1744,8 +1778,19 @@ clause_id(c,2)=coding.confluence.change
 clause_id(w,1)=coding.adapter.preservation
 clause_id(w,2)=coding.adapter.acceptance
 clause_id(choice,1)=coding.choice.storage
-subject_identity(z,i)=IDENTITY_OF(clause(z,i)) for (z,i) in I_REQ
-subject_identity(choice,1)=IDENTITY_OF(C_choice)
+attestation_clause_tag(b,1)=BOUNDS_CLAUSE
+attestation_clause_tag(c,1)=CONFLUENCE_OBSERVATION_CLAUSE
+attestation_clause_tag(c,2)=CONFLUENCE_CHANGE_CLAUSE
+attestation_clause_tag(w,1)=ADAPTER_PRESERVATION_CLAUSE
+attestation_clause_tag(w,2)=ADAPTER_ACCEPTANCE_CLAUSE
+subject_contract(b,1)=C_b
+subject_contract(c,1)=C_c     subject_contract(c,2)=C_c
+subject_contract(w,1)=C_w     subject_contract(w,2)=C_w
+attestation_subject_identity(z,i)=CLAUSE_ATTESTATION_SUBJECT(
+  IDENTITY_OF(subject_contract(z,i)),attestation_clause_tag(z,i))
+  for (z,i) in I_REQ
+attestation_subject_identity(choice,1)=CHOICE_ATTESTATION_SUBJECT(
+  IDENTITY_OF(C_choice),storage)
 role(z,i)=REQUIRE for (z,i) in I_REQ
 role(choice,1)=BIND_CHOICE(storage)
 principal(z,i)=fixture_principal for (z,i) in I_REQ
@@ -1771,7 +1816,7 @@ AE_REF(z,i)=EvidenceRef(
 ATTEST(z,i)=AUTHORITY_ATTESTATION_VALUE(
   authority_ref=AUTH(z,i),source_ref=SRC(z,i),
   principal=principal(z,i),normative_role=role(z,i),
-  subject_identity=subject_identity(z,i))
+  subject_identity=attestation_subject_identity(z,i))
 AC(z,i)=AuthorityFactCandidate(
   authority_fact_key=AF(z,i),admission_subject_data=ATTEST(z,i),
   offered_evidence_refs={AE_REF(z,i)})
@@ -1780,14 +1825,93 @@ authority_subject(z,i)=AUTHORITY_ATTESTATION_SUBJECT(
 L_authority={authority_subject(b,1),authority_subject(c,1),
   authority_subject(c,2),authority_subject(w,1),authority_subject(w,2),
   authority_subject(choice,1)} : T(ServiceAdmissionSubject)
-Delta_authority={the exact TypeDeclaration(T(ServiceAdmissionSubject)),
+Delta_authority_fields={
+  the exact TypeDeclaration(T(AuthorityClauseTag)),
+  the exact TypeDeclaration(T(AuthorityAttestationSubjectIdentity)),
+  the exact TypeDeclaration(T(AuthorityAttestationValue)),
+  LiteralDeclaration(T(AuthorityClauseTag),BOUNDS_CLAUSE),
+  LiteralDeclaration(T(AuthorityClauseTag),CONFLUENCE_OBSERVATION_CLAUSE),
+  LiteralDeclaration(T(AuthorityClauseTag),CONFLUENCE_CHANGE_CLAUSE),
+  LiteralDeclaration(T(AuthorityClauseTag),ADAPTER_PRESERVATION_CLAUSE),
+  LiteralDeclaration(T(AuthorityClauseTag),ADAPTER_ACCEPTANCE_CLAUSE),
+  LiteralDeclaration(T(AuthorityAttestationSubjectIdentity),
+                     attestation_subject_identity(b,1)),
+  LiteralDeclaration(T(AuthorityAttestationSubjectIdentity),
+                     attestation_subject_identity(c,1)),
+  LiteralDeclaration(T(AuthorityAttestationSubjectIdentity),
+                     attestation_subject_identity(c,2)),
+  LiteralDeclaration(T(AuthorityAttestationSubjectIdentity),
+                     attestation_subject_identity(w,1)),
+  LiteralDeclaration(T(AuthorityAttestationSubjectIdentity),
+                     attestation_subject_identity(w,2)),
+  LiteralDeclaration(T(AuthorityAttestationSubjectIdentity),
+                     attestation_subject_identity(choice,1)),
+  LiteralDeclaration(T(AuthorityAttestationValue),ATTEST(b,1)),
+  LiteralDeclaration(T(AuthorityAttestationValue),ATTEST(c,1)),
+  LiteralDeclaration(T(AuthorityAttestationValue),ATTEST(c,2)),
+  LiteralDeclaration(T(AuthorityAttestationValue),ATTEST(w,1)),
+  LiteralDeclaration(T(AuthorityAttestationValue),ATTEST(w,2)),
+  LiteralDeclaration(T(AuthorityAttestationValue),ATTEST(choice,1))}
+Delta_authority=Delta_authority_fields union {
+  the exact TypeDeclaration(T(ServiceAdmissionSubject)),
   LiteralDeclaration(T(ServiceAdmissionSubject),authority_subject(b,1)),
   LiteralDeclaration(T(ServiceAdmissionSubject),authority_subject(c,1)),
   LiteralDeclaration(T(ServiceAdmissionSubject),authority_subject(c,2)),
   LiteralDeclaration(T(ServiceAdmissionSubject),authority_subject(w,1)),
   LiteralDeclaration(T(ServiceAdmissionSubject),authority_subject(w,2)),
   LiteralDeclaration(T(ServiceAdmissionSubject),authority_subject(choice,1))}
-BIND_authority={
+BIND_authority_fields={
+  the exact literal SemanticBinding(T(AuthorityClauseTag),BOUNDS_CLAUSE),
+  the exact literal SemanticBinding(
+    T(AuthorityClauseTag),CONFLUENCE_OBSERVATION_CLAUSE),
+  the exact literal SemanticBinding(
+    T(AuthorityClauseTag),CONFLUENCE_CHANGE_CLAUSE),
+  the exact literal SemanticBinding(
+    T(AuthorityClauseTag),ADAPTER_PRESERVATION_CLAUSE),
+  the exact literal SemanticBinding(
+    T(AuthorityClauseTag),ADAPTER_ACCEPTANCE_CLAUSE),
+  the exact literal SemanticBinding(
+    T(AuthorityAttestationSubjectIdentity),attestation_subject_identity(b,1)),
+  the exact literal SemanticBinding(
+    T(AuthorityAttestationSubjectIdentity),attestation_subject_identity(c,1)),
+  the exact literal SemanticBinding(
+    T(AuthorityAttestationSubjectIdentity),attestation_subject_identity(c,2)),
+  the exact literal SemanticBinding(
+    T(AuthorityAttestationSubjectIdentity),attestation_subject_identity(w,1)),
+  the exact literal SemanticBinding(
+    T(AuthorityAttestationSubjectIdentity),attestation_subject_identity(w,2)),
+  the exact literal SemanticBinding(
+    T(AuthorityAttestationSubjectIdentity),attestation_subject_identity(choice,1)),
+  the exact literal SemanticBinding(T(AuthorityAttestationValue),ATTEST(b,1)),
+  the exact literal SemanticBinding(T(AuthorityAttestationValue),ATTEST(c,1)),
+  the exact literal SemanticBinding(T(AuthorityAttestationValue),ATTEST(c,2)),
+  the exact literal SemanticBinding(T(AuthorityAttestationValue),ATTEST(w,1)),
+  the exact literal SemanticBinding(T(AuthorityAttestationValue),ATTEST(w,2)),
+  the exact literal SemanticBinding(T(AuthorityAttestationValue),ATTEST(choice,1)),
+  MODEL_LITERAL(T(AuthorityClauseTag),BOUNDS_CLAUSE),
+  MODEL_LITERAL(T(AuthorityClauseTag),CONFLUENCE_OBSERVATION_CLAUSE),
+  MODEL_LITERAL(T(AuthorityClauseTag),CONFLUENCE_CHANGE_CLAUSE),
+  MODEL_LITERAL(T(AuthorityClauseTag),ADAPTER_PRESERVATION_CLAUSE),
+  MODEL_LITERAL(T(AuthorityClauseTag),ADAPTER_ACCEPTANCE_CLAUSE),
+  MODEL_LITERAL(T(AuthorityAttestationSubjectIdentity),
+                attestation_subject_identity(b,1)),
+  MODEL_LITERAL(T(AuthorityAttestationSubjectIdentity),
+                attestation_subject_identity(c,1)),
+  MODEL_LITERAL(T(AuthorityAttestationSubjectIdentity),
+                attestation_subject_identity(c,2)),
+  MODEL_LITERAL(T(AuthorityAttestationSubjectIdentity),
+                attestation_subject_identity(w,1)),
+  MODEL_LITERAL(T(AuthorityAttestationSubjectIdentity),
+                attestation_subject_identity(w,2)),
+  MODEL_LITERAL(T(AuthorityAttestationSubjectIdentity),
+                attestation_subject_identity(choice,1)),
+  MODEL_LITERAL(T(AuthorityAttestationValue),ATTEST(b,1)),
+  MODEL_LITERAL(T(AuthorityAttestationValue),ATTEST(c,1)),
+  MODEL_LITERAL(T(AuthorityAttestationValue),ATTEST(c,2)),
+  MODEL_LITERAL(T(AuthorityAttestationValue),ATTEST(w,1)),
+  MODEL_LITERAL(T(AuthorityAttestationValue),ATTEST(w,2)),
+  MODEL_LITERAL(T(AuthorityAttestationValue),ATTEST(choice,1))}
+BIND_authority=BIND_authority_fields union {
   the exact literal SemanticBinding(T(ServiceAdmissionSubject),authority_subject(b,1)),
   the exact literal SemanticBinding(T(ServiceAdmissionSubject),authority_subject(c,1)),
   the exact literal SemanticBinding(T(ServiceAdmissionSubject),authority_subject(c,2)),
@@ -1855,7 +1979,13 @@ other admitted tuple returns `INADMISSIBLE`.  `AFAILURE` has fixed primary
 domain `InterfaceFailure`,
 codomain `AuthorityAdmissionResult.REASONING_ERROR`, and returns only the total
 K2 authority-validation role projection.  Their logical relations have no
-other branch and consume no lower observation value.
+other branch and consume no lower observation value.  These are legal K2
+Service primary domains: `AuthorityFactCandidate` is the field-complete finite
+K2 candidate carrier, and the `AREQUIRED` tuple consists only of that carrier,
+the closed `T(ServiceAdmissionSubject)` value, and a finite evidence-reference
+set.  Candidate equality distinguishes its `AuthorityFactKey` from the later
+`AuthorityFactBinding`; no Service relation accepts a binding in place of the
+key or candidate.
 
 For every `(z,i) in I_A`, define without omission:
 
@@ -2509,7 +2639,7 @@ K2 carrier fields not specialized here retain their accepted K2 disposition.
 | all Sigma unknown/evaluation/reasoning-error `ContractSpec` fields | `RETAINED_SIGMA` | `CK` Sigma | honest disjoint outcomes | no hidden support | nonempty stable reasons | exact key/role `(1)` | status boundary | C09,C12,C15 | `SEP_STATUS_FAMILY` |
 | every ordinary/pair `ModelContract` and `ModelCapabilitySummary` field | `RETAINED_SIGMA` | exact target projection | complete model/machine identity | binding contracts/descriptors | prose diagnostic only | named exact key; absent open/wrong malformed | model-facing lookup | C05,C13,C15 | `SEP_MODEL` |
 | coding `EvidenceRef.{issuer_scope,evidence_namespace,local_identity,schema_binding}` values: every verification reference plus `e_abs_w` and `e0` | `RETAINED_SIGMA` | K1 carrier under exact coding schema | stable support identity only | exact schema key | no embedded truth/authority | full identity equality; unique reference-to-payload map | verification/profile meaning | C01,C09,C15,C19 | `SEP_EVIDENCE_REFERENCE` |
-| every field of `FSOUND/QSOUND/PROFSOUND/BSOUND/BCOMPLETE/WSOUND/CSOUND`, `FREQ/QREQ/PROFREQ/BREQ/CREQ/WREQ`, `FFAIL/QFAIL/PROFFAIL/BFAIL/CFAIL/WFAIL`, `LEX_SOUND/LEX_REQ/LEX_FAIL`, `PSOUND/PCOMPLETE/PEVIDENCE/PFAILURE`, and the finite authority/evolution service specs | `RETAINED_SERVICE` | owning service layer | exact field-total fragments/evidence/failure boundaries | only literal legal query maps; `CSOUND` has the two-node DAG | no denotation/truth shortcut | exact role/key; omission incompatible | capabilities | C01,C11,C19 | `SEP_FRAGMENT` |
+| every field of `FSOUND/QSOUND/PROFSOUND/BSOUND/BCOMPLETE/WSOUND/CSOUND`, `FREQ/QREQ/PROFREQ/BREQ/CREQ/WREQ`, `FFAIL/QFAIL/PROFFAIL/BFAIL/CFAIL/WFAIL`, `LEX_SOUND/LEX_REQ/LEX_FAIL`, `PSOUND/PCOMPLETE/PEVIDENCE/PFAILURE`, and the finite authority/evolution service specs, including their closed typed admission-subject domains | `RETAINED_SERVICE` | owning service layer | exact field-total fragments/evidence/failure boundaries | only literal legal query maps; `CSOUND` has the two-node DAG | no denotation/truth shortcut | exact role/key/type; omission incompatible | capabilities | C01,C11,C19 | `SEP_FRAGMENT` |
 | every field of `CAP(functions)`, `CAP(predicates)`, and `CAP(profile)` descriptors | `RETAINED_SERVICE` | `CK` Service | concrete binding/profile targets | complete closures | exact service-use roots | exact service/capability `(1)` | invocation | C01-C16,C19 | `SEP_EVALUATOR_CAPABILITY` |
 | every field of provider descriptors `CAP(bounds)`, `CAP(confluence)`, `CAP(witness)`, and `LEX_CAP` | `RETAINED_SERVICE` | `CK`/`AWK` Service | exact finite environment/formula targets | `D_b/D_c/D_w/D_lex` | admitted proof or permitted inconclusive/error | exact target/version; no fallback | reasoning requests | C11,C19 | `SEP_PROVIDER_CAPABILITY` |
 | every field of `CAP(validate_bounds)` and `CAP(validate_witness)` descriptors | `RETAINED_SERVICE` | independent `RVK` Service | exact certificate validation capabilities | complete subject dependency sets | separately trusted validation | exact validator/version; missing evaluability status | derived validator request | C11,C19 | `SEP_VALIDATOR_CAPABILITY` |
@@ -2518,12 +2648,12 @@ K2 carrier fields not specialized here retain their accepted K2 disposition.
 | `TrustPolicyKey TP`; root keys `TR/TRB/TRW`; every admitted `TrustRootRecord` permission/owner/adoption field and all five `TrustRootJudgment` variants/reason fields | `RETAINED_SERVICE` | embedding policy | independent exact service/certificate trust | full producer sets | five branches distinct | exact policy/root versions | discovery/admission | C01,C11,C19 | `SEP_TRUST` |
 | alternate pair-proof keys `PVC/PCERT`; every field of `PSOUND/PCOMPLETE/PEVIDENCE/PFAILURE`, `CapabilityDescriptor(PVC)`, `ROOT_p/T_p`, complete occurrence bundle, and `PAIR_PROOF_REF` | `RETAINED_SERVICE` | independent pair-validator/certificate producers | exact independent pair admission fixture | pair subject plus validation references | rejection/failure proves nothing | exact fixture keys | pair validator | C05 | `SEP_PAIR_PROOF` |
 | every `SourceRef.{issuer,source_kind,stable_source_identity,provenance_facts}` value `SRC(z,i)` and `src0`; every `AuthorityRef.{owner,authority_namespace,stable_attestation_identity}` value `AUTH(z,i)` and `auth0` | `RETAINED_SIGMA` | inherited K1 carrier; attributed-source/authority producers | provenance and authority identities remain disjoint | no semantic support | neither record admits authority | complete structural identity | origins/adoption | C13,C19 | `SEP_SOURCE_AUTHORITY` |
-| every field of `AC(z,i).{authority_fact_key,admission_subject_data,offered_evidence_refs}`, `ATTEST(z,i)`, and `AE_REF(z,i)` for the six members of `I_A` | `RETAINED_SERVICE` | inherited K1 carrier at the `APK/ATK` authority-admission boundary | exact finite authority candidate | fact-free base and attestation schema | evidence is not admission | exact tuple/ref identity | authority validator | C13,C19 | `SEP_AUTHORITY_CANDIDATE` |
+| every field of `AC(z,i).{authority_fact_key,admission_subject_data,offered_evidence_refs}`, the two exact `AuthorityAttestationSubjectIdentity` tags, every field of typed `ATTEST(z,i)`, and `AE_REF(z,i)` for the six members of `I_A` | `RETAINED_SERVICE` | inherited K1 carrier at the `APK/ATK` authority-admission boundary | exact finite authority candidate and closed attestation algebra | fact-free base and attestation schema | evidence is not admission; fact key is not a binding | exact tag/field/tuple/ref identity | authority validator | C13,C19 | `SEP_AUTHORITY_CANDIDATE` |
 | every field of the six `AFB(z,i)=AuthorityFactBinding(AF(z,i),{ACERT(z,i)})` and their final authority-map entries | `RETAINED_SIGMA` | admitted Sigma receiving rule | exact normative adoption/choice binding | successful independent admission | certificate set is mandatory | exact fact-key map identity; absent stays open | Contract closure | C13,C19 | `SEP_AUTHORITY_BINDING` |
 | every field of `ASOUND/ACOMPLETE/AREQUIRED/AFAILURE`, `ServiceIdentityRecord(AVSK)`, and `CapabilityDescriptor(CAP(authority))` | `RETAINED_SERVICE` | independent `AVK` Service | exact six-target authority validation fragment | union of six fact-free dependency closures | only typed attestations and exact error mapping | exact ATP/AVK versions | authority requests | C13,C19 | `SEP_AUTHORITY_CAPABILITY` |
 | `ATP/TRA`; every field of `ROOT_A/T_A`; every field of the six `RA(z,i)` and `AENV(z,i)`; all six `ACERT(z,i)` keys | `RETAINED_SERVICE` | external embedding policy / attestation validator | exact service-use and authority target scopes | exact `DA/JA/UA/AA` records | proper producer independence | request/envelope/root exact identity | authority certificate gate | C13,C19 | `SEP_AUTHORITY_REQUEST` |
 | every field of the five `Q_t[T_x]`, `R_lex`, and `Q_profile_w`; exact request-specific Semantic/Trust/DependencyEnvironment carriers (ProfileRequest has no dependency-environment field) | `RETAINED_SERVICE` | inherited K2 invocation carrier; request former | predicate, formula, and profile invocations | exact `E_t/D_t`, `E_lex/D_lex`, and profile-closed `E_w` | trust and evidence remain explicit fields | complete request identity | discovery/invocation | C01,C09,C15,C19 | `SEP_FINITE_REQUEST` |
-| every field of `R_p`, its `PairFullEvalProof`, `PENV`, and its exact `PairValidationResult` | `RETAINED_SERVICE` | inherited K2 pair-admission carrier; pair request/proof former | exact independent full-Eval equality admission | `E_p/D_p` plus exactly two non-proper validation refs | sole `PAIR_PROOF_REF` in pair-service row | request/result/certificate exact | pair admission | C05 | `SEP_PAIR_REQUEST` |
+| every field of `R_p`, its `PairFullEvalProof`, fixed `ALL_ADMITTED_TRACES`/`COMPLETE_EVAL_RECORD` tags, `PENV`, and its exact `PairValidationResult` | `RETAINED_SERVICE` | inherited K2 pair-admission carrier; pair request/proof former | exact independent full-Eval equality admission | `E_p/D_p` plus exactly two non-proper validation refs | sole `PAIR_PROOF_REF` in pair-service row | tag/request/result/certificate exact | pair admission | C05 | `SEP_PAIR_REQUEST` |
 | `m0.{migration_key,source_environment,target_environment,semantic_relation,relation_contract}`; `x0/x1.{extension_key,target_record_identity,owner_layer,semantic_effect,payload}`; every field of `a0/a1`; every field of `MR0/XE0/XP0` | `RETAINED_SIGMA` | exact `EOK` Sigma/evolution owners | explicit migration relation, extension effect/payload, and aliases | exact target/source keys/environments | no implicit migration or alias substitution | exact record keys and versions | K3-X missing matrix | C10,C17 | `SEP_EVOLUTION_RECORD` |
 | `m0.{certificate_key,validator_key,trust_root_key}`; every field of `c0/CC0`; `x0/x1.{certificate_key,validator_key,trust_root_key}`; every field of the three `PKG_evo_*` package membership records | `RETAINED_SERVICE` | K2 evolution-validation/package surface with exact declared owners | compatibility and mandatory independent validation references | exact source/target/certificate/capability/root keys | absent admission gives no migration/compatibility/effect | exact record/package identities | K3-X missing matrix | C10,C17 | `SEP_EVOLUTION_SERVICE_RECORD` |
 | every field of the literal `EVCAP_m/EVCAP_c/EVCAP_x0/EVCAP_x1` descriptors and their sixteen named specs, `ROOT_E/T_evo`, `R_m/R_c0/R_x0/R_x1`, four named `EENV`/`EADMIT` records, and `ER_m/ER_c/ER_x0/ER_x1` | `RETAINED_SERVICE` | independent `EVK/EPK/TP` | four finite evolution admissions | exact four `D_ev/TARGET` records and non-proper triples | one typed proof/ref per row | exact request/envelope/admission identity | evolution validation | C10,C17 | `SEP_EVOLUTION_ADMISSION` |
@@ -2533,8 +2663,8 @@ K2 carrier fields not specialized here retain their accepted K2 disposition.
 | K2 binding keys, supports, closures, observation maps, summaries, lifecycle, service identity, and validation-reference projections | `DERIVED` | K2 | mechanical views | exhaustive graph | owner-specific missing/error | cannot be supplied | validators | C01-C19 | A03/A14/A15: lifecycle/graph/conflict |
 | derived `CertificateValidationRequest` fields and `CertificateAdmission`/receiving projections for BENV/WENV/pair fixture | `DERIVED` | K2 certificate gate | exact independent validation invocation/result | original request/envelope/root | failures yield no claim | derived identity only | reasoning/pair result | C05,C11,C19 | `SEP_CERTIFICATE_RECEPTION` |
 | six derived authority validation requests, six exact admissions/results/receptions, and recomputed subject-producer sets | `DERIVED` | K2 authority gate | one fact-free validation per adoption/choice then exact map union | `RA/AENV/ROOT_A` | no self-support or prior-fact chain | derived request/result identities only | authority map | C13,C19 | `SEP_AUTHORITY_RECEPTION` |
-| equal-duplicate coalescence, conflict sets, package/record permutation result, and `missingStatus` projection | `DERIVED` | K2 composition | order-independent exact outcome | record identities | no last-writer fallback | finite set/map equality | composition/K3-X | C01-C19 | A14: equality/conflict/order |
-| exact two-node observation maps for the two valid confluence topological orders | `DERIVED` | K2 §3.3 | identical complete maps/results/statuses | `observe` and `changes_between` nodes | interface failure aborts | map equality | K3-X check 9 | C01,C02 | `SEP_CONFLUENCE` |
+| per-`FixtureId` authoritative record map, equal-duplicate coalescence, conflict sets, package/record permutation result, and row-local `missingStatus` projection | `DERIVED` | K2 composition | order-independent exact output within one tagged universe | record identities and reconstruction sets | no cross-entry union or last-writer fallback | finite tagged map equality | composition/K3-X | C01-C19 | A14: equality/conflict/order |
+| exact two-node observation maps for the two separately tagged valid confluence orders | `DERIVED` | K2 §3.3 | identical complete maps/results/statuses | `observe` and `changes_between` nodes | interface failure aborts | per-tag map equality | K3-X check 9 | C01,C02 | `SEP_CONFLUENCE` |
 | change set as patch/action sequence; event payload as executable command/endpoint | `EXCLUDED` | none | no declarative denotation | none | presence violates access boundary | never an identity | none | C03-C06,C19 | K3S-A18: satisfying semantics without implementation |
 | universal string/map/opaque handle for path, task, evidence, result, or expected answer | `EXCLUDED` | none | destroys typed distinction | none | presence malformed/oracular | never an identity | none | C01,C02,C09,C15 | K3S-A05,A17: typed reusable values versus escape hatch |
 | task taxonomy, phrase-indexed symbols, challenge IDs, expected mappings, gold Contracts/patches | `EXCLUDED` | none | no semantic role | none | presence rejects | never an identity | none | C01,C15,C18 | K3S-A17: equivalent phrasing shares symbols |
@@ -2634,12 +2764,12 @@ following is the entire finite `SeparationRecord` set:
 | `SEP_TRUST` | `{Q_t[T_undecided]}` / `EVALUABILITY_UNKNOWN` | `{Q_t[T_incompatible]}` / `EVALUABILITY_MISSING` |
 | `SEP_PAIR_PROOF` | `{PENV}` / `CertificateAdmission.ADMITTED(PCERT,PAIR_COHERENCE_ADMITTED(PAIR(refresh),PCERT))` | `{PENV[payload:=BundleBoundsProof]}` / `CertificateAdmission.MALFORMED_ENVELOPE` |
 | `SEP_SOURCE_AUTHORITY` | `{SRC(b,1)}` / `WELL_FORMED` | `{AUTH(b,1)}` / `WELL_FORMED` |
-| `SEP_AUTHORITY_CANDIDATE` | `{AC(b,1)}` / `WELL_FORMED` | `{AC(b,1)[offered_evidence_refs:={}]}` / `WELL_FORMED` |
+| `SEP_AUTHORITY_CANDIDATE` | `{AC(b,1)}` / `WELL_FORMED` | `{AC(b,1)[admission_subject_data:=ATTEST(c,1)]}` / `WELL_FORMED` |
 | `SEP_AUTHORITY_BINDING` | `{E_b}` / `CLOSED` | `{E_b^0}` / `OPEN_BINDINGS({AUTHORITY_FACT(AF(b,1))})` |
 | `SEP_AUTHORITY_CAPABILITY` | `{RA(b,1),CAP(authority)}` / `INVOCABLE_FOR(RA(b,1))` | `{RA(b,1)}` with `CAP(authority)` absent / `EVALUABILITY_MISSING` |
 | `SEP_AUTHORITY_REQUEST` | `{RA(b,1)}` / `INVOCABLE_FOR(RA(b,1))` | `{RA(b,1)[environment_without_fact:=E_b]}` / `MALFORMED_REQUEST` |
 | `SEP_FINITE_REQUEST` | `{Q_t[T_admitted]}` / `INVOCABLE_FOR(Q_t[T_admitted])` | `{Q_t[T_failed]}` / `DISCOVERY_FAILED` |
-| `SEP_PAIR_REQUEST` | `{R_p}` / `INVOCABLE_FOR(R_p)` | `{R_p[complete_dependencies:=D_t]}` / `MALFORMED_REQUEST` |
+| `SEP_PAIR_REQUEST` | `{R_p}` / `INVOCABLE_FOR(R_p)` | `{pair_subject[trace_domain:=TRACE_SUBSET({})],R_p}` / `MALFORMED` |
 | `SEP_EVOLUTION_RECORD` | `{PKG_evo_EOK}` / `WELL_FORMED` | `{PKG_evo_EOK_no_a1}` / `MALFORMED(missing alias AK1)` |
 | `SEP_EVOLUTION_SERVICE_RECORD` | `{PKG_evo_EOK}` / `WELL_FORMED` | `{PKG_evo_EOK_no_m}` / `NO_MIGRATION(MK0)` |
 | `SEP_EVOLUTION_ADMISSION` | `{EENV_m}` / `CertificateAdmission.ADMITTED(EC_m,MIGRATION_RELATION_ADMITTED(MK0,EC_m))` | `{EENV_m_bad_root}` / `CertificateAdmission.MALFORMED_ENVELOPE` |
@@ -2675,6 +2805,25 @@ L_X={
   F_c:T(RepositorySnapshot),O_c:T(ObservationResult),
   s_w:T(ObservationSpec),t_w:T(TaskSpec),t_t:T(TaskSpec),
   LOCAL_STORAGE:T(StorageBackend),HOSTED_STORAGE:T(StorageBackend),
+  ALL_ADMITTED_TRACES:T(PairTraceDomain),
+  COMPLETE_EVAL_RECORD:T(PairComparedFields),
+  BOUNDS_CLAUSE:T(AuthorityClauseTag),
+  CONFLUENCE_OBSERVATION_CLAUSE:T(AuthorityClauseTag),
+  CONFLUENCE_CHANGE_CLAUSE:T(AuthorityClauseTag),
+  ADAPTER_PRESERVATION_CLAUSE:T(AuthorityClauseTag),
+  ADAPTER_ACCEPTANCE_CLAUSE:T(AuthorityClauseTag),
+  attestation_subject_identity(b,1):T(AuthorityAttestationSubjectIdentity),
+  attestation_subject_identity(c,1):T(AuthorityAttestationSubjectIdentity),
+  attestation_subject_identity(c,2):T(AuthorityAttestationSubjectIdentity),
+  attestation_subject_identity(w,1):T(AuthorityAttestationSubjectIdentity),
+  attestation_subject_identity(w,2):T(AuthorityAttestationSubjectIdentity),
+  attestation_subject_identity(choice,1):T(AuthorityAttestationSubjectIdentity),
+  ATTEST(b,1):T(AuthorityAttestationValue),
+  ATTEST(c,1):T(AuthorityAttestationValue),
+  ATTEST(c,2):T(AuthorityAttestationValue),
+  ATTEST(w,1):T(AuthorityAttestationValue),
+  ATTEST(w,2):T(AuthorityAttestationValue),
+  ATTEST(choice,1):T(AuthorityAttestationValue),
   bounds_subject_b:T(ServiceAdmissionSubject),
   confluence_subject_c:T(ServiceAdmissionSubject),
   witness_subject_w:T(ServiceAdmissionSubject),
@@ -2702,7 +2851,10 @@ TYPE_X={
   T(ObservationRelation),T(VerificationStatus),T(VerificationSpec),
   T(VerificationRecord),T(ImplementationEvidence),T(CodingEvidencePayload),
   T(CodingEvidenceEntry),T(AbstractCoverageResult),
-  T(ImplementationCoverageSubject),T(ServiceAdmissionSubject),
+  T(ImplementationCoverageSubject),T(PairTraceDomain),T(PairComparedFields),
+  T(AuthorityClauseTag),
+  T(AuthorityAttestationSubjectIdentity),T(AuthorityAttestationValue),
+  T(ServiceAdmissionSubject),
   T(EvolutionAdmissionSubject),T(Criterion),T(TaskSpec),T(ChangeKind),
   T(CommandId),T(ContactClass),T(ReleaseId),T(Purpose),T(EventPattern),
   T(CommandEventPayload),T(TestEventPayload),T(PathChangeEventPayload),
@@ -2728,6 +2880,10 @@ DELTA_TYPE_X={
   TypeDeclaration(T(CodingEvidencePayload)),TypeDeclaration(T(CodingEvidenceEntry)),
   TypeDeclaration(T(AbstractCoverageResult)),
   TypeDeclaration(T(ImplementationCoverageSubject)),
+  TypeDeclaration(T(PairTraceDomain)),TypeDeclaration(T(PairComparedFields)),
+  TypeDeclaration(T(AuthorityClauseTag)),
+  TypeDeclaration(T(AuthorityAttestationSubjectIdentity)),
+  TypeDeclaration(T(AuthorityAttestationValue)),
   TypeDeclaration(T(ServiceAdmissionSubject)),
   TypeDeclaration(T(EvolutionAdmissionSubject)),TypeDeclaration(T(Criterion)),
   TypeDeclaration(T(TaskSpec)),TypeDeclaration(T(ChangeKind)),
@@ -2751,6 +2907,31 @@ DELTA_LITERAL_X={
   LiteralDeclaration(T(TaskSpec),t_w),LiteralDeclaration(T(TaskSpec),t_t),
   LiteralDeclaration(T(StorageBackend),LOCAL_STORAGE),
   LiteralDeclaration(T(StorageBackend),HOSTED_STORAGE),
+  LiteralDeclaration(T(PairTraceDomain),ALL_ADMITTED_TRACES),
+  LiteralDeclaration(T(PairComparedFields),COMPLETE_EVAL_RECORD),
+  LiteralDeclaration(T(AuthorityClauseTag),BOUNDS_CLAUSE),
+  LiteralDeclaration(T(AuthorityClauseTag),CONFLUENCE_OBSERVATION_CLAUSE),
+  LiteralDeclaration(T(AuthorityClauseTag),CONFLUENCE_CHANGE_CLAUSE),
+  LiteralDeclaration(T(AuthorityClauseTag),ADAPTER_PRESERVATION_CLAUSE),
+  LiteralDeclaration(T(AuthorityClauseTag),ADAPTER_ACCEPTANCE_CLAUSE),
+  LiteralDeclaration(T(AuthorityAttestationSubjectIdentity),
+                     attestation_subject_identity(b,1)),
+  LiteralDeclaration(T(AuthorityAttestationSubjectIdentity),
+                     attestation_subject_identity(c,1)),
+  LiteralDeclaration(T(AuthorityAttestationSubjectIdentity),
+                     attestation_subject_identity(c,2)),
+  LiteralDeclaration(T(AuthorityAttestationSubjectIdentity),
+                     attestation_subject_identity(w,1)),
+  LiteralDeclaration(T(AuthorityAttestationSubjectIdentity),
+                     attestation_subject_identity(w,2)),
+  LiteralDeclaration(T(AuthorityAttestationSubjectIdentity),
+                     attestation_subject_identity(choice,1)),
+  LiteralDeclaration(T(AuthorityAttestationValue),ATTEST(b,1)),
+  LiteralDeclaration(T(AuthorityAttestationValue),ATTEST(c,1)),
+  LiteralDeclaration(T(AuthorityAttestationValue),ATTEST(c,2)),
+  LiteralDeclaration(T(AuthorityAttestationValue),ATTEST(w,1)),
+  LiteralDeclaration(T(AuthorityAttestationValue),ATTEST(w,2)),
+  LiteralDeclaration(T(AuthorityAttestationValue),ATTEST(choice,1)),
   LiteralDeclaration(T(ServiceAdmissionSubject),bounds_subject_b),
   LiteralDeclaration(T(ServiceAdmissionSubject),confluence_subject_c),
   LiteralDeclaration(T(ServiceAdmissionSubject),witness_subject_w),
@@ -2818,6 +2999,11 @@ DELTA_CONTRACT_SPECS_X={
   TypeDeclaration(T(CodingEvidenceEntry)).admitted_value_domain,
   TypeDeclaration(T(AbstractCoverageResult)).admitted_value_domain,
   TypeDeclaration(T(ImplementationCoverageSubject)).admitted_value_domain,
+  TypeDeclaration(T(PairTraceDomain)).admitted_value_domain,
+  TypeDeclaration(T(PairComparedFields)).admitted_value_domain,
+  TypeDeclaration(T(AuthorityClauseTag)).admitted_value_domain,
+  TypeDeclaration(T(AuthorityAttestationSubjectIdentity)).admitted_value_domain,
+  TypeDeclaration(T(AuthorityAttestationValue)).admitted_value_domain,
   TypeDeclaration(T(ServiceAdmissionSubject)).admitted_value_domain,
   TypeDeclaration(T(EvolutionAdmissionSubject)).admitted_value_domain,
   TypeDeclaration(T(Criterion)).admitted_value_domain,
@@ -2855,6 +3041,31 @@ BIND_LITERAL_X={
   SemanticBinding(L(T(TaskSpec),t_w)),SemanticBinding(L(T(TaskSpec),t_t)),
   SemanticBinding(L(T(StorageBackend),LOCAL_STORAGE)),
   SemanticBinding(L(T(StorageBackend),HOSTED_STORAGE)),
+  SemanticBinding(L(T(PairTraceDomain),ALL_ADMITTED_TRACES)),
+  SemanticBinding(L(T(PairComparedFields),COMPLETE_EVAL_RECORD)),
+  SemanticBinding(L(T(AuthorityClauseTag),BOUNDS_CLAUSE)),
+  SemanticBinding(L(T(AuthorityClauseTag),CONFLUENCE_OBSERVATION_CLAUSE)),
+  SemanticBinding(L(T(AuthorityClauseTag),CONFLUENCE_CHANGE_CLAUSE)),
+  SemanticBinding(L(T(AuthorityClauseTag),ADAPTER_PRESERVATION_CLAUSE)),
+  SemanticBinding(L(T(AuthorityClauseTag),ADAPTER_ACCEPTANCE_CLAUSE)),
+  SemanticBinding(L(T(AuthorityAttestationSubjectIdentity),
+                    attestation_subject_identity(b,1))),
+  SemanticBinding(L(T(AuthorityAttestationSubjectIdentity),
+                    attestation_subject_identity(c,1))),
+  SemanticBinding(L(T(AuthorityAttestationSubjectIdentity),
+                    attestation_subject_identity(c,2))),
+  SemanticBinding(L(T(AuthorityAttestationSubjectIdentity),
+                    attestation_subject_identity(w,1))),
+  SemanticBinding(L(T(AuthorityAttestationSubjectIdentity),
+                    attestation_subject_identity(w,2))),
+  SemanticBinding(L(T(AuthorityAttestationSubjectIdentity),
+                    attestation_subject_identity(choice,1))),
+  SemanticBinding(L(T(AuthorityAttestationValue),ATTEST(b,1))),
+  SemanticBinding(L(T(AuthorityAttestationValue),ATTEST(c,1))),
+  SemanticBinding(L(T(AuthorityAttestationValue),ATTEST(c,2))),
+  SemanticBinding(L(T(AuthorityAttestationValue),ATTEST(w,1))),
+  SemanticBinding(L(T(AuthorityAttestationValue),ATTEST(w,2))),
+  SemanticBinding(L(T(AuthorityAttestationValue),ATTEST(choice,1))),
   SemanticBinding(L(T(ServiceAdmissionSubject),bounds_subject_b)),
   SemanticBinding(L(T(ServiceAdmissionSubject),confluence_subject_c)),
   SemanticBinding(L(T(ServiceAdmissionSubject),witness_subject_w)),
@@ -2891,6 +3102,31 @@ MODEL_X={
   MODEL_LITERAL(T(TaskSpec),t_t),
   MODEL_LITERAL(T(StorageBackend),LOCAL_STORAGE),
   MODEL_LITERAL(T(StorageBackend),HOSTED_STORAGE),
+  MODEL_LITERAL(T(PairTraceDomain),ALL_ADMITTED_TRACES),
+  MODEL_LITERAL(T(PairComparedFields),COMPLETE_EVAL_RECORD),
+  MODEL_LITERAL(T(AuthorityClauseTag),BOUNDS_CLAUSE),
+  MODEL_LITERAL(T(AuthorityClauseTag),CONFLUENCE_OBSERVATION_CLAUSE),
+  MODEL_LITERAL(T(AuthorityClauseTag),CONFLUENCE_CHANGE_CLAUSE),
+  MODEL_LITERAL(T(AuthorityClauseTag),ADAPTER_PRESERVATION_CLAUSE),
+  MODEL_LITERAL(T(AuthorityClauseTag),ADAPTER_ACCEPTANCE_CLAUSE),
+  MODEL_LITERAL(T(AuthorityAttestationSubjectIdentity),
+                attestation_subject_identity(b,1)),
+  MODEL_LITERAL(T(AuthorityAttestationSubjectIdentity),
+                attestation_subject_identity(c,1)),
+  MODEL_LITERAL(T(AuthorityAttestationSubjectIdentity),
+                attestation_subject_identity(c,2)),
+  MODEL_LITERAL(T(AuthorityAttestationSubjectIdentity),
+                attestation_subject_identity(w,1)),
+  MODEL_LITERAL(T(AuthorityAttestationSubjectIdentity),
+                attestation_subject_identity(w,2)),
+  MODEL_LITERAL(T(AuthorityAttestationSubjectIdentity),
+                attestation_subject_identity(choice,1)),
+  MODEL_LITERAL(T(AuthorityAttestationValue),ATTEST(b,1)),
+  MODEL_LITERAL(T(AuthorityAttestationValue),ATTEST(c,1)),
+  MODEL_LITERAL(T(AuthorityAttestationValue),ATTEST(c,2)),
+  MODEL_LITERAL(T(AuthorityAttestationValue),ATTEST(w,1)),
+  MODEL_LITERAL(T(AuthorityAttestationValue),ATTEST(w,2)),
+  MODEL_LITERAL(T(AuthorityAttestationValue),ATTEST(choice,1)),
   MODEL_LITERAL(T(ServiceAdmissionSubject),bounds_subject_b),
   MODEL_LITERAL(T(ServiceAdmissionSubject),confluence_subject_c),
   MODEL_LITERAL(T(ServiceAdmissionSubject),witness_subject_w),
@@ -2925,6 +3161,35 @@ SIGMA_CONTRACT_SPECS_X={
   SemanticBinding(L(T(TaskSpec),t_t)).meaning_contract,
   SemanticBinding(L(T(StorageBackend),LOCAL_STORAGE)).meaning_contract,
   SemanticBinding(L(T(StorageBackend),HOSTED_STORAGE)).meaning_contract,
+  SemanticBinding(L(T(PairTraceDomain),ALL_ADMITTED_TRACES)).meaning_contract,
+  SemanticBinding(L(T(PairComparedFields),COMPLETE_EVAL_RECORD)).meaning_contract,
+  SemanticBinding(L(T(AuthorityClauseTag),BOUNDS_CLAUSE)).meaning_contract,
+  SemanticBinding(L(T(AuthorityClauseTag),
+                    CONFLUENCE_OBSERVATION_CLAUSE)).meaning_contract,
+  SemanticBinding(L(T(AuthorityClauseTag),
+                    CONFLUENCE_CHANGE_CLAUSE)).meaning_contract,
+  SemanticBinding(L(T(AuthorityClauseTag),
+                    ADAPTER_PRESERVATION_CLAUSE)).meaning_contract,
+  SemanticBinding(L(T(AuthorityClauseTag),
+                    ADAPTER_ACCEPTANCE_CLAUSE)).meaning_contract,
+  SemanticBinding(L(T(AuthorityAttestationSubjectIdentity),
+                    attestation_subject_identity(b,1))).meaning_contract,
+  SemanticBinding(L(T(AuthorityAttestationSubjectIdentity),
+                    attestation_subject_identity(c,1))).meaning_contract,
+  SemanticBinding(L(T(AuthorityAttestationSubjectIdentity),
+                    attestation_subject_identity(c,2))).meaning_contract,
+  SemanticBinding(L(T(AuthorityAttestationSubjectIdentity),
+                    attestation_subject_identity(w,1))).meaning_contract,
+  SemanticBinding(L(T(AuthorityAttestationSubjectIdentity),
+                    attestation_subject_identity(w,2))).meaning_contract,
+  SemanticBinding(L(T(AuthorityAttestationSubjectIdentity),
+                    attestation_subject_identity(choice,1))).meaning_contract,
+  SemanticBinding(L(T(AuthorityAttestationValue),ATTEST(b,1))).meaning_contract,
+  SemanticBinding(L(T(AuthorityAttestationValue),ATTEST(c,1))).meaning_contract,
+  SemanticBinding(L(T(AuthorityAttestationValue),ATTEST(c,2))).meaning_contract,
+  SemanticBinding(L(T(AuthorityAttestationValue),ATTEST(w,1))).meaning_contract,
+  SemanticBinding(L(T(AuthorityAttestationValue),ATTEST(w,2))).meaning_contract,
+  SemanticBinding(L(T(AuthorityAttestationValue),ATTEST(choice,1))).meaning_contract,
   SemanticBinding(L(T(ServiceAdmissionSubject),bounds_subject_b)).meaning_contract,
   SemanticBinding(L(T(ServiceAdmissionSubject),confluence_subject_c)).meaning_contract,
   SemanticBinding(L(T(ServiceAdmissionSubject),witness_subject_w)).meaning_contract,
@@ -3070,7 +3335,7 @@ PKG_PVK=PluginPackage(
   profile_bindings={},model_contracts={},aliases={},services={PVC},
   certificates={},authority_facts={},compatibility_claims={},migrations={},
   semantic_extensions={},diagnostics=NONE)
-PACKAGES_X={PKG_CK,PKG_AWK,PKG_RVK,PKG_APK,PKG_ATK,PKG_AVK,
+PACKAGE_CATALOG_X={PKG_CK,PKG_AWK,PKG_RVK,PKG_APK,PKG_ATK,PKG_AVK,
   PKG_CK_no_task_model,PKG_APK_no_choice_fact,PKG_PPK,PKG_PVK,PKG_pair_CK,
   PKG_evo_EOK,PKG_evo_EOK_no_m,PKG_evo_EOK_no_c,
   PKG_evo_EOK_no_x0,PKG_evo_EOK_no_x1,
@@ -3110,7 +3375,7 @@ SEQ_EOK_NO_X1=[ABI0,PKG_evo_EOK_no_x1]
 SEQ_EOK_ALIAS_OPTIONAL=[ABI0,PKG_evo_EOK_alias_optional]
 SEQ_EOK_ALIAS_OPTIONAL_NO_A0=[ABI0,PKG_evo_EOK_alias_optional_no_a0]
 SEQ_EOK_NO_A1=[ABI0,PKG_evo_EOK_no_a1]
-PACKAGE_RECORD_SEQUENCES_X={SEQ_CK,SEQ_AWK,SEQ_RVK,SEQ_APK,SEQ_ATK,
+PACKAGE_RECORD_PRESENTATION_CATALOG_X={SEQ_CK,SEQ_AWK,SEQ_RVK,SEQ_APK,SEQ_ATK,
   SEQ_AVK,SEQ_PPK,SEQ_PVK,SEQ_PAIR_CK,SEQ_EOK,SEQ_EPK,SEQ_EVK,
   SEQ_CK_NO_MODEL,SEQ_APK_NO_CHOICE_FACT,
   SEQ_EOK_NO_M,SEQ_EOK_NO_C,SEQ_EOK_NO_X0,SEQ_EOK_NO_X1,
@@ -3171,7 +3436,7 @@ FIXTURE_X={
   ServiceIdentityRecord(LEXSK),
   x_task,f_lex,g_lex,scope_lex,S_lex,lk0,lb0,
   scope_extra,E_t_extra,D_t_extra,Q_t_extra,lk_extra,lb_extra,
-  e0,v0,vr0,i0,H0,ev0,te0,src0,auth0,af0,u0,F_noresult,
+  e0,v0,vr0,i0,H0,ev0,te0,src0,auth0,u0,F_noresult,
   ROOT_TR_t,T_admitted,T_absent,T_undecided,T_incompatible,T_failed,
   e_abs_w,i_abs_w,u_pending_abs_w,i_pending_abs_w,H_w,r_task_w,r_abs_w,
   s_profile_w,U_profile_w,Q_profile_w,ROOT_PROFILE_W,T_profile_w,P_w_result,
@@ -3183,23 +3448,75 @@ FIXTURE_X={
   L_c_ready,L_c_final,K_c,
   RESULT_RECORD(result_identity=(IDENTITY_OF(R_c),ReasoningResult,
                 IDENTITY_OF(Y_c)),result_value=Y_c),
-  R_c_bad_dependencies,d,d_bad,d_bad_v2,CONFLICT_OF(d,d_bad),
+  ROOT_TR_c_alt,T_c_alt,R_c_alt,L_life_after,K_life_after,
+  d,d_bad,d_bad_signature,conflict0,conflict1,
   EENV_m_bad_root,
   CertificateAdmission.ADMITTED(
     PCERT,PAIR_COHERENCE_ADMITTED(PAIR(refresh),PCERT)),
   PAIR_COHERENCE_ADMITTED(PAIR(refresh),PCERT),
   D_pi11,D_pi12,D_pi21,D_pi22,A_pi11,A_pi12,A_pi21,A_pi22,
   ROOT_A,T_A} union AUTHORITY_FIXTURE_X union EVOLUTION_FIXTURE_X union
-  TRUST_REQUEST_FIXTURE_X union PACKAGES_X
-PACKET_X={ABI0} union DELTA_X union SIGMA_X union SERVICE_X union FIXTURE_X
-  union PACKAGES_X union PACKAGE_RECORD_SEQUENCES_X
+  TRUST_REQUEST_FIXTURE_X
 ```
 
-All set and sequence members above are literal and finite.  Every package,
-complete model record, service descriptor/specification, certificate,
-authority fact, evolution record, choice record, carrier, request, and result
-referenced by a later baseline is in `PACKET_X`; there is no package or model
-key standing in for its record and no implicit package-member closure.
+`PACKAGE_CATALOG_X`, `PACKAGE_RECORD_PRESENTATION_CATALOG_X`, and `FIXTURE_X`
+are finite catalogs of literal constructors, not universes and not operands of
+composition.  In particular, catalog membership never co-installs `PKG_CK`
+with `PKG_pair_CK`, never co-installs an evolution package with one of its
+same-key omission variants, and never combines the two pair bindings or the
+two conflict presentations.
+
+The packet itself is a tagged finite map.  Its key sort is the following
+closed algebra (all parameter sorts shown here are the finite enumerations
+defined in §§9.3--9.5):
+
+```text
+TrustFixtureTag = ADMITTED | ABSENT | UNDECIDED | INCOMPATIBLE | FAILED
+OrderTag = FORWARD | REVERSE
+PackageOrderTag = PI1_PI2 | PI2_PI1
+RecordOrderTag = DECLARATION_THEN_SPEC | SPEC_THEN_DECLARATION
+FixtureId =
+    CORE_DEFINITIONAL
+  | PAIR_INDEPENDENT
+  | TRUST_BRANCH(TrustFixtureTag)
+  | MISSING_BASE(MissingRowId)
+  | MISSING_VARIANT(MissingRowId)
+  | CONFLUENCE_ORDER(OrderTag)
+  | PERMUTATION(PackageOrderTag,RecordOrderTag)
+  | DUPLICATE_EQUAL(OrderTag)
+  | DUPLICATE_CONFLICT(OrderTag)
+
+FixtureUniverse = exact finite K2 logical record universe
+FixturePacket = finite map(FixtureId -> FixtureUniverse)
+
+FIXTURE_PACKET_X={
+  CORE_DEFINITIONAL -> U_CORE_DEFINITIONAL,
+  PAIR_INDEPENDENT -> U_PAIR_INDEPENDENT,
+  TRUST_BRANCH(x) -> U_TRUST_x for each displayed TrustFixtureTag x,
+  MISSING_BASE(k) -> B_k for each of the 42 displayed MissingRowId values k,
+  MISSING_VARIANT(k) -> V_k for each such k,
+  CONFLUENCE_ORDER(o) -> U_CONFLUENCE_o for each displayed OrderTag o,
+  PERMUTATION(p,r) -> U_PI_p_r for each of the four displayed `(p,r)` pairs,
+  DUPLICATE_EQUAL(o) -> U_DUPLICATE_EQUAL_o for each displayed OrderTag o,
+  DUPLICATE_CONFLICT(o) -> U_DUPLICATE_CONFLICT_o for each displayed OrderTag o}
+```
+
+Each right-hand side is one self-contained universe, not a union of packet
+entries.  The notation above expands to a finite literal map because every
+parameter sort is displayed and finite.  Every map value conforms to the K2
+universe input algebra; `WELL_FORMED`, `MALFORMED`, open, and missing are its
+derived judgments and do not make the input an untyped packet value.
+`U_CORE_DEFINITIONAL` contains only
+`PKG_CK/PB_refresh`; `U_PAIR_INDEPENDENT` contains only
+`PKG_pair_CK/PB_alt`; every omission baseline/variant owns its own exact
+package and referring carriers; and each permutation or duplicate/conflict
+presentation has its own entry.  No hidden global universe exists.
+
+Every package, complete model record, service descriptor/specification,
+certificate, authority fact, evolution record, choice record, carrier,
+request, and result referenced by a packet entry is its complete record; no
+package or model key stands in for a record and no implicit package-member
+closure is used.
 
 Every fixture value is finite logical data: abstract segments/content,
 snapshots, task/verification specs, EvidenceRefs, event payloads, exact keys,
@@ -3286,8 +3603,7 @@ field.  Freeze the exact finite typed primary value
 ```text
 pair_subject=PAIR_COHERENCE_SUBJECT(
   PAIR(refresh),DP(refresh_scope),DP(refresh_occurred),
-  TYPED_DOMAIN(Trace),
-  {truth,evidence_refs,unknown_reasons,evaluation_errors})
+  ALL_ADMITTED_TRACES,COMPLETE_EVAL_RECORD)
 ```
 
 `PSOUND` and `PCOMPLETE` have primary input domain
@@ -3321,12 +3637,18 @@ The pair environment and its finite record domain are literally
 types_p=the least §3.2 nested-type closure of
   {T(DependencyRefreshEventPayload),T(ServiceAdmissionSubject)}
 Delta_p={TypeDeclaration(k)|k in types_p} union
-  {LiteralDeclaration(T(ServiceAdmissionSubject),pair_subject),
+  {LiteralDeclaration(T(PairTraceDomain),ALL_ADMITTED_TRACES),
+   LiteralDeclaration(T(PairComparedFields),COMPLETE_EVAL_RECORD),
+   LiteralDeclaration(T(ServiceAdmissionSubject),pair_subject),
    the exact PredicateDeclaration(DP(refresh_scope)),
    the exact PredicateDeclaration(DP(refresh_occurred)),
    the exact EventDeclaration(DE(dependency_refresh))}
 Sigma_p={sb,
+  the exact literal SemanticBinding(T(PairTraceDomain),ALL_ADMITTED_TRACES),
+  the exact literal SemanticBinding(T(PairComparedFields),COMPLETE_EVAL_RECORD),
   the exact literal SemanticBinding(T(ServiceAdmissionSubject),pair_subject),
+  MODEL_LITERAL(T(PairTraceDomain),ALL_ADMITTED_TRACES),
+  MODEL_LITERAL(T(PairComparedFields),COMPLETE_EVAL_RECORD),
   MODEL_LITERAL(T(ServiceAdmissionSubject),pair_subject),
   MODEL_refresh_scope,
   MODEL_refresh_occurred} union
@@ -3366,8 +3688,8 @@ R_p = PairAdmissionRequest(
 PairFullEvalProof = FULL_EVAL_EQUALITY(
   pair_key=PAIR(refresh), bundle_identity=IDENTITY_OF(B_alt),
   reference_contract=T3_A1_MEANING_LIFT(pd,sb),
-  trace_domain=TYPED_DOMAIN(Trace),
-  compared_fields={truth,evidence_refs,unknown_reasons,evaluation_errors})
+  trace_domain=ALL_ADMITTED_TRACES,
+  compared_fields=COMPLETE_EVAL_RECORD)
 PENV = CertificateEnvelope(
   certificate_key=PCERT, certificate_kind=EVENT_PAIR_COHERENCE_PROOF,
   request_binding=R_p, subjects=(PAIR(refresh),B_alt), environment=E_p,
@@ -3489,9 +3811,10 @@ completion after the admitted branch becomes invocable.
 ### 9.4 Exhaustive missing-record fixture
 
 Each row below names its own complete finite baseline and one exact
-single-record deletion or substitution; no referencing field is silently
-removed.  Where K2's total function is context-sensitive, the contexts are
-separate named baselines and variants.
+target-removing reconstruction.  Every containing package, environment,
+request, result, and derived carrier is rebuilt explicitly; no referencing
+field is silently removed.  Where K2's total function is context-sensitive,
+the contexts are separate named baselines and variants.
 
 The otherwise auxiliary keys/values used only to exercise the total missing
 function are fixed as follows:
@@ -3593,7 +3916,6 @@ Sigma_ev=BIND_ev union
   UNION(contractFields(r) | r in Delta_ev union BIND_ev)
 src0=SRC(choice,1)
 auth0=AUTH(choice,1)
-af0=AF(choice,1)
 x_task = Variable(task_argument,T(TaskSpec))
 f_lex = Atom(
   SP(task_accepts),Var(x_task),
@@ -4026,245 +4348,283 @@ PKG_evo_EOK_alias_optional_no_a0=
 PKG_evo_EOK_no_a1=PKG_evo_EOK[aliases:={a0}]
 ```
 
-These three packages are finite missing-record fixtures only; they do not
-replace the retained coding package.
+These packages are finite fixture constructors only; no omission package is
+ever composed with its same-key baseline package.
 
-Every missing branch below has a named complete baseline and a named variant.
-For a record set `B`, `B-r` means the single-record deletion `B minus {r}`;
-`B[r=>r']` means the single-record substitution
-`(B minus {r}) union {r'}`.  These are the only two variant constructors.
+The independent pair owner package, used only by the `PAIR_INDEPENDENT`
+packet entry and pair rows below, is the following complete record:
 
 ```text
-SERVICE_RETAINED_X={
-  FSOUND,QSOUND,PROFSOUND,BSOUND,BCOMPLETE,WSOUND,CSOUND,
-  FREQ,QREQ,PROFREQ,BREQ,CREQ,WREQ,
-  FFAIL,QFAIL,PROFFAIL,BFAIL,CFAIL,WFAIL,
-  ASOUND,ACOMPLETE,AREQUIRED,AFAILURE,
-  LEX_SOUND,LEX_REQ,LEX_FAIL,LEX_CAP,ServiceIdentityRecord(LEXSK),
-  CapabilityDescriptor(CAP(functions)),
-  CapabilityDescriptor(CAP(predicates)),CapabilityDescriptor(CAP(profile)),
-  CapabilityDescriptor(CAP(bounds)),CapabilityDescriptor(CAP(confluence)),
-  CapabilityDescriptor(CAP(witness)),
-  CapabilityDescriptor(CAP(validate_bounds)),
-  CapabilityDescriptor(CAP(validate_witness)),
-  CapabilityDescriptor(CAP(authority)),
-  ServiceIdentityRecord(SK(functions)),ServiceIdentityRecord(SK(predicates)),
-  ServiceIdentityRecord(SK(profile)),ServiceIdentityRecord(SK(bounds)),
-  ServiceIdentityRecord(SK(confluence)),ServiceIdentityRecord(AWSK),
-  ServiceIdentityRecord(RVSK(bounds)),ServiceIdentityRecord(RVSK(witness)),
-  ServiceIdentityRecord(AVSK)}
-CORE_FIXTURE_X={
-  C_b,C_c,C_w,C_choice,cb0,cbe0,E_choice^0,E_choice,
-  E_b,E_c,E_w,D_b,D_c,D_w,J_b,J_c,J_w,
-  R_b,R_c,R_w,BENV,WENV,BundleBoundsProof,AdapterWitness,
-  BPROOF_REF,WPROOF_REF,ROOT_B,ROOT_W,T_b,T_w,
-  CertificateAdmission.ADMITTED(BCERT,CONSISTENCY_UNSAT),
-  ReasoningResult.ADMITTED_JUDGMENT(CONSISTENCY_UNSAT,BCERT),
-  CertificateAdmission.ADMITTED(WCERT,CONSISTENCY_SAT),
-  ReasoningResult.ADMITTED_JUDGMENT(CONSISTENCY_SAT,WCERT),
-  t_t,F_t,EVIDENCE_t,E_t,D_t,r_t,RES_t,
-  x_task,f_lex,g_lex,scope_lex,S_lex,lk0,lb0,E_lex,D_lex,
-  LEX_SOUND,LEX_REQ,LEX_FAIL,LEXSK,CAP_lex,TARGET_lex,LEX_CAP,R_lex,
-  ServiceIdentityRecord(LEXSK),
-  ROOT_TR_t,T_admitted,T_absent,T_undecided,T_incompatible,T_failed,
-  Q_t[T_admitted],Q_t[T_absent],Q_t[T_undecided],Q_t[T_incompatible],
-  Q_t[T_failed],
-  e0,v0,vr0,i0,H0,ev0,te0,src0,auth0,af0,u0,F_noresult,
-  ROOT_A,T_A} union AUTHORITY_FIXTURE_X
-BASE_RETAINED={ABI0,PKG_CK,PKG_AWK,PKG_RVK,PKG_APK,PKG_ATK,PKG_AVK}
-  union DELTA_X union SIGMA_X union SERVICE_RETAINED_X union CORE_FIXTURE_X
-
 PKG_pair_CK=PluginPackage(
   ABI0,CK,declarations=DELTA_TYPE_X union {
+    LiteralDeclaration(T(PairTraceDomain),ALL_ADMITTED_TRACES),
+    LiteralDeclaration(T(PairComparedFields),COMPLETE_EVAL_RECORD),
     LiteralDeclaration(T(ServiceAdmissionSubject),pair_subject),
     PredicateDeclaration(DP(refresh_scope)),
     PredicateDeclaration(DP(refresh_occurred)),
     EventDeclaration(DE(dependency_refresh))},pair_declarations={pd},
   bindings={sb,
+    the exact literal SemanticBinding(T(PairTraceDomain),ALL_ADMITTED_TRACES),
+    the exact literal SemanticBinding(T(PairComparedFields),COMPLETE_EVAL_RECORD),
     the exact literal SemanticBinding(T(ServiceAdmissionSubject),pair_subject)},
   pair_bindings={PB_alt},profile_bindings={},
   model_contracts={MODEL_refresh_scope,MODEL_refresh_occurred,
+    MODEL_LITERAL(T(PairTraceDomain),ALL_ADMITTED_TRACES),
+    MODEL_LITERAL(T(PairComparedFields),COMPLETE_EVAL_RECORD),
     MODEL_LITERAL(T(ServiceAdmissionSubject),pair_subject)},aliases={},
   services={},certificates={},authority_facts={},compatibility_claims={},
   migrations={},semantic_extensions={},diagnostics=NONE)
-BASE_PAIR={ABI0,PKG_pair_CK,PKG_PPK,PKG_PVK,pd,sb,od,B_alt,PB_alt,
-  MODEL_refresh_scope,MODEL_refresh_occurred,
-  MODEL_LITERAL(T(ServiceAdmissionSubject),pair_subject),
-  E_p,D_p,PSOUND,PCOMPLETE,PEVIDENCE,PFAILURE,PVC,
-  ServiceIdentityRecord(PVSK),ROOT_p,T_p,R_p,PairFullEvalProof,
-  PAIR_PROOF_REF,PENV,
-  CertificateAdmission.ADMITTED(
-    PCERT,PAIR_COHERENCE_ADMITTED(PAIR(refresh),PCERT)),
-  PAIR_COHERENCE_ADMITTED(PAIR(refresh),PCERT)}
-
-BASE_LEXICAL=BASE_RETAINED union
-  Delta_lex union Sigma_lex union
-  {x_task,f_lex,g_lex,scope_lex,S_lex,lk0,lb0,
-   E_lex,D_lex,LEX_SOUND,CAP_lex,R_lex}
-BASE_EXTRA_LEXICAL=BASE_RETAINED union
-  {scope_extra,lk_extra,lb_extra,E_t_extra,D_t_extra,
-   Q_t[T_admitted]}
-BASE_EVOLUTION=BASE_RETAINED union Delta_ev union Sigma_ev union
-  {PKG_evo_EOK,PKG_evo_EPK,PKG_evo_EVK,m0,c0,x0,x1,a0,a1,
-   mr_subject,cc_subject,x0_subject,x1_subject,MR0,CC0,XE0,XP0,
-   ROOT_E,T_evo,R_m,R_c0,R_x0,R_x1,
-   EENV_m,EENV_c,EENV_x0,EENV_x1,
-   EADMIT_m,EADMIT_c,EADMIT_x0,EADMIT_x1} union EVOLUTION_FIXTURE_X
-BASE_CONFLUENCE=(BASE_RETAINED minus
-  {ROOT_TR_t,T_admitted,Q_t[T_admitted],RES_t}) union
-  {N_o,N_d,V_o,V_d,M_c,O_1,O_2,U_c,ROOT_TR_c,T_c,u_c,Y_c,
-   L_c_ready,L_c_final,K_c,
-   RESULT_RECORD(result_identity=(IDENTITY_OF(R_c),ReasoningResult,
-                 IDENTITY_OF(Y_c)),result_value=Y_c)}
-
-BASE_ABI=BASE_RETAINED
-BASE_PLUGIN=BASE_RETAINED
-BASE_DECLARATION=BASE_RETAINED
-BASE_SYMBOL=BASE_RETAINED
-BASE_EVENT=BASE_RETAINED
-BASE_PAIR_DECLARATION=BASE_PAIR
-BASE_OUTCOME=BASE_RETAINED
-BASE_BINDING=BASE_RETAINED
-BASE_PROFILE_BINDING=BASE_RETAINED
-BASE_PAIR_BINDING=BASE_PAIR
-BASE_AUTHORITY_FACT=BASE_RETAINED minus {AFB(choice,1),E_choice}
-E_choice_missing=E_choice[choice_bindings:={}]
-BASE_CHOICE_BINDING=BASE_RETAINED minus {cbe0}
-BASE_LEXICAL_BINDING=BASE_LEXICAL
-BASE_EXTRANEOUS_LEXICAL=BASE_EXTRA_LEXICAL
-BASE_SERVICE=BASE_RETAINED
-BASE_CAPABILITY=BASE_RETAINED
-BASE_TRUST_POLICY=BASE_RETAINED
-BASE_TRUST_ROOT=BASE_RETAINED
-BASE_CERTIFICATE=BASE_RETAINED
-BASE_MIGRATION=BASE_EVOLUTION minus {m0}
-BASE_COMPATIBILITY=BASE_EVOLUTION minus {c0}
-BASE_EXTENSION_OPTIONAL=(BASE_EVOLUTION minus
-  {R_x0,EENV_x0,EADMIT_x0,EVCAP_x0,ES_x0,ECOMP_x0,EE_x0,EF_x0,ER_x0}
-  ) minus {x0}
-BASE_EXTENSION_REQUIRED=BASE_EVOLUTION minus {x1}
-BASE_MODEL=BASE_RETAINED minus {MODEL_task_accepts}
-BASE_ALIAS_OPTIONAL=
-  (BASE_EXTENSION_OPTIONAL-PKG_evo_EOK) union {PKG_evo_EOK_alias_optional}
-  minus {a0}
-BASE_ALIAS_REQUIRED=BASE_EVOLUTION minus {a1}
-BASE_SIGMA_SPEC=BASE_RETAINED
-BASE_SERVICE_SPEC=BASE_RETAINED
-BASE_REQUEST=BASE_RETAINED
-BASE_RESULT=BASE_RETAINED
-BASE_SEMANTIC_ENVIRONMENT=BASE_RETAINED
-BASE_TRUST_ENVIRONMENT=BASE_RETAINED
-BASE_DEPENDENCY_ENVIRONMENT=BASE_RETAINED
-BASE_OBSERVATION_ENVIRONMENT=BASE_CONFLUENCE
-BASE_LIFECYCLE=BASE_CONFLUENCE
-BASE_EVENT_VALUE=BASE_RETAINED
-BASE_TRACE_EVENT=BASE_RETAINED
-BASE_SOURCE=BASE_RETAINED
-BASE_AUTHORITY_REF=BASE_RETAINED
-BASE_EVIDENCE=BASE_RETAINED
-BASE_REASON=BASE_RETAINED
-BASE_CONFLICT=BASE_RETAINED union {d,d_bad,CONFLICT_OF(d,d_bad)}
-R_c_bad_dependencies=R_c[complete_dependencies:=D_t]
-d_bad_v2=d_bad[exact_version:=(2)]
-
-MISS_ABI=BASE_ABI-ABI0
-MISS_PLUGIN=BASE_PLUGIN-PKG_CK
-MISS_DECLARATION=BASE_DECLARATION-PredicateDeclaration(DP(task_accepts))
-MISS_SYMBOL=BASE_SYMBOL-PredicateDeclaration(DP(task_accepts))
-MISS_EVENT=BASE_EVENT-EventDeclaration(DE(dependency_refresh))
-MISS_PAIR_DECLARATION=BASE_PAIR_DECLARATION-pd
-MISS_OUTCOME=BASE_OUTCOME-O_w
-MISS_BINDING=BASE_BINDING-SemanticBinding(DP(task_accepts))
-MISS_PROFILE_BINDING=BASE_PROFILE_BINDING-PROFILE_impl
-MISS_PAIR_BINDING=BASE_PAIR_BINDING-PB_alt
-MISS_AUTHORITY_FACT=
-  BASE_AUTHORITY_FACT[PKG_APK=>PKG_APK_no_choice_fact]
-MISS_CHOICE_BINDING=BASE_CHOICE_BINDING[E_choice=>E_choice_missing]
-MISS_LEXICAL_BINDING=BASE_LEXICAL_BINDING-lb0
-EXTRA_LEXICAL_REQUEST=
-  BASE_EXTRANEOUS_LEXICAL[Q_t[T_admitted]=>Q_t_extra]
-MISS_SERVICE=BASE_SERVICE-ServiceIdentityRecord(SK(predicates))
-MISS_CAPABILITY=BASE_CAPABILITY-CapabilityDescriptor(CAP(predicates))
-MISS_TRUST_POLICY=BASE_TRUST_POLICY-T_admitted
-MISS_TRUST_ROOT=BASE_TRUST_ROOT-ROOT_TR_t
-MISS_CERTIFICATE=BASE_CERTIFICATE-BENV
-MISS_MIGRATION=BASE_MIGRATION[PKG_evo_EOK=>PKG_evo_EOK_no_m]
-MISS_COMPATIBILITY=BASE_COMPATIBILITY[PKG_evo_EOK=>PKG_evo_EOK_no_c]
-MISS_EXTENSION_OPTIONAL=
-  BASE_EXTENSION_OPTIONAL[PKG_evo_EOK=>PKG_evo_EOK_no_x0]
-MISS_EXTENSION_REQUIRED=
-  BASE_EXTENSION_REQUIRED[PKG_evo_EOK=>PKG_evo_EOK_no_x1]
-MISS_MODEL=BASE_MODEL[PKG_CK=>PKG_CK_no_task_model]
-MISS_ALIAS_OPTIONAL=BASE_ALIAS_OPTIONAL[
-  PKG_evo_EOK_alias_optional=>PKG_evo_EOK_alias_optional_no_a0]
-MISS_ALIAS_REQUIRED=BASE_ALIAS_REQUIRED[PKG_evo_EOK=>PKG_evo_EOK_no_a1]
-MISS_SIGMA_SPEC=BASE_SIGMA_SPEC-CS(PREDICATE_MEANING,task_accepts)
-MISS_SERVICE_SPEC=BASE_SERVICE_SPEC-QSOUND
-MISS_REQUEST=BASE_REQUEST-Q_t[T_admitted]
-MISS_RESULT=BASE_RESULT-RES_t
-MISS_SEMANTIC_ENVIRONMENT=BASE_SEMANTIC_ENVIRONMENT-E_t
-MISS_TRUST_ENVIRONMENT=BASE_TRUST_ENVIRONMENT-T_admitted
-MISS_DEPENDENCY_ENVIRONMENT=BASE_DEPENDENCY_ENVIRONMENT-D_t
-MISS_OBSERVATION_ENVIRONMENT=BASE_OBSERVATION_ENVIRONMENT-M_c
-CHANGE_LIFECYCLE_REQUEST=BASE_LIFECYCLE[R_c=>R_c_bad_dependencies]
-MISS_EVENT_VALUE=BASE_EVENT_VALUE-ev0
-MISS_TRACE_EVENT=BASE_TRACE_EVENT-te0
-MISS_SOURCE=BASE_SOURCE-src0
-MISS_AUTHORITY_REF=BASE_AUTHORITY_REF-auth0
-MISS_EVIDENCE=BASE_EVIDENCE-e0
-MISS_REASON=BASE_REASON-u0
-CHANGE_CONFLICT_MEMBER=BASE_CONFLICT[d_bad=>d_bad_v2]
 ```
 
-| missing kind | named complete baseline | named one-record variant | exact `missingStatus` / resulting family |
+The missing fixture uses canonical K2 record maps, not bags of nested values.
+For an exact universe `U`, `A(U)` is the K2 §3.3 map from `RecordIdentity` to
+the unique authoritative complete record after independently supplied equal
+records coalesce.  Define
+
+```text
+authoritativeCount(i,U)=1 when A(U)[i] is defined, otherwise 0
+authoritativePairs(R)=A(the exact reconstruction fragment whose complete
+  containers are precisely R), including each container's displayed members
+RECONSTRUCT(U,Rminus,Rplus)=
+  the exact universe obtained by removing every complete container in Rminus,
+  inserting every complete container in Rplus, and changing no other record
+```
+
+`RECONSTRUCT` is defined only when `Rminus` names every package, environment,
+request, result, or derived carrier that contains the target record rather
+than merely its key.  Its exact postcondition is
+`A(U) symmetric_difference A(RECONSTRUCT(U,Rminus,Rplus)) =
+authoritativePairs(Rminus) symmetric_difference authoritativePairs(Rplus)`.
+Thus a stale nested copy makes a fixture
+undefined instead of silently turning a deletion into a no-op.
+
+The complete replacements used below are literal.  Bracket notation changes
+the displayed field and repeats every other complete field exactly.  Each
+`D_*'`, request, result, lifecycle, and `chi_C` value is recomputed from the
+replacement inputs; none is copied from its baseline.
+
+```text
+PKG_CK_no_decl=PKG_CK[declarations:=PKG_CK.declarations minus
+  {PredicateDeclaration(DP(task_accepts))}]
+PKG_CK_no_event=PKG_CK[declarations:=PKG_CK.declarations minus
+  {EventDeclaration(DE(dependency_refresh))}]
+PKG_CK_no_binding=PKG_CK[bindings:=PKG_CK.bindings minus
+  {SemanticBinding(DP(task_accepts))}]
+PKG_CK_no_profile=PKG_CK[profile_bindings:={}]
+PKG_pair_CK_no_pair_decl=PKG_pair_CK[pair_declarations:={}]
+PKG_pair_CK_no_pair_binding=PKG_pair_CK[pair_bindings:={}]
+
+E_choice_no_fact=E_choice[
+  authority_facts:={},choice_bindings:={},chi_C:={}]
+E_choice_no_binding=E_choice[choice_bindings:={},chi_C:={}]
+E_lex_no_lb=E_lex[lexical_bindings:={}]
+Omega_lex_no_lb={ABI0,E_lex_no_lb} union Delta_lex union Sigma_lex
+D_lex_no_lb=DependencyEnvironment(S_lex,Omega_lex_no_lb)
+R_lex_no_lb=R_lex[semantic_environment:=E_lex_no_lb,
+  complete_dependencies:=D_lex_no_lb]
+
+CAP_pred_wrong_sound=CapabilityDescriptor(CAP(predicates))[
+  sound_fragment:=FSOUND]
+PKG_CK_wrong_service_spec=PKG_CK[services:=
+  (PKG_CK.services minus {CapabilityDescriptor(CAP(predicates))}) union
+  {CAP_pred_wrong_sound}]
+B_task_wrong_meaning=SemanticBinding(DP(task_accepts))[
+  meaning_contract:=CS(PREDICATE_MEANING,observations_equal)]
+PKG_CK_wrong_sigma_spec=PKG_CK[bindings:=
+  (PKG_CK.bindings minus {SemanticBinding(DP(task_accepts))}) union
+  {B_task_wrong_meaning}]
+
+E_t_empty=E_t[declarations:={},bindings:={},pair_bindings:={},
+  profile_bindings:={},authority_facts:={},semantic_extensions:={},
+  lexical_bindings:={},choice_bindings:={},
+  mechanically_extracted_dependencies:={},chi_C:={}]
+Omega_t_empty={ABI0,E_t_empty}
+D_t_empty=DependencyEnvironment(S_t,Omega_t_empty)
+Q_t_empty=Q_t[T_admitted][semantic_environment:=E_t_empty,
+  complete_dependencies:=D_t_empty]
+RES_t_empty=RESULT_RECORD(
+  result_identity=(IDENTITY_OF(Q_t_empty),Eval,IDENTITY_OF(r_t)),
+  result_value=r_t)
+
+Q_t_no_trust=Q_t[T_admitted][trust_environment:=T_absent]
+RES_t_no_trust=RESULT_RECORD(
+  result_identity=(IDENTITY_OF(Q_t_no_trust),Eval,IDENTITY_OF(r_t)),
+  result_value=r_t)
+
+D_t_incomplete=DependencyEnvironment(
+  S_t,Omega_t minus {SemanticBinding(DP(task_accepts))})
+Q_t_incomplete=Q_t[T_admitted][dependency_environment:=D_t_incomplete]
+RES_t_incomplete=RESULT_RECORD(
+  result_identity=(IDENTITY_OF(Q_t_incomplete),Eval,IDENTITY_OF(r_t)),
+  result_value=r_t)
+
+M_c_missing=DependencyObservationEnvironment({N_o->V_o})
+fr_c_missing=failureReason(
+  REASONING_INVOCATION,MALFORMED_RESULT(SEMANTIC_MISMATCH),R_c,
+  RESULT_OFFENDER((IDENTITY_OF(R_c),ReasoningResult,IDENTITY_OF(Y_c))))
+F_c_missing=InterfaceFailure(
+  domain=REASONING_INVOCATION,
+  kind=MALFORMED_RESULT(SEMANTIC_MISMATCH),reasons={fr_c_missing})
+L_c_missing=LifecycleState(DECLARATION_NOT_REQUIRED,
+  BINDING_NOT_REQUIRED,CAPABILITY_DISCOVERED,
+  INVOCATION_FAILED(PROTOCOL,{fr_c_missing}))
+K_c_missing=(WELL_FORMED,CLOSED,EVALUABILITY_AVAILABLE,
+  LIFECYCLE_RECORD((J_c,IDENTITY_OF(R_c)))->L_c_missing,
+  OBSERVATION_ENVIRONMENT_RECORD(IDENTITY_OF(M_c_missing))->M_c_missing,
+  interface_failure=F_c_missing,
+  CONSISTENCY_UNKNOWN)
+
+ROOT_TR_c_alt=ROOT_TR_c[permitted_targets:={U_c,U_t}]
+T_c_alt=TrustEnvironment(
+  trust_policy_key=TP,policy_owner=EMBEDDING_POLICY_PRODUCER(TP),
+  root_judgments={TR->TRUST_ROOT_ADMITTED(ROOT_TR_c_alt)})
+R_c_alt=R_c[trust_environment:=T_c_alt]
+L_life_after=LifecycleState(DECLARATION_NOT_REQUIRED,
+  BINDING_NOT_REQUIRED,CAPABILITY_DISCOVERED,
+  INVOCABLE_FOR(R_c_alt))
+K_life_after=(WELL_FORMED,CLOSED,EVALUABILITY_AVAILABLE,
+  LIFECYCLE_RECORD((J_c,IDENTITY_OF(R_c_alt)))->L_life_after,
+  CONSISTENCY_UNKNOWN)
+
+d_bad_signature=d_bad[argument_types:=
+  (T(TaskSpec),T(RepositorySnapshot),T(EvidenceStore),T(StorageBackend))]
+conflict0=CONFLICT_OF(d,d_bad)
+conflict1=CONFLICT_OF(d,d_bad_signature)
+```
+
+The `d_bad_signature` substitution changes a real declaration field; there is
+no declaration `exact_version` field.  `E_choice_no_fact` and
+`E_choice_no_binding` recompute `chi_C={}`.  `AF(choice,1)` remains an
+`AuthorityFactKey` inside `cbe0`; it is never used where an
+`AuthorityFactBinding` is required.
+
+`MissingRowId` is exactly this 42-tag enumeration:
+
+```text
+MissingRowId = ABI | PLUGIN | DECLARATION | SYMBOL | EVENT |
+  PAIR_DECLARATION | OUTCOME | BINDING | PROFILE_BINDING | PAIR_BINDING |
+  AUTHORITY_FACT | CHOICE_BINDING | LEXICAL_BINDING |
+  EXTRANEOUS_LEXICAL_BINDING | SERVICE | CAPABILITY | TRUST_POLICY |
+  TRUST_ROOT | CERTIFICATE | MIGRATION | COMPATIBILITY_CLAIM |
+  EXTENSION_OPTIONAL | EXTENSION_REQUIRED | MODEL_CONTRACT |
+  ALIAS_OPTIONAL | ALIAS_REQUIRED | SIGMA_CONTRACT_SPEC |
+  SERVICE_CONTRACT_SPEC | REQUEST | RESULT | SEMANTIC_ENVIRONMENT |
+  TRUST_ENVIRONMENT | DEPENDENCY_ENVIRONMENT | OBSERVATION_ENVIRONMENT |
+  LIFECYCLE | EVENT_VALUE | TRACE_EVENT | SOURCE | AUTHORITY_REF |
+  EVIDENCE | REASON | CONFLICT
+```
+
+For each row `k`, `ROW(k;...)` constructs a fresh, separately tagged K2
+universe containing exactly the displayed complete records and the exact
+proper and validation roots of those records.  The literal package member
+sets are the ones displayed in their complete `PluginPackage` values; this is
+not an implicit package-member closure.  `ROW` deep-copies values, so no
+package, environment, request, result, or carrier is shared by two rows.
+`B_k` is the named baseline `ROW(k;baseline records)` and
+`V_k=RECONSTRUCT(B_k,Rminus_k,Rplus_k)`.  The table is also the literal
+definition of the finite maps `i[k]`, `Rminus[k]`, `Rplus[k]`, and
+`MISSING_EXPECTED[k]`; its fourth cell is the complete value of
+`MISSING_EXPECTED[k]`, not a comment or selector.
+
+<!-- K3S-MISSING-BEGIN -->
+| `MissingRowId k`; target `RecordIdentity i_k` | exact self-contained `B_k` records | exact `Rminus_k -> Rplus_k` reconstruction | exact variant result |
 |---|---|---|---|
-| `ABI` | `BASE_ABI` | `MISS_ABI` deletes `ABI0` | `MALFORMED` |
-| `PLUGIN` | `BASE_PLUGIN` | `MISS_PLUGIN` deletes `PKG_CK` | `MALFORMED` |
-| `DECLARATION` | `BASE_DECLARATION` | `MISS_DECLARATION` deletes the complete `PredicateDeclaration(DP(task_accepts))` | `MALFORMED` |
-| `SYMBOL` | `BASE_SYMBOL` | `MISS_SYMBOL` deletes that one declaration carrying `SP(task_accepts)` | `MALFORMED` |
-| `EVENT` | `BASE_EVENT` | `MISS_EVENT` deletes `EventDeclaration(DE(dependency_refresh))` | `MALFORMED` |
-| `PAIR_DECLARATION` | `BASE_PAIR_DECLARATION` | `MISS_PAIR_DECLARATION` deletes `pd` | `MALFORMED` |
-| required `CARRIER(OUTCOME,IDENTITY_OF(O_w))` | `BASE_OUTCOME` | `MISS_OUTCOME` deletes `O_w` | `MALFORMED` |
-| `BINDING` | `BASE_BINDING` | `MISS_BINDING` deletes the complete `SemanticBinding(DP(task_accepts))` | `OPEN_BINDINGS` |
-| `PROFILE_BINDING` | `BASE_PROFILE_BINDING` | `MISS_PROFILE_BINDING` deletes `PROFILE_impl` | `OPEN_BINDINGS` |
-| `PAIR_BINDING` | `BASE_PAIR_BINDING` | `MISS_PAIR_BINDING` deletes `PB_alt` | `OPEN_BINDINGS` |
-| `AUTHORITY_FACT` | `BASE_AUTHORITY_FACT`, where `AFB(choice,1)=af0` occurs once as the `PKG_APK` member | `MISS_AUTHORITY_FACT` substitutes only that package with `PKG_APK_no_choice_fact` | `OPEN_BINDINGS` |
-| required `CHOICE_BINDING` | `BASE_CHOICE_BINDING`, where `cbe0` occurs once in `E_choice` at exact key `cb0` | `MISS_CHOICE_BINDING` substitutes only that environment with `E_choice_missing` | `OPEN_BINDINGS` |
-| missing `LEXICAL_BINDING` | `BASE_LEXICAL_BINDING` | `MISS_LEXICAL_BINDING` deletes `lb0` while retaining `R_lex` | `OPEN_BINDINGS({LEXICAL_BINDING(lk0)})` |
-| extraneous `LEXICAL_BINDING` | `BASE_EXTRANEOUS_LEXICAL` with the complete ordinary `Q_t[T_admitted]` | `EXTRA_LEXICAL_REQUEST` substitutes only that request record with complete `Q_t_extra`, whose complete `E_t_extra/D_t_extra/lb_extra` records are already in the baseline | `MALFORMED_REQUEST(EXTRANEOUS_LEXICAL_BINDING(lk_extra))` |
-| `SERVICE` | `BASE_SERVICE` | `MISS_SERVICE` deletes `ServiceIdentityRecord(SK(predicates))` | `EVALUABILITY_MISSING` |
-| `CAPABILITY` | `BASE_CAPABILITY` | `MISS_CAPABILITY` deletes `CapabilityDescriptor(CAP(predicates))` | `EVALUABILITY_MISSING` |
-| `TRUST_POLICY` | `BASE_TRUST_POLICY` | `MISS_TRUST_POLICY` deletes the exact `T_admitted` policy carrier from the request universe | `TRUST_ROOT_ABSENT` and no service use |
-| `TRUST_ROOT` | `BASE_TRUST_ROOT` | `MISS_TRUST_ROOT` deletes `ROOT_TR_t` | `TRUST_ROOT_ABSENT(TR)` and no service use |
-| `CERTIFICATE` | `BASE_CERTIFICATE` | `MISS_CERTIFICATE` deletes `BENV` at `BCERT` | `NO_CERTIFICATE_ADMISSION`; no `CONSISTENCY_UNSAT` |
-| `MIGRATION` | `BASE_MIGRATION`, where `m0` occurs once as the `PKG_evo_EOK` member | `MISS_MIGRATION` substitutes only that package with `PKG_evo_EOK_no_m`; `c0.source_keys` still names `MIGRATION(MK0)` | `NO_MIGRATION(MK0)` |
-| `COMPATIBILITY_CLAIM` | `BASE_COMPATIBILITY`, where `c0` occurs once as the `PKG_evo_EOK` member | `MISS_COMPATIBILITY` substitutes only that package with `PKG_evo_EOK_no_c`; `R_c0` remains | `NO_COMPATIBILITY(CCK0)` |
-| optional `SEMANTIC_EXTENSION` | `BASE_EXTENSION_OPTIONAL`, where unreferenced `x0` occurs once as the package member | `MISS_EXTENSION_OPTIONAL` substitutes only that package with `PKG_evo_EOK_no_x0` | `NO_EFFECT(XK0)` |
-| required `SEMANTIC_EXTENSION` | `BASE_EXTENSION_REQUIRED`, where `x1` occurs once as the package member | `MISS_EXTENSION_REQUIRED` substitutes only that package with `PKG_evo_EOK_no_x1`; `R_x1` remains | `INCOMPATIBLE(XK1)` |
-| `MODEL_CONTRACT` | `BASE_MODEL`, where `MODEL_task_accepts` occurs once as the `PKG_CK` member | `MISS_MODEL` substitutes only that package with `PKG_CK_no_task_model` | `OPEN_BINDINGS(model contract)` |
-| optional `ALIAS` | `BASE_ALIAS_OPTIONAL`, where unreferenced `a0` occurs once as the package member | `MISS_ALIAS_OPTIONAL` substitutes only that package with `PKG_evo_EOK_alias_optional_no_a0` | `NO_ALIAS(AK0)` |
-| required `ALIAS` | `BASE_ALIAS_REQUIRED`, where `a1` occurs once as the package member | `MISS_ALIAS_REQUIRED` substitutes only that package with `PKG_evo_EOK_no_a1`; `x1.target_record_identity` remains | `MALFORMED(missing alias AK1)` |
-| Sigma `CONTRACT_SPEC` | `BASE_SIGMA_SPEC` | `MISS_SIGMA_SPEC` deletes `CS(PREDICATE_MEANING,task_accepts)` | owner incompatibility and the binding stays open |
-| Service `CONTRACT_SPEC` | `BASE_SERVICE_SPEC` | `MISS_SERVICE_SPEC` deletes `QSOUND` | the descriptor is incompatible and evaluation is missing |
-| `REQUEST` | `BASE_REQUEST` | `MISS_REQUEST` deletes `Q_t[T_admitted]` | `MALFORMED_REQUEST` |
-| `RESULT` | `BASE_RESULT` | `MISS_RESULT` deletes exact `RES_t` | exact `F_noresult` and `INVOCATION_FAILED(PROTOCOL,{fr_noresult})`; no truth |
-| semantic-environment `CARRIER` | `BASE_SEMANTIC_ENVIRONMENT` | `MISS_SEMANTIC_ENVIRONMENT` deletes `E_t` | `MALFORMED_REQUEST` |
-| trust-environment `CARRIER` | `BASE_TRUST_ENVIRONMENT` | `MISS_TRUST_ENVIRONMENT` deletes `T_admitted` | `MALFORMED_REQUEST` |
-| dependency-environment `CARRIER` | `BASE_DEPENDENCY_ENVIRONMENT` | `MISS_DEPENDENCY_ENVIRONMENT` deletes `D_t` | `MALFORMED_REQUEST` |
-| observation-environment `CARRIER` | `BASE_OBSERVATION_ENVIRONMENT` | `MISS_OBSERVATION_ENVIRONMENT` deletes `M_c` | unequal completion is `MALFORMED_RESULT(SEMANTIC_MISMATCH)` |
-| lifecycle `CARRIER` | `BASE_LIFECYCLE` | `CHANGE_LIFECYCLE_REQUEST` substitutes only `R_c` with its wrong-dependency request | lifecycle is recomputed; no independently removable lifecycle record exists |
-| event-value `CARRIER` | `BASE_EVENT_VALUE` | `MISS_EVENT_VALUE` deletes `ev0` | malformed event |
-| trace-event `CARRIER` | `BASE_TRACE_EVENT` | `MISS_TRACE_EVENT` deletes `te0` | malformed trace |
-| source `CARRIER` | `BASE_SOURCE` | `MISS_SOURCE` deletes `src0` | malformed source |
-| authority-ref `CARRIER` | `BASE_AUTHORITY_REF` | `MISS_AUTHORITY_REF` deletes `auth0` | malformed authority |
-| evidence `CARRIER` | `BASE_EVIDENCE` | `MISS_EVIDENCE` deletes `e0` | factual `UNKNOWN` for the referenced verification evidence |
-| reason `CARRIER` | `BASE_REASON` | `MISS_REASON` deletes `u0` | malformed result for a required nonempty reason |
-| conflict `CARRIER` | `BASE_CONFLICT` | `CHANGE_CONFLICT_MEMBER` substitutes only `d_bad` | conflict is recomputed; no independently removable conflict record exists |
+| `ABI`; `ABI_RECORD(ABI0)` | `ROW(ABI; ABI0,PKG_CK)` | `{ABI0}->{}` | `MALFORMED` |
+| `PLUGIN`; `PACKAGE_RECORD(ABI0,CK)` | `ROW(PLUGIN; ABI0,PKG_CK)` | `{PKG_CK}->{}` | `MALFORMED` |
+| `DECLARATION`; `DECLARATION_RECORD(DP(task_accepts))` | `ROW(DECLARATION; ABI0,PKG_CK)` | `{PKG_CK}->{PKG_CK_no_decl}` | `MALFORMED` |
+| `SYMBOL`; `DECLARATION_RECORD(DP(task_accepts))`, queried as `SYMBOL(SP(task_accepts))` | `ROW(SYMBOL; ABI0,PKG_CK)` | `{PKG_CK}->{PKG_CK_no_decl}` | `MALFORMED` |
+| `EVENT`; `DECLARATION_RECORD(DE(dependency_refresh))`, queried as `EVENT(EK(dependency_refresh))` | `ROW(EVENT; ABI0,PKG_CK)` | `{PKG_CK}->{PKG_CK_no_event}` | `MALFORMED` |
+| `PAIR_DECLARATION`; `PAIR_DECLARATION_RECORD(PAIR(refresh))` | `ROW(PAIR_DECLARATION; ABI0,PKG_pair_CK)` | `{PKG_pair_CK}->{PKG_pair_CK_no_pair_decl}` | `MALFORMED` |
+| `OUTCOME`; `OUTCOME_RECORD(IDENTITY_OF(O_w))` | `ROW(OUTCOME; ABI0,C_w,O_w)` | `{O_w}->{}` | `MALFORMED` |
+| `BINDING`; `BINDING_RECORD(DP(task_accepts))` | `ROW(BINDING; ABI0,PKG_CK)` | `{PKG_CK}->{PKG_CK_no_binding}` | `OPEN_BINDINGS` |
+| `PROFILE_BINDING`; `PROFILE_BINDING_RECORD(PK(implementation_evidence))` | `ROW(PROFILE_BINDING; ABI0,PKG_CK)` | `{PKG_CK}->{PKG_CK_no_profile}` | `OPEN_BINDINGS` |
+| `PAIR_BINDING`; `PAIR_BINDING_RECORD(PAIR(refresh))` | `ROW(PAIR_BINDING; ABI0,PKG_pair_CK)` | `{PKG_pair_CK}->{PKG_pair_CK_no_pair_binding}` | `OPEN_BINDINGS` |
+| `AUTHORITY_FACT`; `AUTHORITY_FACT_RECORD(AF(choice,1))` | `ROW(AUTHORITY_FACT; ABI0,PKG_APK,C_choice,E_choice,cbe0)` | `{PKG_APK,E_choice}->{PKG_APK_no_choice_fact,E_choice_no_fact}` | `OPEN_BINDINGS({AUTHORITY_FACT(AF(choice,1))})` |
+| `CHOICE_BINDING`; `CHOICE_BINDING_RECORD(cb0)` | `ROW(CHOICE_BINDING; ABI0,PKG_APK,C_choice,E_choice)` | `{E_choice}->{E_choice_no_binding}` | `OPEN_BINDINGS({CHOICE_BINDING(cb0)})` |
+| `LEXICAL_BINDING`; `LEXICAL_BINDING_RECORD(lk0)` | `ROW(LEXICAL_BINDING; ABI0,PKG_CK,S_lex,E_lex,D_lex,R_lex)` | `{E_lex,D_lex,R_lex}->{E_lex_no_lb,D_lex_no_lb,R_lex_no_lb}` | `OPEN_BINDINGS({LEXICAL_BINDING(lk0)})` |
+| `EXTRANEOUS_LEXICAL_BINDING`; `REQUEST_RECORD(IDENTITY_OF(Q_t[T_admitted]))` | `ROW(EXTRANEOUS_LEXICAL_BINDING; ABI0,PKG_CK,E_t,D_t,T_admitted,Q_t[T_admitted])` | `{E_t,D_t,Q_t[T_admitted]}->{E_t_extra,D_t_extra,Q_t_extra}` | `MALFORMED_REQUEST(EXTRANEOUS_LEXICAL_BINDING(lk_extra))` |
+| `SERVICE`; `SERVICE_RECORD(SK(predicates))` | `ROW(SERVICE; ABI0,ServiceIdentityRecord(SK(predicates)),CapabilityDescriptor(CAP(predicates)))` | `{ServiceIdentityRecord(SK(predicates))}->{}` | `EVALUABILITY_MISSING` |
+| `CAPABILITY`; `CAPABILITY_RECORD(CAP(predicates))` | `ROW(CAPABILITY; ABI0,PKG_CK,E_t,D_t,T_admitted,Q_t[T_admitted])` | `{PKG_CK}->{PKG_CK[services:=PKG_CK.services minus {CapabilityDescriptor(CAP(predicates))}]}` | `EVALUABILITY_MISSING` |
+| `TRUST_POLICY`; `TRUST_POLICY_RECORD(TP)` | `ROW(TRUST_POLICY; ABI0,T_admitted)` | `{T_admitted}->{}` | `TRUST_ROOT_ABSENT` |
+| `TRUST_ROOT`; `TRUST_ROOT_RECORD(TR)` | `ROW(TRUST_ROOT; ABI0,ROOT_TR_t,T_admitted)` | `{ROOT_TR_t,T_admitted}->{T_absent}` | `TRUST_ROOT_ABSENT(TR)` |
+| `CERTIFICATE`; `CERTIFICATE_RECORD(BCERT)` | `ROW(CERTIFICATE; ABI0,PKG_CK,BENV,R_b,T_b)` | `{PKG_CK,BENV}->{PKG_CK[certificates:={}]}` | `(NO_CERTIFICATE_ADMISSION,CONSISTENCY_UNKNOWN)` |
+| `MIGRATION`; `MIGRATION_RECORD(MK0)` | `ROW(MIGRATION; ABI0,PKG_evo_EOK,c0)` | `{PKG_evo_EOK}->{PKG_evo_EOK_no_m}` | `NO_MIGRATION(MK0)` |
+| `COMPATIBILITY_CLAIM`; `COMPATIBILITY_RECORD(CCK0)` | `ROW(COMPATIBILITY_CLAIM; ABI0,PKG_evo_EOK,R_c0)` | `{PKG_evo_EOK,R_c0}->{PKG_evo_EOK_no_c}` | `NO_COMPATIBILITY(CCK0)` |
+| `EXTENSION_OPTIONAL`; `SEMANTIC_EXTENSION_RECORD(XK0)` | `ROW(EXTENSION_OPTIONAL; ABI0,PKG_evo_EOK)` | `{PKG_evo_EOK}->{PKG_evo_EOK_no_x0}` | `NO_EFFECT(XK0)` |
+| `EXTENSION_REQUIRED`; `SEMANTIC_EXTENSION_RECORD(XK1)` | `ROW(EXTENSION_REQUIRED; ABI0,PKG_evo_EOK,R_x1)` | `{PKG_evo_EOK,R_x1}->{PKG_evo_EOK_no_x1}` | `INCOMPATIBLE(XK1)` |
+| `MODEL_CONTRACT`; `MODEL_CONTRACT_RECORD(MODEL_task_accepts.model_contract_key)` | `ROW(MODEL_CONTRACT; ABI0,PKG_CK)` | `{PKG_CK}->{PKG_CK_no_task_model}` | `OPEN_BINDINGS(model contract)` |
+| `ALIAS_OPTIONAL`; `ALIAS_RECORD(AK0)` | `ROW(ALIAS_OPTIONAL; ABI0,PKG_evo_EOK_alias_optional)` | `{PKG_evo_EOK_alias_optional}->{PKG_evo_EOK_alias_optional_no_a0}` | `NO_ALIAS(AK0)` |
+| `ALIAS_REQUIRED`; `ALIAS_RECORD(AK1)` | `ROW(ALIAS_REQUIRED; ABI0,PKG_evo_EOK,R_x1)` | `{PKG_evo_EOK}->{PKG_evo_EOK_no_a1}` | `MALFORMED(missing alias AK1)` |
+| `SIGMA_CONTRACT_SPEC`; `CONTRACT_SPEC_RECORD(CS(PREDICATE_MEANING,task_accepts))` | `ROW(SIGMA_CONTRACT_SPEC; ABI0,PKG_CK)` | `{PKG_CK}->{PKG_CK_wrong_sigma_spec}` | `(BINDING_INCOMPATIBLE,OPEN_BINDINGS)` |
+| `SERVICE_CONTRACT_SPEC`; `CONTRACT_SPEC_RECORD(QSOUND.contract_key)` | `ROW(SERVICE_CONTRACT_SPEC; ABI0,PKG_CK)` | `{PKG_CK}->{PKG_CK_wrong_service_spec}` | `(CAPABILITY_INCOMPATIBLE,EVALUABILITY_MISSING)` |
+| `REQUEST`; `REQUEST_RECORD(IDENTITY_OF(Q_t[T_admitted]))` | `ROW(REQUEST; ABI0,PKG_CK,E_t,D_t,T_admitted,Q_t[T_admitted],RES_t)` | `{Q_t[T_admitted],RES_t}->{}` | `MALFORMED_REQUEST` |
+| `RESULT`; `RESULT_RECORD((IDENTITY_OF(Q_t[T_admitted]),Eval,IDENTITY_OF(r_t)))` | `ROW(RESULT; ABI0,PKG_CK,E_t,D_t,T_admitted,Q_t[T_admitted],RES_t)` | `{RES_t}->{F_noresult}` | `INVOCATION_FAILED(PROTOCOL,{fr_noresult})`; no truth |
+| `SEMANTIC_ENVIRONMENT`; `SEMANTIC_ENVIRONMENT_RECORD(semanticIdentity(E_t))` | `ROW(SEMANTIC_ENVIRONMENT; ABI0,PKG_CK,E_t,D_t,T_admitted,Q_t[T_admitted],RES_t)` | `{E_t,D_t,Q_t[T_admitted],RES_t}->{E_t_empty,D_t_empty,Q_t_empty,RES_t_empty}` | `MALFORMED_REQUEST(IDENTITY_OF(Q_t[T_admitted]))` |
+| `TRUST_ENVIRONMENT`; `TRUST_ENVIRONMENT_RECORD(trustEnvironmentIdentity(T_admitted))` | `ROW(TRUST_ENVIRONMENT; ABI0,PKG_CK,E_t,D_t,T_admitted,Q_t[T_admitted],RES_t)` | `{T_admitted,Q_t[T_admitted],RES_t}->{T_absent,Q_t_no_trust,RES_t_no_trust}` | `MALFORMED_REQUEST(IDENTITY_OF(Q_t[T_admitted]))` |
+| `DEPENDENCY_ENVIRONMENT`; `DEPENDENCY_ENVIRONMENT_RECORD(IDENTITY_OF(D_t))` | `ROW(DEPENDENCY_ENVIRONMENT; ABI0,PKG_CK,E_t,D_t,T_admitted,Q_t[T_admitted],RES_t)` | `{D_t,Q_t[T_admitted],RES_t}->{D_t_incomplete,Q_t_incomplete,RES_t_incomplete}` | `MALFORMED_REQUEST(IDENTITY_OF(Q_t[T_admitted]))` |
+| `OBSERVATION_ENVIRONMENT`; `OBSERVATION_ENVIRONMENT_RECORD(IDENTITY_OF(M_c))` | `ROW(OBSERVATION_ENVIRONMENT; ABI0,PKG_CK,R_c,M_c,Y_c,L_c_final,K_c)` | `{M_c,Y_c,L_c_final,K_c}->{M_c_missing,F_c_missing,L_c_missing,K_c_missing}` | `MALFORMED_RESULT(SEMANTIC_MISMATCH)` |
+| `LIFECYCLE`; `LIFECYCLE_RECORD((J_c,IDENTITY_OF(R_c)))` | `ROW(LIFECYCLE; ABI0,PKG_CK,R_c,M_c,Y_c,L_c_final,K_c)` | `{R_c,L_c_final,K_c}->{R_c_alt,L_life_after,K_life_after}` | `(LIFECYCLE_RECORD((J_c,IDENTITY_OF(R_c_alt)))->L_life_after,INVOCABLE_FOR(R_c_alt))` |
+| `EVENT_VALUE`; `EVENT_VALUE_RECORD(IDENTITY_OF(ev0))` | `ROW(EVENT_VALUE; ABI0,EventDeclaration(DE(dependency_refresh)),ev0,te0)` | `{ev0,te0}->{}` | `MALFORMED` |
+| `TRACE_EVENT`; `TRACE_EVENT_RECORD(IDENTITY_OF(te0))` | `ROW(TRACE_EVENT; ABI0,ev0,te0)` | `{te0}->{}` | `MALFORMED` |
+| `SOURCE`; `SOURCE_RECORD(IDENTITY_OF(src0))` | `ROW(SOURCE; ABI0,src0)` | `{src0}->{}` | `MALFORMED` |
+| `AUTHORITY_REF`; `AUTHORITY_REF_RECORD(IDENTITY_OF(auth0))` | `ROW(AUTHORITY_REF; ABI0,auth0)` | `{auth0}->{}` | `MALFORMED` |
+| `EVIDENCE`; `EVIDENCE_RECORD(e0)` | `ROW(EVIDENCE; ABI0,e0,v0,vr0,i0,H0)` | `{e0,i0,H0}->{}` | `TRUTH_UNKNOWN` |
+| `REASON`; `REASON_RECORD(UnknownReason,IDENTITY_OF(u0))` | `ROW(REASON; ABI0,u0,VALUE(UNKNOWN,{},{u0}))` | `{u0,VALUE(UNKNOWN,{},{u0})}->{}` | `MALFORMED_RESULT(MALFORMED_CARRIER)` |
+| `CONFLICT`; `CONFLICT_RECORD(conflict0)` | `ROW(CONFLICT; ABI0,d,d_bad,conflict0)` | `{d_bad,conflict0}->{d_bad_signature,conflict1}` | `(CONFLICT_RECORD(conflict1),MALFORMED)` |
+<!-- K3S-MISSING-END -->
 
-There is no generic carrier/result selector in this matrix: every retained K2
-missing-status constructor has an exact named row or exhaustive named
-subvariant, and none fabricates a semantic result.
+For every one of these 42 rows, the following equations are fixture
+assertions, not review-time prose:
 
+```text
+q[SYMBOL]=SYMBOL(SP(task_accepts))
+q[EVENT]=EVENT(EK(dependency_refresh))
+q[k]=dependencyRoot(i[k]) for every other displayed MissingRowId k
+conformantUniverseInput(B_k)=TRUE
+conformantUniverseInput(V_k)=TRUE
+authoritativeCount(i[k],B_k)=1
+recordAt(q[k],B_k)=PRESENT(A(B_k)[i[k]])
+authoritativeCount(i[k],V_k)=0
+recordAt(q[k],V_k)=ABSENT_REQUIRED_RECORD(q[k])
+A(B_k) symmetric_difference A(V_k)=
+  authoritativePairs(Rminus[k]) symmetric_difference
+  authoritativePairs(Rplus[k])
+missingStatus(q[k],V_k)=MISSING_EXPECTED[k]
+```
+
+For `EXTRANEOUS_LEXICAL_BINDING`, `LIFECYCLE`, and `CONFLICT`, `V_k`
+additionally has exactly one occurrence of the displayed substituted request,
+lifecycle, or conflict identity.  For all other rows it has no substituted
+target identity.  Baseline and variant records from one row are never members
+of another row's universe.
+
+The non-missing packet entries are independently constructed as follows:
+
+```text
+U_CORE_DEFINITIONAL=ROW(CORE_DEFINITIONAL;
+  ABI0,PKG_CK,PKG_AWK,PKG_RVK,PKG_APK,PKG_ATK,PKG_AVK,
+  C_b,C_c,C_w,C_choice,E_b,E_c,E_w,E_choice)
+U_PAIR_INDEPENDENT=ROW(PAIR_INDEPENDENT;
+  ABI0,PKG_pair_CK,PKG_PPK,PKG_PVK,E_p,D_p,R_p,PENV,
+  PairFullEvalProof,PAIR_PROOF_REF,
+  CertificateAdmission.ADMITTED(
+    PCERT,PAIR_COHERENCE_ADMITTED(PAIR(refresh),PCERT)))
+U_TRUST_ADMITTED=ROW(TRUST_ADMITTED;
+  ABI0,PKG_CK,E_t,D_t,T_admitted,Q_t[T_admitted],RES_t)
+U_TRUST_ABSENT=ROW(TRUST_ABSENT;
+  ABI0,PKG_CK,E_t,D_t,T_absent,Q_t[T_absent])
+U_TRUST_UNDECIDED=ROW(TRUST_UNDECIDED;
+  ABI0,PKG_CK,E_t,D_t,T_undecided,Q_t[T_undecided])
+U_TRUST_INCOMPATIBLE=ROW(TRUST_INCOMPATIBLE;
+  ABI0,PKG_CK,E_t,D_t,T_incompatible,Q_t[T_incompatible])
+U_TRUST_FAILED=ROW(TRUST_FAILED;
+  ABI0,PKG_CK,E_t,D_t,T_failed,Q_t[T_failed])
+```
+
+There is no generic carrier/result selector: every retained K2 missing-status
+constructor has this exact named row, target identity, reconstruction set, and
+result.  The packet map uses each `B_k` and `V_k` as distinct values and never
+unions them.
 ### 9.5 Two-node confluence and permutation fixtures
 
 Fix the already named `s_c,P_c,F_c,C_c,E_c,D_c,J_c` and define the two exact
@@ -4351,15 +4711,25 @@ result, final lifecycle, and `K_c`.  Adding `N_o -> N_d` still permits only
 both `N_o -> N_d` and `N_d -> N_o`, or a self-edge, is `MALFORMED`.  This DAG
 is independent of direct, empty-support `task_accepts`.
 
+```text
+U_CONFLUENCE_FORWARD=ROW(CONFLUENCE_FORWARD;
+  ABI0,PKG_CK,N_o,N_d,V_o,V_d,O_1,M_c,R_c,Y_c,L_c_final,K_c)
+U_CONFLUENCE_REVERSE=ROW(CONFLUENCE_REVERSE;
+  ABI0,PKG_CK,N_o,N_d,V_o,V_d,O_2,M_c,R_c,Y_c,L_c_final,K_c)
+```
+
+These are distinct packet universes with the same exact derived output
+`(M_c,Y_c,K_c)`; the two orders are not co-composed.
+
 The package-order fixture is a separate finite literal construction.  Fix
 
 ```text
 P_pi1=((capknow.fixture,permutation-one),(1))
 P_pi2=((capknow.fixture,permutation-two),(1))
-T_pi11=(P_pi1,TYPE,fixture_unit_one,(1))
-T_pi12=(P_pi1,TYPE,fixture_unit_two,(1))
-T_pi21=(P_pi2,TYPE,fixture_unit_three,(1))
-T_pi22=(P_pi2,TYPE,fixture_unit_four,(1))
+T_pi11=(P_pi1,coding.fixture,fixture_unit_one,TYPE)
+T_pi12=(P_pi1,coding.fixture,fixture_unit_two,TYPE)
+T_pi21=(P_pi2,coding.fixture,fixture_unit_three,TYPE)
+T_pi22=(P_pi2,coding.fixture,fixture_unit_four,TYPE)
 ```
 
 For `ij in {11,12,21,22}`, `A_piij` is the complete
@@ -4375,7 +4745,7 @@ complete declarations
 ```text
 D_piij = TypeDeclaration(
   key=T_piij,admitted_value_domain=A_piij,
-  proper_declaration_dependencies={})
+  proper_declaration_dependencies={CONTRACT_SPEC(A_piij.contract_key)})
 ```
 
 and the two literal packages (every omitted-looking field is displayed):
@@ -4394,11 +4764,11 @@ PKG_pi2 = PluginPackage(
   services={},certificates={},authority_facts={},compatibility_claims={},
   migrations={},semantic_extensions={},diagnostics=NONE)
 G_pi={PKG_pi1,PKG_pi2}
-R_pi1={PACKAGE_RECORD(ABI0,P_pi1),
+R_pi1={ABI_RECORD(ABI0),PACKAGE_RECORD(ABI0,P_pi1),
        DECLARATION_RECORD(T_pi11),DECLARATION_RECORD(T_pi12),
        CONTRACT_SPEC_RECORD(A_pi11.contract_key),
        CONTRACT_SPEC_RECORD(A_pi12.contract_key)}
-R_pi2={PACKAGE_RECORD(ABI0,P_pi2),
+R_pi2={ABI_RECORD(ABI0),PACKAGE_RECORD(ABI0,P_pi2),
        DECLARATION_RECORD(T_pi21),DECLARATION_RECORD(T_pi22),
        CONTRACT_SPEC_RECORD(A_pi21.contract_key),
        CONTRACT_SPEC_RECORD(A_pi22.contract_key)}
@@ -4408,18 +4778,53 @@ The only two package presentations and their two literal per-package record
 presentations are
 
 ```text
-Pi_pkg_1=[PKG_pi1,PKG_pi2]
-Pi_pkg_2=[PKG_pi2,PKG_pi1]
-Pi_rec_1(PKG_pi1)=[PKG_pi1,D_pi11,A_pi11,D_pi12,A_pi12]
-Pi_rec_2(PKG_pi1)=[A_pi12,D_pi12,A_pi11,D_pi11,PKG_pi1]
-Pi_rec_1(PKG_pi2)=[PKG_pi2,D_pi21,A_pi21,D_pi22,A_pi22]
-Pi_rec_2(PKG_pi2)=[A_pi22,D_pi22,A_pi21,D_pi21,PKG_pi2]
+Pi_pkg_1=[ABI0,PKG_pi1,PKG_pi2]
+Pi_pkg_2=[ABI0,PKG_pi2,PKG_pi1]
+Pi_rec_1(PKG_pi1)=[ABI0,PKG_pi1,D_pi11,A_pi11,D_pi12,A_pi12]
+Pi_rec_2(PKG_pi1)=[ABI0,A_pi12,D_pi12,A_pi11,D_pi11,PKG_pi1]
+Pi_rec_1(PKG_pi2)=[ABI0,PKG_pi2,D_pi21,A_pi21,D_pi22,A_pi22]
+Pi_rec_2(PKG_pi2)=[ABI0,A_pi22,D_pi22,A_pi21,D_pi21,PKG_pi2]
 ```
 
-There is no implicit constructor ordering or unlisted record.  All four
-combinations yield exactly `(G_pi,R_pi1 union R_pi2,
-{T_pi11->D_pi11,T_pi12->D_pi12,T_pi21->D_pi21,T_pi22->D_pi22},
-WELL_FORMED,CLOSED)`.  Separately, `O_1/O_2` yield exactly `(M_c,Y_c,K_c)`.
+There is no implicit constructor ordering or unlisted record.  Define the
+only composition operator for this fixture by
+
+```text
+COMPOSE_PI(pkg_order,record_order)=K2_COMPOSE(
+  the selected complete Pi_pkg sequence,
+  the selected complete Pi_rec sequence for PKG_pi1,
+  the same selected complete Pi_rec sequence for PKG_pi2)
+selected Pi_pkg sequence=Pi_pkg_1 iff pkg_order=PI1_PI2,
+                         otherwise Pi_pkg_2
+selected Pi_rec sequence=Pi_rec_1 iff
+  record_order=DECLARATION_THEN_SPEC, otherwise Pi_rec_2
+PI_EXPECTED=(
+  abi_record=ABI_RECORD(ABI0),
+  packages=G_pi,
+  record_identities=(R_pi1 union R_pi2),
+  declarations={T_pi11->D_pi11,T_pi12->D_pi12,
+                T_pi21->D_pi21,T_pi22->D_pi22},
+  contract_specs={A_pi11.contract_key->A_pi11,
+                  A_pi12.contract_key->A_pi12,
+                  A_pi21.contract_key->A_pi21,
+                  A_pi22.contract_key->A_pi22},
+  formation=WELL_FORMED,closure=CLOSED)
+U_PI_PI1_PI2_DECLARATION_THEN_SPEC=
+  COMPOSE_PI(PI1_PI2,DECLARATION_THEN_SPEC)
+U_PI_PI1_PI2_SPEC_THEN_DECLARATION=
+  COMPOSE_PI(PI1_PI2,SPEC_THEN_DECLARATION)
+U_PI_PI2_PI1_DECLARATION_THEN_SPEC=
+  COMPOSE_PI(PI2_PI1,DECLARATION_THEN_SPEC)
+U_PI_PI2_PI1_SPEC_THEN_DECLARATION=
+  COMPOSE_PI(PI2_PI1,SPEC_THEN_DECLARATION)
+```
+
+Each of these four separately tagged universes contains one explicit `ABI0`,
+the two literal package records, the four literal declarations, and the four
+literal admission ContractSpecs.  All four outcomes are exactly
+`PI_EXPECTED`; in particular each includes exactly `ABI_RECORD(ABI0)` and the
+same complete package/member record set.  Separately, `O_1/O_2` yield exactly
+`(M_c,Y_c,K_c)`.
 
 Finally, let `d` and `d'` be independently constructed complete equal copies
 of the exact `DP(task_accepts)` declaration, and let `d_bad` have the same key
@@ -4428,7 +4833,57 @@ but the unequal two-argument signature omitting `EvidenceStore`.  Presentations
 `[d_bad,d]` yield the identical one-key conflict set and `MALFORMED`.  No last-
 writer or package-order rule exists.
 
+```text
+U_DUPLICATE_EQUAL_FORWARD=K2_COMPOSE([ABI0,d,d'])
+U_DUPLICATE_EQUAL_REVERSE=K2_COMPOSE([ABI0,d',d])
+U_DUPLICATE_CONFLICT_FORWARD=K2_COMPOSE([ABI0,d,d_bad])
+U_DUPLICATE_CONFLICT_REVERSE=K2_COMPOSE([ABI0,d_bad,d])
+EXPECTED_DUPLICATE_EQUAL=(ABI_RECORD(ABI0),{recordIdentity(d)->d},
+                          WELL_FORMED)
+EXPECTED_DUPLICATE_CONFLICT=(ABI_RECORD(ABI0),{conflict0},MALFORMED)
+```
+
+The first two packet entries both yield exactly `EXPECTED_DUPLICATE_EQUAL`;
+the last two both yield exactly `EXPECTED_DUPLICATE_CONFLICT`.  No entry is
+unioned with another presentation.
+
 ### 9.6 Mapping of all thirteen checks
+
+Check 12 replays packet entries independently.  Its exact expected-output map
+has the same finite domain as `FIXTURE_PACKET_X`:
+
+```text
+FIXTURE_EXPECTED_X={
+  CORE_DEFINITIONAL ->
+    (A(U_CORE_DEFINITIONAL),WELL_FORMED,CLOSED),
+  PAIR_INDEPENDENT ->
+    (A(U_PAIR_INDEPENDENT),WELL_FORMED,CLOSED,
+     PAIR_COHERENCE_ADMITTED(PAIR(refresh),PCERT) : PairValidationResult),
+  TRUST_BRANCH(ADMITTED) -> INVOCABLE_FOR(Q_t[T_admitted]),
+  TRUST_BRANCH(ABSENT) -> EVALUABILITY_MISSING,
+  TRUST_BRANCH(UNDECIDED) -> EVALUABILITY_UNKNOWN,
+  TRUST_BRANCH(INCOMPATIBLE) -> EVALUABILITY_MISSING,
+  TRUST_BRANCH(FAILED) -> DISCOVERY_FAILED,
+  MISSING_BASE(k) ->
+    (A(B_k),PRESENT(A(B_k)[i[k]])) for each displayed MissingRowId k,
+  MISSING_VARIANT(k) ->
+    (A(V_k),MISSING_EXPECTED[k]) for each displayed MissingRowId k,
+  CONFLUENCE_ORDER(FORWARD) -> (M_c,Y_c,K_c),
+  CONFLUENCE_ORDER(REVERSE) -> (M_c,Y_c,K_c),
+  PERMUTATION(p,r) -> PI_EXPECTED for each of the four displayed pairs,
+  DUPLICATE_EQUAL(FORWARD) -> EXPECTED_DUPLICATE_EQUAL,
+  DUPLICATE_EQUAL(REVERSE) -> EXPECTED_DUPLICATE_EQUAL,
+  DUPLICATE_CONFLICT(FORWARD) -> EXPECTED_DUPLICATE_CONFLICT,
+  DUPLICATE_CONFLICT(REVERSE) -> EXPECTED_DUPLICATE_CONFLICT}
+
+CHECK_12_REPLAY=id ->
+  (K2_REPLAY(FIXTURE_PACKET_X[id]) = FIXTURE_EXPECTED_X[id])
+  for each id in the exact finite domain of FIXTURE_PACKET_X
+```
+
+There is no replay of a union, catalog, alternative package, or another
+entry's records.  The input tag, exact universe, and exact derived output are
+one replay coordinate.
 
 | amendment check | K3-S symbols/records | adversarial cases | exact K1/K2 clauses and required outcome |
 |---:|---|---|---|
@@ -4443,13 +4898,15 @@ writer or package-order rule exists.
 | 9 | independent `N_o/N_d` confluence DAG with `O_1/O_2`, exact `M_c/Y_c`, and both package/record presentations | K3S-A09,A14,A15 | K2 §§1.1,3.3,7.5,8.3: both topological orders yield the identical complete map/status; package/record permutations do likewise; direct `task_accepts` remains empty-support |
 | 10 | equal duplicate declarations/bindings/models and one unequal same-key variant in reversed order | K3S-A14 | K2 §§1.1,8.3: equality coalesces and conflict is order-independent |
 | 11 | every exact row and context subvariant of the exhaustive §9.4 missing-record matrix | K3S-A03,A15,A16 | K2 §3.3 `missingStatus` and §2.4 lifecycle: every missing kind yields only its displayed malformed/open/evaluability/trust/no-admission/protocol family |
-| 12 | the entire finite packet and every derived identity/result map | K3S-A14 | K1 §4.8; K2 §§1.1,3.3,5.2: exact finite equality, deterministic meanings, set semantics, and source binding permit replay only after the later clean-commit gate |
+| 12 | each `FixtureId -> FixtureUniverse` entry in `FIXTURE_PACKET_X` paired with the same-tag exact `FIXTURE_EXPECTED_X` output; never a cross-entry union | K3S-A14 | K1 §4.8; K2 §§1.1,3.3,5.2: exact finite equality, deterministic meanings, set semantics, and source binding require the displayed per-tag replay equality, only after the later clean-commit gate |
 | 13 | task predicate variant requesting ambient repository/evidence/expected-answer state | K3S-A05,A09,A17 | K1 §§1.2,2.2,3.1; K2 §§3.3,4.2,5.1: invalid observation/access is rejected before a truth can be used |
 
 ### 9.7 Intentionally excluded executable branches
 
 The finite slice intentionally omits every literal value, request, target, and
-capability not enumerated in `L_X/FIXTURE_X/SERVICE_X`.  In particular it
+capability not enumerated by one tagged universe in `FIXTURE_PACKET_X` and its
+literal `L_X/FIXTURE_X/SERVICE_X` catalogs.  Catalog membership alone supplies
+no universe record.  In particular the slice
 omits general cross-plugin joint reasoning, public relation services,
 evolution records beyond the four `Z` fixtures, authority facts beyond the
 six `I_A` fixtures, certificate kinds/targets beyond the enumerated
@@ -4505,9 +4962,10 @@ implementation or execution authority.
 - [x] Exactly 18 ordered adversarial cases and exactly eight complete worked
   traces derive from general rules; their identifiers are never semantic
   inputs.
-- [x] The section 9 semantic packet covers all thirteen accepted executable
-  checks with finite logical values, names the excluded branches, preserves
-  both provenance gates, and freezes no implementation detail or authority.
+- [x] The section 9 tagged semantic packet covers all thirteen accepted
+  executable checks with one exact universe and derived output per
+  `FixtureId`, names the excluded branches, preserves both provenance gates,
+  and freezes no implementation detail or authority.
 - [x] Abstract satisfiability and profile coverage imply no patch, build,
   planner, executor, repository operation, or concrete implementation.
 - [x] Conclusions remain limited to accepted-seed semantic representability.
