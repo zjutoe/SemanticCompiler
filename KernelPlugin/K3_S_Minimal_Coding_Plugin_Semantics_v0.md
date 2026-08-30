@@ -3482,6 +3482,7 @@ FixtureId =
   | MISSING_BASE(MissingRowId)
   | MISSING_VARIANT(MissingRowId)
   | CONFLUENCE_ORDER(OrderTag)
+  | PROPER_CYCLE_REJECTION
   | PERMUTATION(PackageOrderTag,RecordOrderTag)
   | DUPLICATE_EQUAL(OrderTag)
   | DUPLICATE_CONFLICT(OrderTag)
@@ -3496,9 +3497,13 @@ FIXTURE_PACKET_X={
   MISSING_BASE(k) -> B_k for each of the 42 displayed MissingRowId values k,
   MISSING_VARIANT(k) -> V_k for each such k,
   CONFLUENCE_ORDER(o) -> U_CONFLUENCE_o for each displayed OrderTag o,
+  PROPER_CYCLE_REJECTION -> U_PROPER_CYCLE_REJECTION,
   PERMUTATION(p,r) -> U_PI_p_r for each of the four displayed `(p,r)` pairs,
   DUPLICATE_EQUAL(o) -> U_DUPLICATE_EQUAL_o for each displayed OrderTag o,
   DUPLICATE_CONFLICT(o) -> U_DUPLICATE_CONFLICT_o for each displayed OrderTag o}
+The exact finite domain has cardinality 102: one core, one independent-pair,
+five trust, 84 missing base/variant, two confluence, one proper-cycle, four
+permutation, two equal-duplicate, and two conflict-duplicate entries.
 ```
 
 Each right-hand side is one self-contained universe, not a union of packet
@@ -3650,8 +3655,8 @@ Sigma_p={sb,
   MODEL_LITERAL(T(PairTraceDomain),ALL_ADMITTED_TRACES),
   MODEL_LITERAL(T(PairComparedFields),COMPLETE_EVAL_RECORD),
   MODEL_LITERAL(T(ServiceAdmissionSubject),pair_subject),
-  MODEL_refresh_scope,
-  MODEL_refresh_occurred} union
+  MODEL_refresh_scope_pair,
+  MODEL_refresh_occurred_pair} union
   contractFields(sb) union contractFields(B_alt) union contractFields(PB_alt)
 E_p=SemanticEnvironment(
   abi_version=ABI0,declarations=Delta_p,pair_declarations={pd},
@@ -4355,6 +4360,9 @@ The independent pair owner package, used only by the `PAIR_INDEPENDENT`
 packet entry and pair rows below, is the following complete record:
 
 ```text
+MODEL_refresh_scope_pair=MODEL_refresh_scope[capability_summaries:={}]
+MODEL_refresh_occurred_pair=MODEL_refresh_occurred[capability_summaries:={}]
+
 PKG_pair_CK=PluginPackage(
   ABI0,CK,declarations=DELTA_TYPE_X union {
     LiteralDeclaration(T(PairTraceDomain),ALL_ADMITTED_TRACES),
@@ -4368,7 +4376,7 @@ PKG_pair_CK=PluginPackage(
     the exact literal SemanticBinding(T(PairComparedFields),COMPLETE_EVAL_RECORD),
     the exact literal SemanticBinding(T(ServiceAdmissionSubject),pair_subject)},
   pair_bindings={PB_alt},profile_bindings={},
-  model_contracts={MODEL_refresh_scope,MODEL_refresh_occurred,
+  model_contracts={MODEL_refresh_scope_pair,MODEL_refresh_occurred_pair,
     MODEL_LITERAL(T(PairTraceDomain),ALL_ADMITTED_TRACES),
     MODEL_LITERAL(T(PairComparedFields),COMPLETE_EVAL_RECORD),
     MODEL_LITERAL(T(ServiceAdmissionSubject),pair_subject)},aliases={},
@@ -4581,8 +4589,27 @@ d_bad_alt=PredicateDeclaration(
   result_kind=BOOL,facet_positions=({},{},{evidence}),
   proper_declaration_dependencies={DECLARATION(T(TaskSpec)),
     DECLARATION(T(RepositorySnapshot))})
-conflict0=CONFLICT_OF(d,d_bad)
-conflict1=CONFLICT_OF(d,d_bad_alt)
+PredicateFacetPositions = sequence_3(finset(Facet)) admitted exactly when it
+is a position-aligned predicate facet sequence for `DP(task_accepts)`.
+The closed K2 `conflict_kind` used here has the sole constructor
+`PREDICATE_FACET_POSITIONS_CONFLICT`:
+
+PREDICATE_FACET_POSITIONS_CONFLICT(
+  declaration_key:DeclarationKey[PREDICATE],
+  unequal_positions:exact_two_element_finset(PredicateFacetPositions))
+
+conflict0=ConflictRef(
+  PREDICATE_FACET_POSITIONS_CONFLICT(DP(task_accepts),
+    {d.facet_positions,d_bad.facet_positions}),
+  {DECLARATION_RECORD(DP(task_accepts))})
+conflict1=ConflictRef(
+  PREDICATE_FACET_POSITIONS_CONFLICT(DP(task_accepts),
+    {d.facet_positions,d_bad_alt.facet_positions}),
+  {DECLARATION_RECORD(DP(task_accepts))})
+Each displayed `unequal_positions` finset has cardinality exactly two because
+its two complete position sequences are unequal; the constructor is admitted
+only under that premise.  Its tag and finset are compared by complete equality,
+so each displayed `ConflictRef` is order-independent.
 
 T_root_missing=TrustEnvironment(
   trust_policy_key=TP,policy_owner=EMBEDDING_POLICY_PRODUCER(TP),
@@ -4859,10 +4886,134 @@ U_CONFLUENCE_FORWARD=ROW(CONFLUENCE_FORWARD;
   ABI0,PKG_CK,N_o,N_d,V_o,V_d,O_1,M_c,R_c,Y_c,L_c_final,K_c)
 U_CONFLUENCE_REVERSE=ROW(CONFLUENCE_REVERSE;
   ABI0,PKG_CK,N_o,N_d,V_o,V_d,O_2,M_c,R_c,Y_c,L_c_final,K_c)
+SINGLETON_EVENT_TRACE(event_value)=the exact one-element admitted `Trace`
+whose only element is `TraceEvent(event_value,user)`.
+CYCLE_PATTERN=ANY_EVENT(EK(dependency_refresh))
+CYCLE_EVENT=ev0
+S_cycle=PREDICATE_SUBJECT(
+  SP(event_matches),DP(event_matches),(CYCLE_PATTERN,CYCLE_EVENT))
+CYCLE_SYNTAX_ROOTS=required(S_cycle)=
+  sigDeps_Delta(SP(event_matches)) union
+  declDeps_Delta(CYCLE_PATTERN) union declDeps_Delta(CYCLE_EVENT)
+CS(PREDICATE_MEANING,event_matches_cycle)=ContractSpec(
+  contract_key=CS(PREDICATE_MEANING,event_matches_cycle),owner_layer=Sigma,
+  contract_role=PREDICATE_MEANING,
+  primary_input_domain=(T(EventPattern),EventValue),codomain=Eval,
+  observation_queries={BINDING(DP(event_occurred))->
+    DependencyObservationQuery(expected_kind=EVAL_RESULT,
+      input_projection=(pattern,event_value)->
+        (pattern,SINGLETON_EVENT_TRACE(event_value)))},
+  logical_relation=((pattern,event_value),observed)->
+    the total K2 lower-Eval projection of
+      `observed[BINDING(DP(event_occurred))]`: return `e` for `EVAL_OBS(e)`
+      and the exact role-mapped evaluation error for either typed lower failure)
+B_event_matches_cycle=SemanticBinding(DP(event_matches))[
+  meaning_contract:=CS(PREDICATE_MEANING,event_matches_cycle),
+  proper_semantic_dependencies:=the exact K2 §3.3 mechanically derived set
+    from its declaration, five displayed ContractSpecs, and the displayed
+    `BINDING(DP(event_occurred))` observation support,
+  dependency_closure:=CYCLE_REACHABILITY_ATTEMPT]
+CYCLE_REACHABILITY_ATTEMPT={
+  BINDING(DP(event_matches)),BINDING(DP(event_occurred)),
+  DECLARATION(DP(event_matches)),DECLARATION(DP(event_occurred)),
+  CONTRACT_SPEC(CS(PREDICATE_MEANING,event_matches_cycle)),
+  CONTRACT_SPEC(CS(PREDICATE_MEANING,event_occurred)),
+  CONTRACT_SPEC(CS(EVIDENCE_SCHEMA,none)),
+  CONTRACT_SPEC(CS(ACCESS_BOUNDARY,pattern_event)),
+  CONTRACT_SPEC(CS(ACCESS_BOUNDARY,pattern_trace)),
+  CONTRACT_SPEC(CS(UNKNOWN_BEHAVIOR,never)),
+  CONTRACT_SPEC(CS(EVALUATION_ERROR_BEHAVIOR,predicate)),
+  DECLARATION(T(PathSegment)),DECLARATION(T(Path)),
+  DECLARATION(T(PathSet)),DECLARATION(T(ArtifactRole)),
+  DECLARATION(T(Format)),DECLARATION(T(ByteSize)),
+  DECLARATION(T(ContentIdentity)),DECLARATION(T(FieldId)),
+  DECLARATION(T(FieldValue)),DECLARATION(T(SubjectId)),
+  DECLARATION(T(BehaviorValue)),DECLARATION(T(ArtifactContent)),
+  DECLARATION(T(ArtifactSelector)),DECLARATION(T(ArtifactProjection)),
+  DECLARATION(T(ObservationSpec)),DECLARATION(T(VerificationStatus)),
+  DECLARATION(T(VerificationSpec)),DECLARATION(T(RepositorySnapshot)),
+  DECLARATION(T(SnapshotIdentity)),DECLARATION(T(ChangeKind)),
+  DECLARATION(T(CommandId)),DECLARATION(T(ContactClass)),
+  DECLARATION(T(ReleaseId)),DECLARATION(T(EventPattern)),
+  CONTRACT_SPEC(CS(TYPE_ADMISSION,type.PathSegment)),
+  CONTRACT_SPEC(CS(TYPE_ADMISSION,type.Path)),
+  CONTRACT_SPEC(CS(TYPE_ADMISSION,type.PathSet)),
+  CONTRACT_SPEC(CS(TYPE_ADMISSION,type.ArtifactRole)),
+  CONTRACT_SPEC(CS(TYPE_ADMISSION,type.Format)),
+  CONTRACT_SPEC(CS(TYPE_ADMISSION,type.ByteSize)),
+  CONTRACT_SPEC(CS(TYPE_ADMISSION,type.ContentIdentity)),
+  CONTRACT_SPEC(CS(TYPE_ADMISSION,type.FieldId)),
+  CONTRACT_SPEC(CS(TYPE_ADMISSION,type.FieldValue)),
+  CONTRACT_SPEC(CS(TYPE_ADMISSION,type.SubjectId)),
+  CONTRACT_SPEC(CS(TYPE_ADMISSION,type.BehaviorValue)),
+  CONTRACT_SPEC(CS(TYPE_ADMISSION,type.ArtifactContent)),
+  CONTRACT_SPEC(CS(TYPE_ADMISSION,type.ArtifactSelector)),
+  CONTRACT_SPEC(CS(TYPE_ADMISSION,type.ArtifactProjection)),
+  CONTRACT_SPEC(CS(TYPE_ADMISSION,type.ObservationSpec)),
+  CONTRACT_SPEC(CS(TYPE_ADMISSION,type.VerificationStatus)),
+  CONTRACT_SPEC(CS(TYPE_ADMISSION,type.VerificationSpec)),
+  CONTRACT_SPEC(CS(TYPE_ADMISSION,type.RepositorySnapshot)),
+  CONTRACT_SPEC(CS(TYPE_ADMISSION,type.SnapshotIdentity)),
+  CONTRACT_SPEC(CS(TYPE_ADMISSION,type.ChangeKind)),
+  CONTRACT_SPEC(CS(TYPE_ADMISSION,type.CommandId)),
+  CONTRACT_SPEC(CS(TYPE_ADMISSION,type.ContactClass)),
+  CONTRACT_SPEC(CS(TYPE_ADMISSION,type.ReleaseId)),
+  CONTRACT_SPEC(CS(TYPE_ADMISSION,type.EventPattern))}
+MODEL_event_matches_cycle=MODEL_event_matches_no_predicate_capability[
+  semantic_contract_reference:=
+    CS(PREDICATE_MEANING,event_matches_cycle).contract_key]
+MODEL_snapshot_of_cycle=MODEL_snapshot_of[capability_summaries:={}]
+MODEL_changes_between_cycle=MODEL_changes_between[capability_summaries:={}]
+MODEL_observe_cycle=MODEL_observe[capability_summaries:={}]
+MODEL_X_PROPER_CYCLE=(MODEL_X_NO_PREDICATE_CAPABILITY minus
+  {MODEL_event_matches_no_predicate_capability,MODEL_snapshot_of,
+   MODEL_changes_between,MODEL_observe}) union
+  {MODEL_event_matches_cycle,MODEL_snapshot_of_cycle,
+   MODEL_changes_between_cycle,MODEL_observe_cycle}
+PKG_CK_PROPER_CYCLE=PKG_CK[
+  bindings:=(PKG_CK.bindings minus {SemanticBinding(DP(event_matches))}) union
+    {B_event_matches_cycle},
+  model_contracts:=MODEL_X_PROPER_CYCLE,services:={},certificates:={}]
+E_PROPER_CYCLE=SemanticEnvironment(
+  abi_version=ABI0,declarations=PKG_CK_PROPER_CYCLE.declarations,
+  pair_declarations=PKG_CK_PROPER_CYCLE.pair_declarations,
+  bindings=PKG_CK_PROPER_CYCLE.bindings,
+  pair_bindings=PKG_CK_PROPER_CYCLE.pair_bindings,
+  profile_bindings=PKG_CK_PROPER_CYCLE.profile_bindings,
+  authority_facts=PKG_CK_PROPER_CYCLE.authority_facts,
+  semantic_extensions=PKG_CK_PROPER_CYCLE.semantic_extensions,
+  lexical_bindings={},choice_bindings={},
+  mechanically_extracted_dependencies=required(S_cycle),chi_C={})
+U_PROPER_CYCLE_REJECTION=ROW(PROPER_CYCLE_REJECTION;
+  ABI0,PKG_CK_PROPER_CYCLE,E_PROPER_CYCLE,
+  CS(PREDICATE_MEANING,event_matches_cycle),B_event_matches_cycle,
+  MODEL_event_matches_cycle)
+EXPECTED_PROPER_CYCLE_REJECTION=(
+  formation=MALFORMED(dependency cycle),closure=NOT_APPLICABLE,
+  cycle={BINDING(DP(event_matches)),BINDING(DP(event_occurred))})
 ```
 
-These are distinct packet universes with the same exact derived output
-`(M_c,Y_c,K_c)`; the two orders are not co-composed.
+`B_event_matches_cycle` is otherwise the complete ordinary `event_matches`
+binding: its declaration, evidence, access, unknown, error, binding key,
+facets, and determinism fields are unchanged and field-conformant.  Its sole
+changed semantic reference is the displayed cycle ContractSpec.  The retained
+`event_occurred` ContractSpec support is resolved by exact binding identity, so
+in `E_PROPER_CYCLE` its existing
+`BINDING(DP(event_matches))->EVAL_RESULT_SEQUENCE` support reaches
+`B_event_matches_cycle`, while the cycle ContractSpec reaches the retained
+same-key `event_occurred` binding.  `CYCLE_REACHABILITY_ATTEMPT` is the exact
+finite finset containing every direct declaration/ContractSpec/support root
+and its reachable type-admission roots; K2 checks its proper graph, identifies
+the two-edge cycle, and rejects before accepting any DAG closure.  Thus no
+validation reference, self-edge, descriptor, model, package, type, or service
+mismatch contributes to the rejection.  Every
+model in `MODEL_X_PROPER_CYCLE` has empty capability summaries, and the
+service-free package/environment retains the complete declaration,
+ContractSpec, binding, and model surroundings required for that isolated
+outcome.
+
+The two confluence packet universes have the same exact derived output
+`(M_c,Y_c,K_c)`; neither is co-composed with the separate cycle packet.
 
 The package-order fixture is a separate finite literal construction.  Fix
 
@@ -4998,25 +5149,100 @@ second declaration-formation, binding, model, package, type-admission, or
 dependency reason for either conflict universe to be malformed.
 
 ```text
-DUPLICATE_TYPE_DECLARATIONS={TypeDeclaration(k) | k in types_t}
-DUPLICATE_TYPE_ADMISSIONS={TypeDeclaration(k).admitted_value_domain |
-  k in types_t}
+DUPLICATE_TYPE_DECLARATION_SEQUENCE=[
+  TypeDeclaration(T(PathSegment)),TypeDeclaration(T(Path)),
+  TypeDeclaration(T(PathSet)),TypeDeclaration(T(ArtifactRole)),
+  TypeDeclaration(T(Format)),TypeDeclaration(T(ByteSize)),
+  TypeDeclaration(T(ContentIdentity)),TypeDeclaration(T(FieldId)),
+  TypeDeclaration(T(FieldValue)),TypeDeclaration(T(SubjectId)),
+  TypeDeclaration(T(BehaviorValue)),TypeDeclaration(T(ArtifactBodyKind)),
+  TypeDeclaration(T(ArtifactContent)),TypeDeclaration(T(ArtifactSelector)),
+  TypeDeclaration(T(ArtifactProjection)),TypeDeclaration(T(Coverage)),
+  TypeDeclaration(T(ObservationSpec)),TypeDeclaration(T(ObservationValue)),
+  TypeDeclaration(T(ObservationResult)),TypeDeclaration(T(ObservationRelation)),
+  TypeDeclaration(T(VerificationSpec)),TypeDeclaration(T(Criterion)),
+  TypeDeclaration(T(TaskSpec)),TypeDeclaration(T(RepositorySnapshot))]
+DUPLICATE_TYPE_ADMISSION_SEQUENCE=[
+  TypeDeclaration(T(PathSegment)).admitted_value_domain,
+  TypeDeclaration(T(Path)).admitted_value_domain,
+  TypeDeclaration(T(PathSet)).admitted_value_domain,
+  TypeDeclaration(T(ArtifactRole)).admitted_value_domain,
+  TypeDeclaration(T(Format)).admitted_value_domain,
+  TypeDeclaration(T(ByteSize)).admitted_value_domain,
+  TypeDeclaration(T(ContentIdentity)).admitted_value_domain,
+  TypeDeclaration(T(FieldId)).admitted_value_domain,
+  TypeDeclaration(T(FieldValue)).admitted_value_domain,
+  TypeDeclaration(T(SubjectId)).admitted_value_domain,
+  TypeDeclaration(T(BehaviorValue)).admitted_value_domain,
+  TypeDeclaration(T(ArtifactBodyKind)).admitted_value_domain,
+  TypeDeclaration(T(ArtifactContent)).admitted_value_domain,
+  TypeDeclaration(T(ArtifactSelector)).admitted_value_domain,
+  TypeDeclaration(T(ArtifactProjection)).admitted_value_domain,
+  TypeDeclaration(T(Coverage)).admitted_value_domain,
+  TypeDeclaration(T(ObservationSpec)).admitted_value_domain,
+  TypeDeclaration(T(ObservationValue)).admitted_value_domain,
+  TypeDeclaration(T(ObservationResult)).admitted_value_domain,
+  TypeDeclaration(T(ObservationRelation)).admitted_value_domain,
+  TypeDeclaration(T(VerificationSpec)).admitted_value_domain,
+  TypeDeclaration(T(Criterion)).admitted_value_domain,
+  TypeDeclaration(T(TaskSpec)).admitted_value_domain,
+  TypeDeclaration(T(RepositorySnapshot)).admitted_value_domain]
+DUPLICATE_TYPE_DECLARATIONS=finset(DUPLICATE_TYPE_DECLARATION_SEQUENCE)
+DUPLICATE_TYPE_ADMISSIONS=finset(DUPLICATE_TYPE_ADMISSION_SEQUENCE)
 PKG_CK_DUPLICATE_CONTEXT=PluginPackage(
   ABI0,CK,declarations=DUPLICATE_TYPE_DECLARATIONS,pair_declarations={},
   bindings={},pair_bindings={},profile_bindings={},model_contracts={},
   aliases={},services={},certificates={},authority_facts={},
   compatibility_claims={},migrations={},semantic_extensions={},diagnostics=NONE)
 DUPLICATE_CONTEXT=[ABI0,PKG_CK_DUPLICATE_CONTEXT] ++
-  DUPLICATE_TYPE_DECLARATIONS ++ DUPLICATE_TYPE_ADMISSIONS
+  DUPLICATE_TYPE_DECLARATION_SEQUENCE ++ DUPLICATE_TYPE_ADMISSION_SEQUENCE
+DUPLICATE_CONTEXT_REVERSE=[
+  TypeDeclaration(T(RepositorySnapshot)).admitted_value_domain,
+  TypeDeclaration(T(TaskSpec)).admitted_value_domain,
+  TypeDeclaration(T(Criterion)).admitted_value_domain,
+  TypeDeclaration(T(VerificationSpec)).admitted_value_domain,
+  TypeDeclaration(T(ObservationRelation)).admitted_value_domain,
+  TypeDeclaration(T(ObservationResult)).admitted_value_domain,
+  TypeDeclaration(T(ObservationValue)).admitted_value_domain,
+  TypeDeclaration(T(ObservationSpec)).admitted_value_domain,
+  TypeDeclaration(T(Coverage)).admitted_value_domain,
+  TypeDeclaration(T(ArtifactProjection)).admitted_value_domain,
+  TypeDeclaration(T(ArtifactSelector)).admitted_value_domain,
+  TypeDeclaration(T(ArtifactContent)).admitted_value_domain,
+  TypeDeclaration(T(ArtifactBodyKind)).admitted_value_domain,
+  TypeDeclaration(T(BehaviorValue)).admitted_value_domain,
+  TypeDeclaration(T(SubjectId)).admitted_value_domain,
+  TypeDeclaration(T(FieldValue)).admitted_value_domain,
+  TypeDeclaration(T(FieldId)).admitted_value_domain,
+  TypeDeclaration(T(ContentIdentity)).admitted_value_domain,
+  TypeDeclaration(T(ByteSize)).admitted_value_domain,
+  TypeDeclaration(T(Format)).admitted_value_domain,
+  TypeDeclaration(T(ArtifactRole)).admitted_value_domain,
+  TypeDeclaration(T(PathSet)).admitted_value_domain,
+  TypeDeclaration(T(Path)).admitted_value_domain,
+  TypeDeclaration(T(PathSegment)).admitted_value_domain,
+  TypeDeclaration(T(RepositorySnapshot)),TypeDeclaration(T(TaskSpec)),
+  TypeDeclaration(T(Criterion)),TypeDeclaration(T(VerificationSpec)),
+  TypeDeclaration(T(ObservationRelation)),TypeDeclaration(T(ObservationResult)),
+  TypeDeclaration(T(ObservationValue)),TypeDeclaration(T(ObservationSpec)),
+  TypeDeclaration(T(Coverage)),TypeDeclaration(T(ArtifactProjection)),
+  TypeDeclaration(T(ArtifactSelector)),TypeDeclaration(T(ArtifactContent)),
+  TypeDeclaration(T(ArtifactBodyKind)),TypeDeclaration(T(BehaviorValue)),
+  TypeDeclaration(T(SubjectId)),TypeDeclaration(T(FieldValue)),
+  TypeDeclaration(T(FieldId)),TypeDeclaration(T(ContentIdentity)),
+  TypeDeclaration(T(ByteSize)),TypeDeclaration(T(Format)),
+  TypeDeclaration(T(ArtifactRole)),TypeDeclaration(T(PathSet)),
+  TypeDeclaration(T(Path)),TypeDeclaration(T(PathSegment)),
+  PKG_CK_DUPLICATE_CONTEXT,ABI0]
 DUPLICATE_BASE=K2_COMPOSE(DUPLICATE_CONTEXT ++ [d])
 U_DUPLICATE_EQUAL_FORWARD=K2_COMPOSE(
   DUPLICATE_CONTEXT ++ [d,d'])
 U_DUPLICATE_EQUAL_REVERSE=K2_COMPOSE(
-  [d',d] ++ reverse(DUPLICATE_CONTEXT))
+  [d',d] ++ DUPLICATE_CONTEXT_REVERSE)
 U_DUPLICATE_CONFLICT_FORWARD=K2_COMPOSE(
   DUPLICATE_CONTEXT ++ [d,d_bad])
 U_DUPLICATE_CONFLICT_REVERSE=K2_COMPOSE(
-  [d_bad,d] ++ reverse(DUPLICATE_CONTEXT))
+  [d_bad,d] ++ DUPLICATE_CONTEXT_REVERSE)
 EXPECTED_DUPLICATE_EQUAL=(
   authoritative_map=A(DUPLICATE_BASE),
   formation=WELL_FORMED,closure=CLOSED)
@@ -5037,7 +5263,7 @@ unioned with another presentation.  In particular,
 `A(U_DUPLICATE_CONFLICT_FORWARD)` and
 `A(U_DUPLICATE_CONFLICT_REVERSE)` replace only
 `DECLARATION_RECORD(DP(task_accepts))->d` by
-`CONFLICT_RECORD(CONFLICT_OF(d,d_bad))->conflict0`; reverse input order has no
+`CONFLICT_RECORD(conflict0)->conflict0`; reverse input order has no
 semantic effect.  Repeating the same construction with `d_bad_alt` derives
 `conflict1` independently for the missing-record replacement row.
 
@@ -5064,11 +5290,14 @@ FIXTURE_EXPECTED_X={
     (A(V_k),MISSING_EXPECTED[k]) for each displayed MissingRowId k,
   CONFLUENCE_ORDER(FORWARD) -> (M_c,Y_c,K_c),
   CONFLUENCE_ORDER(REVERSE) -> (M_c,Y_c,K_c),
+  PROPER_CYCLE_REJECTION -> EXPECTED_PROPER_CYCLE_REJECTION,
   PERMUTATION(p,r) -> PI_EXPECTED for each of the four displayed pairs,
   DUPLICATE_EQUAL(FORWARD) -> EXPECTED_DUPLICATE_EQUAL,
   DUPLICATE_EQUAL(REVERSE) -> EXPECTED_DUPLICATE_EQUAL,
   DUPLICATE_CONFLICT(FORWARD) -> EXPECTED_DUPLICATE_CONFLICT,
   DUPLICATE_CONFLICT(REVERSE) -> EXPECTED_DUPLICATE_CONFLICT}
+`dom(FIXTURE_EXPECTED_X)=dom(FIXTURE_PACKET_X)` and both have the displayed
+cardinality 102.
 
 CHECK_12_REPLAY=id ->
   (K2_REPLAY(FIXTURE_PACKET_X[id]) = FIXTURE_EXPECTED_X[id])
@@ -5085,7 +5314,7 @@ one replay coordinate.
 | 2 | exact `CK/T/DF/DP/SF/SP` constructors with independently built equal records and one forced kind collision | K3S-A01,A14 | K2 §§3.1,8.3: equal identities coalesce; owner/plugin/kind variants remain distinct; one-key unequal kind rejects |
 | 3 | identical logical meaning at exact `(1)` and an exact `(2)` target | K3S-A02,A16 | K1 §§2.3,3.5; K2 §§3.4,4.3,8.2: agreement succeeds, mismatch rejects, no fallback |
 | 4 | `DP(task_accepts)` declaration; environments omitting its binding or `CAP(predicates)` | K3S-A03,A09 | K1 §2.3; K2 §§2.4,8.1: declaration present/binding absent/capability absent are distinct coordinates |
-| 5 | retained pair DAG plus complete `B_alt/PB_alt/R_p/PENV/PVC/TRP` independent fixture and a true proper back-edge | K3S-A15 | K2 §§3.3,7.2: exact validation refs stay mandatory/non-proper; admitted proof closes; genuine semantic self-edge/cycle malformed |
+| 5 | retained pair DAG plus complete `B_alt/PB_alt/R_p/PENV/PVC/TRP` independent fixture and tagged `U_PROPER_CYCLE_REJECTION` with the `event_matches -> event_occurred -> event_matches` proper back-edge | K3S-A15 | K2 §§3.3,7.2: exact validation refs stay mandatory/non-proper; admitted proof closes; the replayed genuine semantic cycle is `MALFORMED(dependency cycle)` |
 | 6 | the five complete `Q_t[T_x]` requests, exact root reasons/scopes, and producer sets in §9.3 | K3S-A03,A13 | K2 §§2.3-2.4,5.4,8.1: admitted -> usable; absent -> exact missing/evaluability missing; undecided -> evaluability unknown; incompatible -> evaluability missing; failed -> exact discovery failure and no fabricated K1 result |
 | 7 | task result fixtures, malformed unequal Eval, and bounds-reasoner result/failure | K3S-A10,A11 | K1 §§4,5.3; K2 §§5.2-5.4,6.3: false, logical unknown, evaluation error, reasoning error, malformed result stay distinct |
 | 8 | network prohibition and exact release/refresh grants/pair | K3S-A06,A07 | K1 §§3.2-3.4; K2 §7.1: hard trace truth and authority are independent; evaluability grants no authority |
