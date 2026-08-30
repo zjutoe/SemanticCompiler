@@ -2742,7 +2742,7 @@ following is the entire finite `SeparationRecord` set:
 | `SEP_TYPE_DECLARATION` | `{E_c}` / `WELL_FORMED` | `{E_c[declarations:=E_c.declarations minus {TypeDeclaration(T(Path))}]}` / `MALFORMED` |
 | `SEP_LITERAL_DECLARATION` | `{E_b}` / `WELL_FORMED` | `{E_b[declarations:=E_b.declarations minus {LiteralDeclaration(T(TaskSpec),ts_nonempty)}]}` / `MALFORMED` |
 | `SEP_FUNCTION_DECLARATION` | `{Declaration(DF(observe))}` / `WELL_FORMED` | `{Declaration(DF(observe))[facet_positions:=({}, {})]}` / `MALFORMED` |
-| `SEP_PREDICATE_DECLARATION` | `{Declaration(DP(task_accepts))}` / `WELL_FORMED` | `{d_bad}` / `MALFORMED` |
+| `SEP_PREDICATE_DECLARATION` | `{Declaration(DP(task_accepts))}` / `WELL_FORMED` | `{Declaration(DP(task_accepts))[facet_positions:=({},{})]}` / `MALFORMED` |
 | `SEP_EVENT_DECLARATION` | `{Declaration(DE(network_contact))}` / `WELL_FORMED` | `{Declaration(DE(network_contact))[event_class:=OBSERVATIONAL]}` / `MALFORMED` |
 | `SEP_PAIR_DECLARATION` | `{E_p}` / `WELL_FORMED` | `{E_p[pair_declarations:={}]}` / `MALFORMED` |
 | `SEP_LITERAL_BINDING` | `{E_b}` / `CLOSED` | `{E_b[bindings:=E_b.bindings minus {SemanticBinding(L(T(TaskSpec),ts_nonempty))}]}` / `OPEN_BINDINGS` |
@@ -3449,7 +3449,7 @@ FIXTURE_X={
   RESULT_RECORD(result_identity=(IDENTITY_OF(R_c),ReasoningResult,
                 IDENTITY_OF(Y_c)),result_value=Y_c),
   ROOT_TR_c_alt,T_c_alt,R_c_alt,L_life_after,K_life_after,
-  d,d_bad,d_bad_signature,conflict0,conflict1,
+  d,d_bad,d_bad_alt,conflict0,conflict1,
   EENV_m_bad_root,
   CertificateAdmission.ADMITTED(
     PCERT,PAIR_COHERENCE_ADMITTED(PAIR(refresh),PCERT)),
@@ -4413,8 +4413,42 @@ PKG_CK_no_binding=PKG_CK[bindings:=PKG_CK.bindings minus
 PKG_CK_no_profile=PKG_CK[profile_bindings:={}]
 PKG_pair_CK_no_pair_decl=PKG_pair_CK[pair_declarations:={}]
 PKG_pair_CK_no_pair_binding=PKG_pair_CK[pair_bindings:={}]
-PKG_CK_no_predicate_service=PKG_CK[services:=
-  PKG_CK.services minus {CapabilityDescriptor(CAP(predicates))}]
+PREDICATE_MODELS={
+  MODEL_observations_equal,MODEL_task_accepts,
+  MODEL_dependency_metadata_changed,MODEL_verification_passed,
+  MODEL_event_matches,MODEL_event_occurred,MODEL_refresh_scope,
+  MODEL_refresh_occurred}
+MODEL_observations_equal_no_predicate_capability=
+  MODEL_observations_equal[capability_summaries:={}]
+MODEL_task_accepts_no_predicate_capability=
+  MODEL_task_accepts[capability_summaries:={}]
+MODEL_dependency_metadata_changed_no_predicate_capability=
+  MODEL_dependency_metadata_changed[capability_summaries:={}]
+MODEL_verification_passed_no_predicate_capability=
+  MODEL_verification_passed[capability_summaries:={}]
+MODEL_event_matches_no_predicate_capability=
+  MODEL_event_matches[capability_summaries:={}]
+MODEL_event_occurred_no_predicate_capability=
+  MODEL_event_occurred[capability_summaries:={}]
+MODEL_refresh_scope_no_predicate_capability=
+  MODEL_refresh_scope[capability_summaries:={}]
+MODEL_refresh_occurred_no_predicate_capability=
+  MODEL_refresh_occurred[capability_summaries:={}]
+PREDICATE_MODELS_NO_PREDICATE_CAPABILITY={
+  MODEL_observations_equal_no_predicate_capability,
+  MODEL_task_accepts_no_predicate_capability,
+  MODEL_dependency_metadata_changed_no_predicate_capability,
+  MODEL_verification_passed_no_predicate_capability,
+  MODEL_event_matches_no_predicate_capability,
+  MODEL_event_occurred_no_predicate_capability,
+  MODEL_refresh_scope_no_predicate_capability,
+  MODEL_refresh_occurred_no_predicate_capability}
+MODEL_X_NO_PREDICATE_CAPABILITY=(MODEL_X minus PREDICATE_MODELS) union
+  PREDICATE_MODELS_NO_PREDICATE_CAPABILITY
+PKG_CK_no_predicate_service=PKG_CK[
+  services:=PKG_CK.services minus {CapabilityDescriptor(CAP(predicates))},
+  model_contracts:=MODEL_X_NO_PREDICATE_CAPABILITY]
+PKG_CK_no_predicate_capability=PKG_CK_no_predicate_service
 
 E_choice_no_fact=E_choice[
   authority_facts:={},choice_bindings:={},chi_C:={}]
@@ -4426,15 +4460,62 @@ R_lex_no_lb=R_lex[semantic_environment:=E_lex_no_lb,
   complete_dependencies:=D_lex_no_lb]
 
 CAP_pred_wrong_sound=CapabilityDescriptor(CAP(predicates))[
-  sound_fragment:=FSOUND]
-PKG_CK_wrong_service_spec=PKG_CK[services:=
-  (PKG_CK.services minus {CapabilityDescriptor(CAP(predicates))}) union
-  {CAP_pred_wrong_sound}]
+  sound_fragment:=FSOUND,
+  proper_semantic_dependencies:=
+    (CapabilityDescriptor(CAP(predicates)).proper_semantic_dependencies minus
+      {CONTRACT_SPEC(QSOUND.contract_key)}) union
+      {CONTRACT_SPEC(FSOUND.contract_key)},
+  dependency_closure:=the least acyclic proper closure of the rebuilt
+    `proper_semantic_dependencies`]
+MODEL_observations_equal_wrong_service_spec=MODEL_observations_equal[
+  capability_summaries:={modelCapabilitySummary(CAP_pred_wrong_sound)}]
+MODEL_task_accepts_wrong_service_spec=MODEL_task_accepts[
+  capability_summaries:={modelCapabilitySummary(CAP_pred_wrong_sound)}]
+MODEL_dependency_metadata_changed_wrong_service_spec=
+  MODEL_dependency_metadata_changed[
+    capability_summaries:={modelCapabilitySummary(CAP_pred_wrong_sound)}]
+MODEL_verification_passed_wrong_service_spec=MODEL_verification_passed[
+  capability_summaries:={modelCapabilitySummary(CAP_pred_wrong_sound)}]
+MODEL_event_matches_wrong_service_spec=MODEL_event_matches[
+  capability_summaries:={modelCapabilitySummary(CAP_pred_wrong_sound)}]
+MODEL_event_occurred_wrong_service_spec=MODEL_event_occurred[
+  capability_summaries:={modelCapabilitySummary(CAP_pred_wrong_sound)}]
+MODEL_refresh_scope_wrong_service_spec=MODEL_refresh_scope[
+  capability_summaries:={modelCapabilitySummary(CAP_pred_wrong_sound)}]
+MODEL_refresh_occurred_wrong_service_spec=MODEL_refresh_occurred[
+  capability_summaries:={modelCapabilitySummary(CAP_pred_wrong_sound)}]
+PREDICATE_MODELS_WRONG_SERVICE_SPEC={
+  MODEL_observations_equal_wrong_service_spec,
+  MODEL_task_accepts_wrong_service_spec,
+  MODEL_dependency_metadata_changed_wrong_service_spec,
+  MODEL_verification_passed_wrong_service_spec,
+  MODEL_event_matches_wrong_service_spec,
+  MODEL_event_occurred_wrong_service_spec,
+  MODEL_refresh_scope_wrong_service_spec,
+  MODEL_refresh_occurred_wrong_service_spec}
+MODEL_X_WRONG_SERVICE_SPEC=(MODEL_X minus PREDICATE_MODELS) union
+  PREDICATE_MODELS_WRONG_SERVICE_SPEC
+PKG_CK_wrong_service_spec=PKG_CK[
+  services:=(PKG_CK.services minus {CapabilityDescriptor(CAP(predicates))}) union
+    {CAP_pred_wrong_sound},
+  model_contracts:=MODEL_X_WRONG_SERVICE_SPEC]
 B_task_wrong_meaning=SemanticBinding(DP(task_accepts))[
-  meaning_contract:=CS(PREDICATE_MEANING,observations_equal)]
-PKG_CK_wrong_sigma_spec=PKG_CK[bindings:=
-  (PKG_CK.bindings minus {SemanticBinding(DP(task_accepts))}) union
-  {B_task_wrong_meaning}]
+  meaning_contract:=CS(PREDICATE_MEANING,observations_equal),
+  proper_semantic_dependencies:=
+    (SemanticBinding(DP(task_accepts)).proper_semantic_dependencies minus
+      {CONTRACT_SPEC(CS(PREDICATE_MEANING,task_accepts))}) union
+      {CONTRACT_SPEC(CS(PREDICATE_MEANING,observations_equal))},
+  dependency_closure:=the least acyclic proper closure of the rebuilt
+    `proper_semantic_dependencies`]
+MODEL_task_accepts_wrong_sigma_spec=MODEL_task_accepts[
+  semantic_contract_reference:=
+    CS(PREDICATE_MEANING,observations_equal).contract_key]
+MODEL_X_WRONG_SIGMA_SPEC=(MODEL_X minus {MODEL_task_accepts}) union
+  {MODEL_task_accepts_wrong_sigma_spec}
+PKG_CK_wrong_sigma_spec=PKG_CK[
+  bindings:=(PKG_CK.bindings minus {SemanticBinding(DP(task_accepts))}) union
+    {B_task_wrong_meaning},
+  model_contracts:=MODEL_X_WRONG_SIGMA_SPEC]
 
 E_t_empty=E_t[declarations:={},bindings:={},pair_bindings:={},
   profile_bindings:={},authority_facts:={},semantic_extensions:={},
@@ -4488,18 +4569,34 @@ K_life_after=(WELL_FORMED,CLOSED,EVALUABILITY_AVAILABLE,
   LIFECYCLE_RECORD((J_c,IDENTITY_OF(R_c_alt)))->L_life_after,
   CONSISTENCY_UNKNOWN)
 
-d_bad_signature=d_bad[argument_types:=
-  (T(TaskSpec),T(RepositorySnapshot),T(EvidenceStore),T(StorageBackend))]
+d_bad=PredicateDeclaration(
+  key=DP(task_accepts),symbol_key=SP(task_accepts),
+  argument_types=(T(TaskSpec),T(RepositorySnapshot),EvidenceStore),
+  result_kind=BOOL,facet_positions=({},{final},{}),
+  proper_declaration_dependencies={DECLARATION(T(TaskSpec)),
+    DECLARATION(T(RepositorySnapshot))})
+d_bad_alt=PredicateDeclaration(
+  key=DP(task_accepts),symbol_key=SP(task_accepts),
+  argument_types=(T(TaskSpec),T(RepositorySnapshot),EvidenceStore),
+  result_kind=BOOL,facet_positions=({},{},{evidence}),
+  proper_declaration_dependencies={DECLARATION(T(TaskSpec)),
+    DECLARATION(T(RepositorySnapshot))})
 conflict0=CONFLICT_OF(d,d_bad)
-conflict1=CONFLICT_OF(d,d_bad_signature)
+conflict1=CONFLICT_OF(d,d_bad_alt)
 
 T_root_missing=TrustEnvironment(
   trust_policy_key=TP,policy_owner=EMBEDDING_POLICY_PRODUCER(TP),
   root_judgments={})
 ```
 
-The `d_bad_signature` substitution changes a real declaration field; there is
-no declaration `exact_version` field.  `E_choice_no_fact` and
+`d_bad` and `d_bad_alt` are independently complete declarations: each retains
+the exact `DP(task_accepts)`/`SP(task_accepts)` identity, the original
+three-position argument-type sequence, Boolean result kind, and the K2-derived
+proper declaration-dependency set.  Each changes exactly one admissible facet
+position from `d`, so each is field-conformant in isolation and unequal to
+`d`; neither has an arity, positional, type, or dependency defect.  The two
+conflicts above are therefore derived solely from unequal records at the exact
+same declaration identity.  `E_choice_no_fact` and
 `E_choice_no_binding` recompute `chi_C={}`.  `AF(choice,1)` remains an
 `AuthorityFactKey` inside `cbe0`; it is never used where an
 `AuthorityFactBinding` is required.
@@ -4550,7 +4647,7 @@ definition of the finite maps `i[k]`, `Rminus[k]`, `Rplus[k]`, and
 | `LEXICAL_BINDING`; `LEXICAL_BINDING_RECORD(lk0)` | `ROW(LEXICAL_BINDING; ABI0,PKG_CK,S_lex,E_lex,D_lex,R_lex)` | `{E_lex,D_lex,R_lex}->{E_lex_no_lb,D_lex_no_lb,R_lex_no_lb}` | `OPEN_BINDINGS({LEXICAL_BINDING(lk0)})` |
 | `EXTRANEOUS_LEXICAL_BINDING`; `REQUEST_RECORD(IDENTITY_OF(Q_t[T_admitted]))` | `ROW(EXTRANEOUS_LEXICAL_BINDING; ABI0,PKG_CK,E_t,D_t,T_admitted,Q_t[T_admitted])` | `{E_t,D_t,Q_t[T_admitted]}->{E_t_extra,D_t_extra,Q_t_extra}` | `MALFORMED_REQUEST(EXTRANEOUS_LEXICAL_BINDING(lk_extra))` |
 | `SERVICE`; `SERVICE_RECORD(SK(predicates))` | `ROW(SERVICE; ABI0,PKG_CK,E_t,D_t,T_admitted,Q_t[T_admitted])` | `{PKG_CK}->{PKG_CK_no_predicate_service}` | `EVALUABILITY_MISSING` |
-| `CAPABILITY`; `CAPABILITY_RECORD(CAP(predicates))` | `ROW(CAPABILITY; ABI0,PKG_CK,E_t,D_t,T_admitted,Q_t[T_admitted])` | `{PKG_CK}->{PKG_CK[services:=PKG_CK.services minus {CapabilityDescriptor(CAP(predicates))}]}` | `EVALUABILITY_MISSING` |
+| `CAPABILITY`; `CAPABILITY_RECORD(CAP(predicates))` | `ROW(CAPABILITY; ABI0,PKG_CK,E_t,D_t,T_admitted,Q_t[T_admitted])` | `{PKG_CK}->{PKG_CK_no_predicate_capability}` | `EVALUABILITY_MISSING` |
 | `TRUST_POLICY`; `TRUST_POLICY_RECORD(TP)` | `ROW(TRUST_POLICY; ABI0,T_admitted)` | `{T_admitted}->{}` | `TRUST_ROOT_ABSENT` |
 | `TRUST_ROOT`; `TRUST_ROOT_RECORD(TR)` | `ROW(TRUST_ROOT; ABI0,ROOT_TR_t,T_admitted)` | `{ROOT_TR_t,T_admitted}->{T_root_missing}` | `TRUST_ROOT_ABSENT(TR)` |
 | `CERTIFICATE`; `CERTIFICATE_RECORD(BCERT)` | `ROW(CERTIFICATE; ABI0,PKG_CK,BENV,R_b,T_b)` | `{PKG_CK,BENV}->{PKG_CK[certificates:={}]}` | `(NO_CERTIFICATE_ADMISSION,CONSISTENCY_UNKNOWN)` |
@@ -4576,7 +4673,7 @@ definition of the finite maps `i[k]`, `Rminus[k]`, `Rplus[k]`, and
 | `AUTHORITY_REF`; `AUTHORITY_REF_RECORD(IDENTITY_OF(auth0))` | `ROW(AUTHORITY_REF; ABI0,auth0)` | `{auth0}->{}` | `MALFORMED` |
 | `EVIDENCE`; `EVIDENCE_RECORD(e0)` | `ROW(EVIDENCE; ABI0,e0,v0,vr0,i0,H0)` | `{e0,vr0,i0,H0}->{}` | `TRUTH_UNKNOWN` |
 | `REASON`; `REASON_RECORD(UnknownReason,IDENTITY_OF(u0))` | `ROW(REASON; ABI0,u0,VALUE(UNKNOWN,{},{u0}))` | `{u0,VALUE(UNKNOWN,{},{u0})}->{}` | `MALFORMED_RESULT(MALFORMED_CARRIER)` |
-| `CONFLICT`; `CONFLICT_RECORD(conflict0)` | `ROW(CONFLICT; ABI0,d,d_bad,conflict0)` | `{d_bad,conflict0}->{d_bad_signature,conflict1}` | `(CONFLICT_RECORD(conflict1),MALFORMED)` |
+| `CONFLICT`; `CONFLICT_RECORD(conflict0)` | `ROW(CONFLICT; ABI0,d,d_bad,conflict0)` | `{d_bad,conflict0}->{d_bad_alt,conflict1}` | `(CONFLICT_RECORD(conflict1),MALFORMED)` |
 <!-- K3S-MISSING-END -->
 
 For every one of these 42 rows, the following equations are fixture
@@ -4607,7 +4704,29 @@ c.capability_key.service_key=s}` and
 and `serviceDescriptors(SK(predicates),V_SERVICE)={}`.  Therefore the exact
 derived `ServiceIdentityRecord(SK(predicates))` target count is `1 -> 0`, and
 `recordAt(q[SERVICE],V_SERVICE)=ABSENT_REQUIRED_RECORD(q[SERVICE])`; removing
-only its derived carrier would not be a reconstruction.  For `TRUST_ROOT`,
+only its derived carrier would not be a reconstruction.  The identical
+descriptor removal in the `CAPABILITY` row uses the separately named but
+field-identical `PKG_CK_no_predicate_capability`.  In both variants all eight
+predicate `ModelContract` records are rebuilt with empty
+`capability_summaries`, while every function, literal, and non-predicate model
+record is retained unchanged.  Thus the bidirectional descriptor/summary
+relation is exact in both directions: there is neither a descriptor lacking a
+summary nor a stale nested `CAP(predicates)` summary.  The row-local outcomes
+are consequently only `EVALUABILITY_MISSING`, never model/machine malformed.
+
+For `SIGMA_CONTRACT_SPEC`, the rebuilt `MODEL_task_accepts_wrong_sigma_spec`
+projects the replacement binding's exact meaning-contract key; all seven
+unaffected predicate models and every non-predicate model are retained from
+`MODEL_X`.  For `SERVICE_CONTRACT_SPEC`, all eight predicate models are
+rebuilt from `CAP_pred_wrong_sound`, including its changed sound-fragment key,
+and no old descriptor projection remains.  These are complete package
+reconstructions, so their displayed `BINDING_INCOMPATIBLE` and
+`CAPABILITY_INCOMPATIBLE/EVALUABILITY_MISSING` results have no additional
+model/machine mismatch.  `PKG_CK_no_decl`, `PKG_CK_no_event`,
+`PKG_CK_no_binding`, `PKG_CK_no_profile`, `PKG_CK_no_task_model`, and the
+certificate-only replacement retain the original descriptor and therefore the
+original exact model summaries; no other `PKG_CK` variant projects a changed
+predicate descriptor or binding.  For `TRUST_ROOT`,
 `T_root_missing.root_judgments` has no `TR` entry and the row contains no
 request, descriptor, certificate, or other record requiring `TR`; it is a
 genuine absent-record row, not a replacement by `TRUST_ROOT_ABSENT(TR)`.  For
@@ -4854,29 +4973,50 @@ same complete package/member record set.  Separately, `O_1/O_2` yield exactly
 
 Finally, let `d` be the complete `PredicateDeclaration(DP(task_accepts))`
 member of `PKG_CK`, and let `d'` be an independently constructed complete
-field-for-field equal copy.  Let `d_bad` have that same key but the unequal
-two-argument signature omitting `EvidenceStore`; all of its remaining fields
-are those of `d`.  Each duplicate presentation is embedded in the complete,
-dependency-closed owner/package-valid universe used by
-`U_CORE_DEFINITIONAL`: it includes `ABI0`, `PKG_CK`, its retained owner,
-certificate, validator, authority, model, declaration, binding, and service
-packages, plus `C_b,C_c,C_w,C_choice,E_b,E_c,E_w,E_choice`.  Thus the only
-difference between the equal and conflict presentations is equality versus
-inequality of the one exact declaration identity, rather than a missing
-owner, package member, type declaration, admission contract, or dependency.
+field-for-field equal copy.  `d_bad` has the same exact declaration/symbol
+identity and the same three-position signature as `d`, but has the independently
+well-formed facet sequence `({}, {final}, {})`; its K2-derived proper
+declaration dependencies are recomputed from that unchanged signature.
+`d_bad_alt` is likewise independently well formed, with
+`({}, {}, {evidence})`.  Neither unequal declaration is a two-argument or
+otherwise malformed presentation.
+
+The duplicate context is deliberately declaration-only: adding an unequal
+declaration to `PKG_CK` would also make its retained binding and model
+projection mismatched, obscuring the duplicate result.  Instead the complete
+owner/package-valid context below contains the exact recursively closed type
+declarations and their admission ContractSpecs, no task binding, model, or
+capability descriptor, and exactly one independently supplied task declaration.
+K2 permits that independently supplied record to coalesce with an equal
+presentation; package membership is not an implicit binding or model record.
+Before duplicate grouping, the declaration validator independently validates
+the complete `d`, `d'`, `d_bad`, and `d_bad_alt` records.  Removing either
+presentation in every equal or conflict pair leaves the remaining declaration
+and its complete type/declaration closure conformant; only their simultaneous
+unequal same-identity presentation creates `ConflictRef`.  Thus there is no
+second declaration-formation, binding, model, package, type-admission, or
+dependency reason for either conflict universe to be malformed.
 
 ```text
-DUPLICATE_CLOSED_TAIL=[PKG_AWK,PKG_RVK,PKG_APK,PKG_ATK,PKG_AVK,
-  C_b,C_c,C_w,C_choice,E_b,E_c,E_w,E_choice]
-DUPLICATE_BASE=K2_COMPOSE([ABI0,PKG_CK] ++ DUPLICATE_CLOSED_TAIL)
+DUPLICATE_TYPE_DECLARATIONS={TypeDeclaration(k) | k in types_t}
+DUPLICATE_TYPE_ADMISSIONS={TypeDeclaration(k).admitted_value_domain |
+  k in types_t}
+PKG_CK_DUPLICATE_CONTEXT=PluginPackage(
+  ABI0,CK,declarations=DUPLICATE_TYPE_DECLARATIONS,pair_declarations={},
+  bindings={},pair_bindings={},profile_bindings={},model_contracts={},
+  aliases={},services={},certificates={},authority_facts={},
+  compatibility_claims={},migrations={},semantic_extensions={},diagnostics=NONE)
+DUPLICATE_CONTEXT=[ABI0,PKG_CK_DUPLICATE_CONTEXT] ++
+  DUPLICATE_TYPE_DECLARATIONS ++ DUPLICATE_TYPE_ADMISSIONS
+DUPLICATE_BASE=K2_COMPOSE(DUPLICATE_CONTEXT ++ [d])
 U_DUPLICATE_EQUAL_FORWARD=K2_COMPOSE(
-  [ABI0,PKG_CK,d'] ++ DUPLICATE_CLOSED_TAIL)
+  DUPLICATE_CONTEXT ++ [d,d'])
 U_DUPLICATE_EQUAL_REVERSE=K2_COMPOSE(
-  [ABI0,d',PKG_CK] ++ DUPLICATE_CLOSED_TAIL)
+  [d',d] ++ reverse(DUPLICATE_CONTEXT))
 U_DUPLICATE_CONFLICT_FORWARD=K2_COMPOSE(
-  [ABI0,PKG_CK,d_bad] ++ DUPLICATE_CLOSED_TAIL)
+  DUPLICATE_CONTEXT ++ [d,d_bad])
 U_DUPLICATE_CONFLICT_REVERSE=K2_COMPOSE(
-  [ABI0,d_bad,PKG_CK] ++ DUPLICATE_CLOSED_TAIL)
+  [d_bad,d] ++ reverse(DUPLICATE_CONTEXT))
 EXPECTED_DUPLICATE_EQUAL=(
   authoritative_map=A(DUPLICATE_BASE),
   formation=WELL_FORMED,closure=CLOSED)
@@ -4893,7 +5033,13 @@ A(U_DUPLICATE_CONFLICT_FORWARD)=A(U_DUPLICATE_CONFLICT_REVERSE)=
 
 The first two packet entries both yield exactly `EXPECTED_DUPLICATE_EQUAL`;
 the last two both yield exactly `EXPECTED_DUPLICATE_CONFLICT`.  No entry is
-unioned with another presentation.
+unioned with another presentation.  In particular,
+`A(U_DUPLICATE_CONFLICT_FORWARD)` and
+`A(U_DUPLICATE_CONFLICT_REVERSE)` replace only
+`DECLARATION_RECORD(DP(task_accepts))->d` by
+`CONFLICT_RECORD(CONFLICT_OF(d,d_bad))->conflict0`; reverse input order has no
+semantic effect.  Repeating the same construction with `d_bad_alt` derives
+`conflict1` independently for the missing-record replacement row.
 
 ### 9.6 Mapping of all thirteen checks
 
