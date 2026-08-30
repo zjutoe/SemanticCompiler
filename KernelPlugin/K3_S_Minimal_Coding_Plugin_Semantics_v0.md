@@ -428,7 +428,7 @@ displayed tags and every field has its displayed frozen K1/K2 sort.  An
 and all five fields are admitted at their displayed sorts.  A
 `ServiceAdmissionSubject` or `EvolutionAdmissionSubject` is admitted iff it
 has one displayed tag and every field is admitted at its displayed sort.
-Equality for all six sorts is tag equality followed by exact componentwise
+Equality for all seven sorts is tag equality followed by exact componentwise
 field equality; there is no raw field-name, prose sort, open map, subtyping, or
 coercion rule.  They contain no `ContractSpec`,
 `OccurrenceSemanticContractBundle`, `SemanticEnvironment`, `AliasBinding`,
@@ -4413,6 +4413,8 @@ PKG_CK_no_binding=PKG_CK[bindings:=PKG_CK.bindings minus
 PKG_CK_no_profile=PKG_CK[profile_bindings:={}]
 PKG_pair_CK_no_pair_decl=PKG_pair_CK[pair_declarations:={}]
 PKG_pair_CK_no_pair_binding=PKG_pair_CK[pair_bindings:={}]
+PKG_CK_no_predicate_service=PKG_CK[services:=
+  PKG_CK.services minus {CapabilityDescriptor(CAP(predicates))}]
 
 E_choice_no_fact=E_choice[
   authority_facts:={},choice_bindings:={},chi_C:={}]
@@ -4441,7 +4443,7 @@ E_t_empty=E_t[declarations:={},bindings:={},pair_bindings:={},
 Omega_t_empty={ABI0,E_t_empty}
 D_t_empty=DependencyEnvironment(S_t,Omega_t_empty)
 Q_t_empty=Q_t[T_admitted][semantic_environment:=E_t_empty,
-  complete_dependencies:=D_t_empty]
+  dependency_environment:=D_t_empty]
 RES_t_empty=RESULT_RECORD(
   result_identity=(IDENTITY_OF(Q_t_empty),Eval,IDENTITY_OF(r_t)),
   result_value=r_t)
@@ -4490,6 +4492,10 @@ d_bad_signature=d_bad[argument_types:=
   (T(TaskSpec),T(RepositorySnapshot),T(EvidenceStore),T(StorageBackend))]
 conflict0=CONFLICT_OF(d,d_bad)
 conflict1=CONFLICT_OF(d,d_bad_signature)
+
+T_root_missing=TrustEnvironment(
+  trust_policy_key=TP,policy_owner=EMBEDDING_POLICY_PRODUCER(TP),
+  root_judgments={})
 ```
 
 The `d_bad_signature` substitution changes a real declaration field; there is
@@ -4543,10 +4549,10 @@ definition of the finite maps `i[k]`, `Rminus[k]`, `Rplus[k]`, and
 | `CHOICE_BINDING`; `CHOICE_BINDING_RECORD(cb0)` | `ROW(CHOICE_BINDING; ABI0,PKG_APK,C_choice,E_choice)` | `{E_choice}->{E_choice_no_binding}` | `OPEN_BINDINGS({CHOICE_BINDING(cb0)})` |
 | `LEXICAL_BINDING`; `LEXICAL_BINDING_RECORD(lk0)` | `ROW(LEXICAL_BINDING; ABI0,PKG_CK,S_lex,E_lex,D_lex,R_lex)` | `{E_lex,D_lex,R_lex}->{E_lex_no_lb,D_lex_no_lb,R_lex_no_lb}` | `OPEN_BINDINGS({LEXICAL_BINDING(lk0)})` |
 | `EXTRANEOUS_LEXICAL_BINDING`; `REQUEST_RECORD(IDENTITY_OF(Q_t[T_admitted]))` | `ROW(EXTRANEOUS_LEXICAL_BINDING; ABI0,PKG_CK,E_t,D_t,T_admitted,Q_t[T_admitted])` | `{E_t,D_t,Q_t[T_admitted]}->{E_t_extra,D_t_extra,Q_t_extra}` | `MALFORMED_REQUEST(EXTRANEOUS_LEXICAL_BINDING(lk_extra))` |
-| `SERVICE`; `SERVICE_RECORD(SK(predicates))` | `ROW(SERVICE; ABI0,ServiceIdentityRecord(SK(predicates)),CapabilityDescriptor(CAP(predicates)))` | `{ServiceIdentityRecord(SK(predicates))}->{}` | `EVALUABILITY_MISSING` |
+| `SERVICE`; `SERVICE_RECORD(SK(predicates))` | `ROW(SERVICE; ABI0,PKG_CK,E_t,D_t,T_admitted,Q_t[T_admitted])` | `{PKG_CK}->{PKG_CK_no_predicate_service}` | `EVALUABILITY_MISSING` |
 | `CAPABILITY`; `CAPABILITY_RECORD(CAP(predicates))` | `ROW(CAPABILITY; ABI0,PKG_CK,E_t,D_t,T_admitted,Q_t[T_admitted])` | `{PKG_CK}->{PKG_CK[services:=PKG_CK.services minus {CapabilityDescriptor(CAP(predicates))}]}` | `EVALUABILITY_MISSING` |
 | `TRUST_POLICY`; `TRUST_POLICY_RECORD(TP)` | `ROW(TRUST_POLICY; ABI0,T_admitted)` | `{T_admitted}->{}` | `TRUST_ROOT_ABSENT` |
-| `TRUST_ROOT`; `TRUST_ROOT_RECORD(TR)` | `ROW(TRUST_ROOT; ABI0,ROOT_TR_t,T_admitted)` | `{ROOT_TR_t,T_admitted}->{T_absent}` | `TRUST_ROOT_ABSENT(TR)` |
+| `TRUST_ROOT`; `TRUST_ROOT_RECORD(TR)` | `ROW(TRUST_ROOT; ABI0,ROOT_TR_t,T_admitted)` | `{ROOT_TR_t,T_admitted}->{T_root_missing}` | `TRUST_ROOT_ABSENT(TR)` |
 | `CERTIFICATE`; `CERTIFICATE_RECORD(BCERT)` | `ROW(CERTIFICATE; ABI0,PKG_CK,BENV,R_b,T_b)` | `{PKG_CK,BENV}->{PKG_CK[certificates:={}]}` | `(NO_CERTIFICATE_ADMISSION,CONSISTENCY_UNKNOWN)` |
 | `MIGRATION`; `MIGRATION_RECORD(MK0)` | `ROW(MIGRATION; ABI0,PKG_evo_EOK,c0)` | `{PKG_evo_EOK}->{PKG_evo_EOK_no_m}` | `NO_MIGRATION(MK0)` |
 | `COMPATIBILITY_CLAIM`; `COMPATIBILITY_RECORD(CCK0)` | `ROW(COMPATIBILITY_CLAIM; ABI0,PKG_evo_EOK,R_c0)` | `{PKG_evo_EOK,R_c0}->{PKG_evo_EOK_no_c}` | `NO_COMPATIBILITY(CCK0)` |
@@ -4568,7 +4574,7 @@ definition of the finite maps `i[k]`, `Rminus[k]`, `Rplus[k]`, and
 | `TRACE_EVENT`; `TRACE_EVENT_RECORD(IDENTITY_OF(te0))` | `ROW(TRACE_EVENT; ABI0,ev0,te0)` | `{te0}->{}` | `MALFORMED` |
 | `SOURCE`; `SOURCE_RECORD(IDENTITY_OF(src0))` | `ROW(SOURCE; ABI0,src0)` | `{src0}->{}` | `MALFORMED` |
 | `AUTHORITY_REF`; `AUTHORITY_REF_RECORD(IDENTITY_OF(auth0))` | `ROW(AUTHORITY_REF; ABI0,auth0)` | `{auth0}->{}` | `MALFORMED` |
-| `EVIDENCE`; `EVIDENCE_RECORD(e0)` | `ROW(EVIDENCE; ABI0,e0,v0,vr0,i0,H0)` | `{e0,i0,H0}->{}` | `TRUTH_UNKNOWN` |
+| `EVIDENCE`; `EVIDENCE_RECORD(e0)` | `ROW(EVIDENCE; ABI0,e0,v0,vr0,i0,H0)` | `{e0,vr0,i0,H0}->{}` | `TRUTH_UNKNOWN` |
 | `REASON`; `REASON_RECORD(UnknownReason,IDENTITY_OF(u0))` | `ROW(REASON; ABI0,u0,VALUE(UNKNOWN,{},{u0}))` | `{u0,VALUE(UNKNOWN,{},{u0})}->{}` | `MALFORMED_RESULT(MALFORMED_CARRIER)` |
 | `CONFLICT`; `CONFLICT_RECORD(conflict0)` | `ROW(CONFLICT; ABI0,d,d_bad,conflict0)` | `{d_bad,conflict0}->{d_bad_signature,conflict1}` | `(CONFLICT_RECORD(conflict1),MALFORMED)` |
 <!-- K3S-MISSING-END -->
@@ -4591,6 +4597,24 @@ A(B_k) symmetric_difference A(V_k)=
   authoritativePairs(Rplus[k])
 missingStatus(q[k],V_k)=MISSING_EXPECTED[k]
 ```
+
+For a universe `U`, define
+`serviceDescriptors(s,U)={c in range(A(U)) | c=CapabilityDescriptor(_) and
+c.capability_key.service_key=s}` and
+`authoritativeServiceTargetCount(s,U)=|serviceDescriptors(s,U)|`.  For the
+`SERVICE` row, with `B_SERVICE=B_{SERVICE}` and `V_SERVICE=V_{SERVICE}`,
+`serviceDescriptors(SK(predicates),B_SERVICE)={CapabilityDescriptor(CAP(predicates))}`
+and `serviceDescriptors(SK(predicates),V_SERVICE)={}`.  Therefore the exact
+derived `ServiceIdentityRecord(SK(predicates))` target count is `1 -> 0`, and
+`recordAt(q[SERVICE],V_SERVICE)=ABSENT_REQUIRED_RECORD(q[SERVICE])`; removing
+only its derived carrier would not be a reconstruction.  For `TRUST_ROOT`,
+`T_root_missing.root_judgments` has no `TR` entry and the row contains no
+request, descriptor, certificate, or other record requiring `TR`; it is a
+genuine absent-record row, not a replacement by `TRUST_ROOT_ABSENT(TR)`.  For
+`EVIDENCE`, `vr0` is removed together with `e0`, `i0`, and `H0`, so the
+reconstructed row has zero occurrences of `e0` in every record or nested
+container.  These three row-local assertions are part of the preceding
+exhaustive equations.
 
 For `EXTRANEOUS_LEXICAL_BINDING`, `LIFECYCLE`, and `CONFLICT`, `V_k`
 additionally has exactly one occurrence of the displayed substituted request,
@@ -4736,10 +4760,12 @@ For `ij in {11,12,21,22}`, `A_piij` is the complete
 `ContractSpec[Delta]` whose key is
 `(owner(T_piij),coding.fixture.type-admission,local(T_piij),(1),TYPE_ADMISSION)`,
 owner layer and role are `Delta/TYPE_ADMISSION`, primary domain is the exact
-sort `Value`, codomain is `ValueAdmissionResult`, observation-query map and
-support are `{}`, and logical relation returns
-`VALUE_ADMITTED(T_piij,UNIT_piij)` exactly on `UNIT_piij` and
-`VALUE_NOT_ADMITTED(T_piij,v)` on every unequal supplied `v`.  Define the four
+sort `Value`, codomain is the abstract membership sort
+`{admitted,not_admitted}`, observation-query map and support are `{}`, and
+logical relation returns `admitted` exactly on `UNIT_piij` and `not_admitted`
+on every unequal supplied `v`.  `ValueAdmissionResult` is constructed only by
+the K2 value-admission request/result wrapper around this relation; it is not
+the codomain of a `ContractSpec`.  Define the four
 complete declarations
 
 ```text
@@ -4826,21 +4852,43 @@ literal admission ContractSpecs.  All four outcomes are exactly
 same complete package/member record set.  Separately, `O_1/O_2` yield exactly
 `(M_c,Y_c,K_c)`.
 
-Finally, let `d` and `d'` be independently constructed complete equal copies
-of the exact `DP(task_accepts)` declaration, and let `d_bad` have the same key
-but the unequal two-argument signature omitting `EvidenceStore`.  Presentations
-`[d,d']` and `[d',d]` coalesce to `d`; presentations `[d,d_bad]` and
-`[d_bad,d]` yield the identical one-key conflict set and `MALFORMED`.  No last-
-writer or package-order rule exists.
+Finally, let `d` be the complete `PredicateDeclaration(DP(task_accepts))`
+member of `PKG_CK`, and let `d'` be an independently constructed complete
+field-for-field equal copy.  Let `d_bad` have that same key but the unequal
+two-argument signature omitting `EvidenceStore`; all of its remaining fields
+are those of `d`.  Each duplicate presentation is embedded in the complete,
+dependency-closed owner/package-valid universe used by
+`U_CORE_DEFINITIONAL`: it includes `ABI0`, `PKG_CK`, its retained owner,
+certificate, validator, authority, model, declaration, binding, and service
+packages, plus `C_b,C_c,C_w,C_choice,E_b,E_c,E_w,E_choice`.  Thus the only
+difference between the equal and conflict presentations is equality versus
+inequality of the one exact declaration identity, rather than a missing
+owner, package member, type declaration, admission contract, or dependency.
 
 ```text
-U_DUPLICATE_EQUAL_FORWARD=K2_COMPOSE([ABI0,d,d'])
-U_DUPLICATE_EQUAL_REVERSE=K2_COMPOSE([ABI0,d',d])
-U_DUPLICATE_CONFLICT_FORWARD=K2_COMPOSE([ABI0,d,d_bad])
-U_DUPLICATE_CONFLICT_REVERSE=K2_COMPOSE([ABI0,d_bad,d])
-EXPECTED_DUPLICATE_EQUAL=(ABI_RECORD(ABI0),{recordIdentity(d)->d},
-                          WELL_FORMED)
-EXPECTED_DUPLICATE_CONFLICT=(ABI_RECORD(ABI0),{conflict0},MALFORMED)
+DUPLICATE_CLOSED_TAIL=[PKG_AWK,PKG_RVK,PKG_APK,PKG_ATK,PKG_AVK,
+  C_b,C_c,C_w,C_choice,E_b,E_c,E_w,E_choice]
+DUPLICATE_BASE=K2_COMPOSE([ABI0,PKG_CK] ++ DUPLICATE_CLOSED_TAIL)
+U_DUPLICATE_EQUAL_FORWARD=K2_COMPOSE(
+  [ABI0,PKG_CK,d'] ++ DUPLICATE_CLOSED_TAIL)
+U_DUPLICATE_EQUAL_REVERSE=K2_COMPOSE(
+  [ABI0,d',PKG_CK] ++ DUPLICATE_CLOSED_TAIL)
+U_DUPLICATE_CONFLICT_FORWARD=K2_COMPOSE(
+  [ABI0,PKG_CK,d_bad] ++ DUPLICATE_CLOSED_TAIL)
+U_DUPLICATE_CONFLICT_REVERSE=K2_COMPOSE(
+  [ABI0,d_bad,PKG_CK] ++ DUPLICATE_CLOSED_TAIL)
+EXPECTED_DUPLICATE_EQUAL=(
+  authoritative_map=A(DUPLICATE_BASE),
+  formation=WELL_FORMED,closure=CLOSED)
+EXPECTED_DUPLICATE_CONFLICT=(
+  authoritative_map=(A(DUPLICATE_BASE) minus
+    {DECLARATION_RECORD(DP(task_accepts))->d}) union
+    {CONFLICT_RECORD(conflict0)->conflict0},
+  formation=MALFORMED,closure=NOT_APPLICABLE)
+A(U_DUPLICATE_EQUAL_FORWARD)=A(U_DUPLICATE_EQUAL_REVERSE)=
+  EXPECTED_DUPLICATE_EQUAL.authoritative_map
+A(U_DUPLICATE_CONFLICT_FORWARD)=A(U_DUPLICATE_CONFLICT_REVERSE)=
+  EXPECTED_DUPLICATE_CONFLICT.authoritative_map
 ```
 
 The first two packet entries both yield exactly `EXPECTED_DUPLICATE_EQUAL`;
