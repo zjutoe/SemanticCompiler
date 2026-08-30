@@ -81,7 +81,7 @@ FieldId       = FIELD(field_atom)
 FieldValue    = BOOL_VALUE(Bool) | INT_VALUE(integer) |
                 ATOM_VALUE(field_value_atom)
 BehaviorValue = BEHAVIOR_ACCEPTED | BEHAVIOR_REJECTED |
-                BEHAVIOR_METRIC(integer) |
+                BEHAVIOR_METRIC(metric : FieldId, value : integer) |
                 BEHAVIOR_RESOLUTION(ContentIdentity) |
                 BEHAVIOR_CORRESPONDENCE(
                   finite map(FieldId -> FieldValue),
@@ -91,6 +91,8 @@ ArtifactBody =
   | STRUCTURED_BODY(finite map(FieldId -> FieldValue))
   | OPAQUE_BODY(ContentIdentity)
   | BEHAVIOR_BODY(finite map(SubjectId -> BehaviorValue))
+ArtifactBodyKind = TEXT_BODY_KIND | STRUCTURED_BODY_KIND |
+                   OPAQUE_BODY_KIND | BEHAVIOR_BODY_KIND
 
 ArtifactContent =
     TEXT_ARTIFACT(role : ArtifactRole, format : Format,
@@ -152,12 +154,16 @@ SubjectId = REQUEST_SUBJECT(subject_atom) | WORKLOAD_SUBJECT(subject_atom) |
             RESOLUTION_LANE(subject_atom) | CLIENT_PAIR(subject_atom)
 Coverage = COMPLETE | INCOMPLETE_SUBJECTS(nonempty finset(SubjectId))
 ObservationValue =
-    ABSENT | PRESENT | PRESENT_CONTENT(ArtifactContent) | PRESENT_FORMAT(Format) |
+    ABSENT | ROLE_MISMATCH(actual : ArtifactRole, required : ArtifactRole) |
+    PROJECTION_MISMATCH(actual : ArtifactBodyKind,
+                        required : ArtifactProjection) |
+    PRESENT | PRESENT_CONTENT(ArtifactContent) | PRESENT_FORMAT(Format) |
     PRESENT_SIZE(ByteSize) | PRESENT_FIELD(FieldValue) |
     ACCEPTED | REJECTED | METRIC_VALUE(integer) |
     RESOLUTION_VALUE(ContentIdentity) |
     CORRESPONDENCE_VALUE(finite map(FieldId -> FieldValue),
-                         finite map(FieldId -> FieldValue))
+                         finite map(FieldId -> FieldValue)) |
+    BEHAVIOR_CONFLICT(nonempty finset(BehaviorValue))
 
 ObservationSpec =
     ARTIFACT_VIEW(selector : ArtifactSelector,
@@ -190,21 +196,88 @@ ObservationRelation = EQUAL | ACCEPT_REJECT_EQUAL | NO_GREATER |
 ```
 
 Every `SubjectId` in a request/workload/lane/client domain must carry the
-matching tag.  An `ObservationResult` is admitted only when its result tag
-matches the spec tag, `spec_identity` is exact, all keys have the required
-sort, and its value constructors match the projection: `PRESENCE` permits
-only `ABSENT|PRESENT`, `CONTENT` only `ABSENT|PRESENT_CONTENT`, `FORMAT_ONLY`
-only `ABSENT|PRESENT_FORMAT`, `SIZE_ONLY` only `ABSENT|PRESENT_SIZE`, and
-`STRUCTURED_FIELD` only `ABSENT|PRESENT_FIELD`.  An artifact result is
-always `COMPLETE` and has the exact selected path set as its map domain; path
-selectors include selected absent paths as `ABSENT`, and role-only selectors
-range over the finite supplied map.  A subject/lane/correspondence result is
-`COMPLETE` iff its map domain is the exact declared subject domain.
-`INCOMPLETE_SUBJECTS(M)` requires `M` to be exactly the nonempty missing
-subject subset and the map domain to be the declared domain minus `M`.  The
-four non-artifact views read only matching `BEHAVIOR_ARTIFACT` tables from that
-same snapshot.  A missing declared subject yields `INCOMPLETE_SUBJECTS`, never
-a hidden lookup.
+matching tag.  Artifact selection is the following total equation, where
+`role(F[p])` is the total `artifact_role` projection:
+
+```text
+selector_domain(SELECT_PATHS(P),F) = P
+selector_domain(SELECT_ROLE(r),F) = {p in dom(F) | role(F[p])=r}
+selector_domain(SELECT_PATHS_WITH_ROLE(P,r),F) = P
+
+selected_value(SELECT_PATHS(_),projection,p,F) =
+  ABSENT                                      if p notin dom(F)
+  project(projection,F[p])                   otherwise
+selected_value(SELECT_ROLE(r),projection,p,F) =
+  project(projection,F[p])                   (domain already proves role=r)
+selected_value(SELECT_PATHS_WITH_ROLE(_,r),projection,p,F) =
+  ABSENT                                      if p notin dom(F)
+  ROLE_MISMATCH(role(F[p]),r)                 if role(F[p]) != r
+  project(projection,F[p])                   otherwise
+```
+
+`project(PRESENCE,a)=PRESENT`, `project(CONTENT,a)=PRESENT_CONTENT(a)`,
+`project(FORMAT_ONLY,a)=PRESENT_FORMAT(artifact_format(a))`, and
+`project(SIZE_ONLY,a)=PRESENT_SIZE(artifact_size(a))`.
+`project(STRUCTURED_FIELD(f),STRUCTURED_ARTIFACT(...,M))` is
+`PRESENT_FIELD(M[f])` when `f` is present and `ABSENT` otherwise; on any other
+artifact constructor it is
+`PROJECTION_MISMATCH(body_kind(artifact_body(a)),STRUCTURED_FIELD(f))`, where
+`body_kind` is the total tag projection.  This is rejected as an evaluation
+error by any criterion that needs a field value.
+
+An `ObservationResult` is admitted only when its result tag matches the spec
+tag, `spec_identity` is exact, all keys have the required sort, and its value
+constructors match the projection.  `PRESENCE` permits
+`ABSENT|ROLE_MISMATCH|PRESENT`; `CONTENT` permits
+`ABSENT|ROLE_MISMATCH|PRESENT_CONTENT`; `FORMAT_ONLY` permits
+`ABSENT|ROLE_MISMATCH|PRESENT_FORMAT`; `SIZE_ONLY` permits
+`ABSENT|ROLE_MISMATCH|PRESENT_SIZE`; and `STRUCTURED_FIELD` permits
+`ABSENT|ROLE_MISMATCH|PROJECTION_MISMATCH|PRESENT_FIELD`.  Its map domain is exactly
+`selector_domain(selector,F)`, so absent requested paths and present
+wrong-role paths are both explicit and distinct.
+
+For every non-artifact view and subject `s`, let `raw(F,s)` be the finite set
+of exact `BehaviorValue`s found at key `s` in every
+`BEHAVIOR_ARTIFACT(...,observations)` in `F`.  Define the view-specific
+candidate set and total aggregate:
+
+```text
+candidates(REQUEST_BEHAVIOR_VIEW(_),s,F) =
+  raw(F,s) intersect {BEHAVIOR_ACCEPTED,BEHAVIOR_REJECTED}
+candidates(WORKLOAD_METRIC_VIEW(_,m),s,F) =
+  {BEHAVIOR_METRIC(m,n) in raw(F,s)}
+candidates(DEPENDENCY_RESOLUTION_VIEW(_,_),s,F) =
+  {BEHAVIOR_RESOLUTION(c) in raw(F,s)}
+candidates(CLIENT_ADAPTER_VIEW(_),s,F) =
+  {BEHAVIOR_CORRESPONDENCE(L,R) in raw(F,s)}
+
+aggregate(V) = MISSING                          if V={}
+aggregate({BEHAVIOR_ACCEPTED}) = ACCEPTED
+aggregate({BEHAVIOR_REJECTED}) = REJECTED
+aggregate({BEHAVIOR_METRIC(m,n)}) = METRIC_VALUE(n)
+aggregate({BEHAVIOR_RESOLUTION(c)}) = RESOLUTION_VALUE(c)
+aggregate({BEHAVIOR_CORRESPONDENCE(L,R)}) = CORRESPONDENCE_VALUE(L,R)
+aggregate(V) = BEHAVIOR_CONFLICT(V)             otherwise
+```
+
+Because `raw` and `candidates` are sets, equal duplicate artifact claims
+coalesce and two or more unequal matching claims deterministically produce the
+same `BEHAVIOR_CONFLICT`, independent of artifact or package order.  A metric
+view selects only the exact requested `FieldId`; a differently keyed metric is
+nonmatching rather than silently used.  Request results permit only
+`ACCEPTED|REJECTED|BEHAVIOR_CONFLICT`; workload results only
+`METRIC_VALUE|BEHAVIOR_CONFLICT`; lane results only
+`RESOLUTION_VALUE|BEHAVIOR_CONFLICT`; and client results only
+`CORRESPONDENCE_VALUE|BEHAVIOR_CONFLICT`.
+
+For each of these four views, the result map contains exactly the declared
+subjects whose aggregate is not `MISSING`.  It is `COMPLETE` iff none is
+missing.  Otherwise `INCOMPLETE_SUBJECTS(M)` has the exact nonempty set
+`M={s in declared_domain | aggregate(candidates(view,s,F))=MISSING}` and the
+map domain is the declared domain minus `M`.  A conflict is a present map
+value, not missing coverage; any task criterion needing it returns the stable
+schema/conflict `Eval.ERROR`.  These equations exhaust every admitted view,
+subject, value constructor, absence, role mismatch, duplicate, and conflict.
 
 `EQUAL` is complete result equality.  `ACCEPT_REJECT_EQUAL` compares equal
 subject domains and exact `ACCEPTED`/`REJECTED` values.  `NO_GREATER` and
@@ -233,6 +306,35 @@ VerificationRecord = VERIFICATION_RECORD(
   observation : ObservationResult,
   evidence_refs : nonempty finset(EvidenceRef))
 
+ImplementationEvidence =
+    ABSTRACT_ACCEPTANCE_EVIDENCE(
+      contract_identity : ContractIdentity,
+      snapshot_identity : SnapshotIdentity,
+      certificate_key : CertificateKey)
+  | CONCRETE_IMPLEMENTATION_EVIDENCE(
+      contract_identity : ContractIdentity,
+      snapshot_identity : SnapshotIdentity,
+      implementation_identity : implementation_evidence_atom)
+  | DIMENSION_EVIDENCE_PENDING(
+      contract_identity : ContractIdentity,
+      snapshot_identity : SnapshotIdentity,
+      dimension : ProfileDimensionKey,
+      reason : UnknownReason)
+CodingEvidencePayload =
+    VERIFICATION_EVIDENCE(VerificationRecord)
+  | IMPLEMENTATION_PROFILE_EVIDENCE(ImplementationEvidence)
+CodingEvidenceEntry = EVIDENCE_ENTRY(
+  reference : EvidenceRef, payload : CodingEvidencePayload)
+AbstractCoverageResult = NO_ABSTRACT_RESULT |
+                         ABSTRACT_REASONING_RESULT(ReasoningResult)
+ImplementationCoverageSubject = IMPLEMENTATION_COVERAGE_SUBJECT(
+  contract_identity : ContractIdentity,
+  task : TaskSpec,
+  snapshot : RepositorySnapshot,
+  evidence_store : EvidenceStore,
+  task_result : Eval,
+  abstract_result : AbstractCoverageResult)
+
 Criterion =
     OBSERVATION_EQUALS(spec : ObservationSpec,
                        expected : ObservationResult)
@@ -255,7 +357,48 @@ TaskSpec = TASK(
 A `VerificationRecord` is admitted only when its observation has exact
 `spec.subject` identity, its evidence references bind the displayed evidence
 schema, and its fields have the displayed types.  It remains evidence, not a
-truth value.  Criterion admission additionally requires the obvious matching
+truth value.  The coding projection of a supplied K1 `EvidenceStore E` is an
+exact finite set `coding_entries(E)` of `CodingEvidenceEntry` values.  Entry
+equality is complete field equality.  Equal entries coalesce.  Grouping by
+`reference`, define the total result algebra and equation
+
+```text
+CodingEvidenceProjection =
+    EVIDENCE_MAP(finite map(EvidenceRef -> CodingEvidencePayload))
+  | EVIDENCE_CONFLICT(nonempty finset(EvidenceReferenceConflict))
+EvidenceReferenceConflict = EVIDENCE_REFERENCE_CONFLICT(
+  reference : EvidenceRef,
+  payloads : nonempty finset(CodingEvidencePayload))
+groups(E,e)={i.payload | i in coding_entries(E), i.reference=e}
+conflicts(E)={EVIDENCE_REFERENCE_CONFLICT(e,groups(E,e)) |
+              e in references(coding_entries(E)), |groups(E,e)|>1}
+coding_projection(E)=EVIDENCE_CONFLICT(conflicts(E)) if conflicts(E)!={}
+coding_projection(E)=EVIDENCE_MAP(
+  {e->the unique member of groups(E,e) |
+   e in references(coding_entries(E))})                 otherwise
+evidence_map(E)=M iff coding_projection(E)=EVIDENCE_MAP(M)
+```
+
+Thus two unequal payloads for one exact `EvidenceRef` produce one exact
+conflict member; any number of equal duplicates coalesces.  Consumers treat
+the `EVIDENCE_CONFLICT` branch as the exact schema/conflict `Eval.ERROR` and
+never select a map from it.  There is no first/last-record rule.
+
+Exact schema membership is total.  A `VERIFICATION_EVIDENCE(r)` entry is
+admitted only when its reference has
+`schema_binding=CS(EVIDENCE_SCHEMA,verification)`, its reference is a member
+of `r.evidence_refs`, and `r` is admitted.  An
+`IMPLEMENTATION_PROFILE_EVIDENCE(i)` entry is admitted only when its reference
+has `schema_binding=CS(EVIDENCE_SCHEMA,implementation_profile)` and every field
+of `i` is admitted.  A schema/payload mismatch, a referenced record omitting
+the indexing reference, an inadmitted payload, or an unequal same-reference
+payload is the exact evidence-schema/conflict evaluation error.  Foreign
+schema references are outside `coding_entries(E)` and cannot satisfy a coding
+predicate.  Thus membership, reference, schema, uniqueness, duplicate, and
+conflict behavior are finite and exact; an `EvidenceRef` still contains no
+truth, authority, consistency, or profile conclusion.
+
+Criterion admission additionally requires the obvious matching
 spec/result tag: `UNIVERSAL_OBSERVATION` has a request/workload view,
 `DEPENDENCY_REPRODUCIBLE` has a dependency-resolution view, and
 `ADAPTER_CORRESPONDS` has a client-adapter view and requires a
@@ -330,14 +473,21 @@ rules above and returns the unique `TERM_VALUE(ObservationResult)`; an
 inadmitted value produces the declared term error.  These functions are
 extensional and never prescribe a state transition.
 
-For current supplied snapshot `F`, `verification_passed(v,F,E)` selects only
-schema-valid `VerificationRecord`s in supplied `EvidenceStore E` whose spec is
-exactly `v` and whose snapshot identity is exactly `SNAPSHOT_IDENTITY(F)`.
-Wrong-snapshot records are nonmatching evidence, never success.  A malformed
-schema/reference or two matching decisive records with opposite status returns
-`Eval.ERROR`.  Otherwise any matching `FAIL` returns `FALSE`, any matching
-`PASS` returns `TRUE`, and no decisive match returns `UNKNOWN`; all matching
-evidence and inconclusive reasons are retained under K1 set semantics.
+For current supplied snapshot `F`, `verification_passed(v,F,E)` first requires
+the unique `evidence_map(E)`.  It selects exactly the map entries
+`(e,VERIFICATION_EVIDENCE(r))` satisfying all four equations
+`r.spec=v`, `r.snapshot_identity=SNAPSHOT_IDENTITY(F)`,
+`r.observation.spec_identity=v.subject`, and `e in r.evidence_refs`.
+Wrong-spec, wrong-snapshot, implementation-profile, and foreign-schema entries
+are nonmatching evidence, never success.  A malformed schema/reference or any
+`EVIDENCE_REFERENCE_CONFLICT` returns the exact `Eval.ERROR`.  Let `M` be the
+finite matching set.  If both a `PASS` and a `FAIL` occur in `M`, return the
+stable opposite-decisive-record conflict `Eval.ERROR`.  Otherwise a `FAIL`
+returns `VALUE(FALSE,refs(M),inconclusiveReasons(M))`; a `PASS` returns
+`VALUE(TRUE,refs(M),inconclusiveReasons(M))`; and no decisive record returns
+`VALUE(UNKNOWN,refs(M),missingOrInconclusiveReasons(v,F,M))`.  The last reason
+set is nonempty.  These cases are disjoint and exhaustive for every admitted
+finite store.
 
 `task_accepts(t,F,E)` is a direct extensional relation on its three supplied
 values.  It does not call or observe another binding.  It computes each of the
@@ -349,6 +499,22 @@ criteria and verification specs and repeated constructor kinds; the empty/
 empty task is K1 `TrueF` and returns `VALUE(TRUE,{},{})`.  This does not
 pretend that one K2 lower observation stands for a variable number of calls.  The direct
 definition is not an evaluator algorithm and adds no ambient access.
+
+`dependency_metadata_changed(X)` is total and returns true exactly when at
+least one `(p,e)` in `X` satisfies the following role equation:
+
+```text
+metadata_role(CREATED(new))      = artifact_role(new)=DEPENDENCY_METADATA
+metadata_role(DELETED(old))      = artifact_role(old)=DEPENDENCY_METADATA
+metadata_role(MODIFIED(old,new)) =
+  artifact_role(old)=DEPENDENCY_METADATA OR
+  artifact_role(new)=DEPENDENCY_METADATA
+dependency_metadata_changed(X) = ANY(metadata_role(e) | (_,e) in X)
+```
+
+The empty change set is false.  A modification from metadata to another role
+and a modification from another role to metadata are both true; neither side
+is silently preferred.
 
 The standard preservation and final-state patterns remain ordinary K1 terms:
 
@@ -435,8 +601,9 @@ arguments to these constructors.
 | `T(SubjectId)` | exact request/workload/lane/client subject tags | `{}` |
 | `T(BehaviorValue)` | exact five behavior-value constructors | `{DECLARATION(T(ContentIdentity)),DECLARATION(T(FieldId)),DECLARATION(T(FieldValue))}` |
 | `T(ArtifactBody)` | exact four tagged body-projection constructors | `{DECLARATION(T(ContentIdentity)),DECLARATION(T(FieldId)),DECLARATION(T(FieldValue)),DECLARATION(T(SubjectId)),DECLARATION(T(BehaviorValue))}` |
+| `T(ArtifactBodyKind)` | exact four artifact-body tag projections | `{}` |
 | `T(ArtifactContent)` | exact four tagged artifact constructors | `{DECLARATION(T(ArtifactRole)),DECLARATION(T(Format)),DECLARATION(T(ByteSize)),DECLARATION(T(ContentIdentity)),DECLARATION(T(FieldId)),DECLARATION(T(FieldValue)),DECLARATION(T(SubjectId)),DECLARATION(T(BehaviorValue))}` |
-| `T(ObservationValue)` | exact closed observation-value constructors | `{DECLARATION(T(ArtifactContent)),DECLARATION(T(Format)),DECLARATION(T(ByteSize)),DECLARATION(T(FieldId)),DECLARATION(T(FieldValue)),DECLARATION(T(ContentIdentity))}` |
+| `T(ObservationValue)` | exact closed observation-value constructors | `{DECLARATION(T(ArtifactRole)),DECLARATION(T(ArtifactBodyKind)),DECLARATION(T(ArtifactProjection)),DECLARATION(T(ArtifactContent)),DECLARATION(T(BehaviorValue)),DECLARATION(T(Format)),DECLARATION(T(ByteSize)),DECLARATION(T(FieldId)),DECLARATION(T(FieldValue)),DECLARATION(T(ContentIdentity))}` |
 | `T(RepositorySnapshot)` | finite maps `T(Path)->T(ArtifactContent)` | `{DECLARATION(T(Path)),DECLARATION(T(ArtifactContent))}` |
 | `T(SnapshotIdentity)` | exact `SNAPSHOT_IDENTITY` values | `{DECLARATION(T(RepositorySnapshot))}` |
 | `T(ChangeEntry)` | exact created/deleted/modified constructors | `{DECLARATION(T(ArtifactContent))}` |
@@ -450,6 +617,11 @@ arguments to these constructors.
 | `T(VerificationStatus)` | exactly `PASS`, `FAIL`, or `INCONCLUSIVE` | `{}` |
 | `T(VerificationSpec)` | exact `VERIFY` records | `{DECLARATION(T(ObservationSpec))}` |
 | `T(VerificationRecord)` | exact `VERIFICATION_RECORD` values | `{DECLARATION(T(VerificationSpec)),DECLARATION(T(SnapshotIdentity)),DECLARATION(T(VerificationStatus)),DECLARATION(T(ObservationResult))}` |
+| `T(ImplementationEvidence)` | exact abstract/concrete/pending profile-evidence constructors | `{DECLARATION(T(SnapshotIdentity))}` |
+| `T(CodingEvidencePayload)` | exact verification/profile payload variants | `{DECLARATION(T(VerificationRecord)),DECLARATION(T(ImplementationEvidence))}` |
+| `T(CodingEvidenceEntry)` | exact reference/payload entries | `{DECLARATION(T(CodingEvidencePayload))}` |
+| `T(AbstractCoverageResult)` | no result or one exact K2 reasoning-result carrier | `{}` |
+| `T(ImplementationCoverageSubject)` | exact profile subject fields | `{DECLARATION(T(TaskSpec)),DECLARATION(T(RepositorySnapshot)),DECLARATION(T(AbstractCoverageResult))}` |
 | `T(Criterion)` | exactly the eight criterion constructors and fields | `{DECLARATION(T(ObservationSpec)),DECLARATION(T(ObservationResult)),DECLARATION(T(ArtifactSelector)),DECLARATION(T(ByteSize)),DECLARATION(T(Format)),DECLARATION(T(ObservationRelation))}` |
 | `T(TaskSpec)` | finite typed task specifications | `{DECLARATION(T(Criterion)),DECLARATION(T(VerificationSpec))}` |
 | `T(ChangeKind)` | exactly created/deleted/modified kind tags | `{}` |
@@ -584,13 +756,14 @@ domain equals extensional `support`; no relation receives a binding,
 | `CS(PREDICATE_MEANING,observations_equal)` | Sigma / `PREDICATE_MEANING` | two results -> `VALUE(TRUE|FALSE,{},{})` by exact equality | `{}` |
 | `CS(PREDICATE_MEANING,verification_passed)` | Sigma / `PREDICATE_MEANING` | `(VerificationSpec,RepositorySnapshot,EvidenceStore) -> Eval` by exact spec/schema/current-snapshot matching and the total decisive/conflict rule in §2.2 | `{}` |
 | `CS(PREDICATE_MEANING,task_accepts)` | Sigma / `PREDICATE_MEANING` | `(TaskSpec,RepositorySnapshot,EvidenceStore) -> Eval` by the direct total extensional criterion/verification relation in §2.2 and K1 A1 | `{}` |
-| `CS(PREDICATE_MEANING,dependency_metadata_changed)` | Sigma / `PREDICATE_MEANING` | change set -> true iff at least one extensional entry has dependency-metadata artifact role | `{}` |
+| `CS(PREDICATE_MEANING,dependency_metadata_changed)` | Sigma / `PREDICATE_MEANING` | change set -> the exact total `CREATED(new)`, `DELETED(old)`, and `MODIFIED(old,new)` role equation in §2.2 | `{}` |
 | `CS(PREDICATE_MEANING,event_matches)` | Sigma / `PREDICATE_MEANING` | pattern/event value -> exact structural match; keys outside the pattern are false | `{}` |
 | `CS(PREDICATE_MEANING,event_occurred)` | Sigma / `PREDICATE_MEANING` | pattern/trace -> K1 `ANY_RESULT` over `event_matches(pattern,event_value)` in trace order-insensitive set aggregation | `{BINDING(DP(event_matches))->EVAL_RESULT_SEQUENCE}` |
 | `CS(PREDICATE_MEANING,refresh_scope)` | Sigma / `PREDICATE_MEANING` | event value -> true exactly for admitted `EK(dependency_refresh)` payloads whose selector is the exact `DEPENDENCY_LOCK` artifact role, false for every other admitted event | `{}` |
-| `CS(PROFILE_COVERAGE,implementation_evidence)` | Sigma / `PROFILE_COVERAGE` | exact `(TaskSpec,RepositorySnapshot,EvidenceStore,Eval)` coverage subject -> exact complete/incomplete/unknown profile result, with the supplied Eval required to equal direct `task_accepts` | `{BINDING(DP(task_accepts))->EVAL_RESULT}` |
+| `CS(PROFILE_COVERAGE,implementation_evidence)` | Sigma / `PROFILE_COVERAGE` | exact `ImplementationCoverageSubject -> ProfileResult` by the total dimension equation below, with the supplied `task_result` required to equal direct `task_accepts` | `{BINDING(DP(task_accepts))->EVAL_RESULT}` |
 | `CS(EVIDENCE_SCHEMA,none)` | Sigma / `EVIDENCE_SCHEMA` | explicit inputs -> only empty evidence-reference set admitted | `{}` |
-| `CS(EVIDENCE_SCHEMA,verification)` | Sigma / `EVIDENCE_SCHEMA` | EvidenceStore projection -> exactly schema-valid `VerificationRecord`/`EvidenceRef` pairs | `{DECLARATION(T(VerificationRecord))->TYPE_ADMISSION_FACT}` |
+| `CS(EVIDENCE_SCHEMA,verification)` | Sigma / `EVIDENCE_SCHEMA` | `EvidenceStore ->` exactly the unique map entries whose references and `VERIFICATION_EVIDENCE` payloads satisfy §2.1 | `{DECLARATION(T(CodingEvidenceEntry))->TYPE_ADMISSION_FACT}` |
+| `CS(EVIDENCE_SCHEMA,implementation_profile)` | Sigma / `EVIDENCE_SCHEMA` | `EvidenceStore ->` exactly the unique map entries whose references and `IMPLEMENTATION_PROFILE_EVIDENCE` payloads satisfy §2.1 | `{DECLARATION(T(CodingEvidenceEntry))->TYPE_ADMISSION_FACT}` |
 | `CS(ACCESS_BOUNDARY,A)` | Sigma / `ACCESS_BOUNDARY` | for each exact `A` named below, admits only its listed positional fields/facets and lower observations | exactly the same lower binding support as its meaning, otherwise `{}` |
 | `CS(UNKNOWN_BEHAVIOR,not_applicable)` | Sigma / `UNKNOWN_BEHAVIOR` | literal/function input -> `NOT_APPLICABLE` | `{}` |
 | `CS(UNKNOWN_BEHAVIOR,never)` | Sigma / `UNKNOWN_BEHAVIOR` | admitted predicate input -> no unknown result is in the relation | `{}` |
@@ -650,6 +823,73 @@ incomplete needed domain is unknown with a stable reason.  Type, schema,
 conflict, or undeclared-access failure is `Eval.ERROR`.  None consults a
 challenge label, expected mapping, service state, or ambient repository.
 
+Profile coverage is also a total extensional relation, not a prose checker.
+Write
+
+```text
+P_impl = PK(implementation_evidence)
+d_abs  = (P_impl,abstract_acceptance_evidence)
+d_conc = (P_impl,concrete_implementation_evidence)
+D_impl = {d_abs,d_conc}
+```
+
+For admitted subject
+`s=IMPLEMENTATION_COVERAGE_SUBJECT(cid,t,F,E,r,a)`, first construct the exact
+`evidence_map(E)` and exact direct `r_expected=task_accepts(t,F,E)`.  A map
+schema/reference/conflict error or `r != r_expected` returns
+`ProfileResult.EVALUATION_ERROR` with the corresponding stable nonempty error
+set.  If `r_expected=Eval.ERROR(R,_,_)`, return
+`ProfileResult.EVALUATION_ERROR(R)`.  Otherwise define:
+
+```text
+abstract_acceptance_evidence(e,s) iff
+  evidence_map(E)[e] = IMPLEMENTATION_PROFILE_EVIDENCE(
+    ABSTRACT_ACCEPTANCE_EVIDENCE(cid,SNAPSHOT_IDENTITY(F),c))
+  and e.schema_binding = CS(EVIDENCE_SCHEMA,implementation_profile)
+  and a = ABSTRACT_REASONING_RESULT(
+            ADMITTED_JUDGMENT(CONSISTENCY_SAT,c))
+
+concrete_implementation_evidence(e,s) iff
+  evidence_map(E)[e] = IMPLEMENTATION_PROFILE_EVIDENCE(
+    CONCRETE_IMPLEMENTATION_EVIDENCE(
+      cid,SNAPSHOT_IDENTITY(F),implementation_identity))
+  and e.schema_binding = CS(EVIDENCE_SCHEMA,implementation_profile)
+
+covered(s) =
+  ({d_abs}  if some e satisfies abstract_acceptance_evidence(e,s) else {})
+  union
+  ({d_conc} if some e satisfies concrete_implementation_evidence(e,s) else {})
+
+pending(s) = {d in D_impl |
+  some e has evidence_map(E)[e] = IMPLEMENTATION_PROFILE_EVIDENCE(
+    DIMENSION_EVIDENCE_PENDING(cid,SNAPSHOT_IDENTITY(F),d,u))}
+missing(s) = D_impl minus covered(s)
+```
+
+The evidence-reference set of `PROFILE_COMPLETE` is exactly all references
+witnessing the two predicates above.  If `missing(s)={}`, return that exact
+`PROFILE_COMPLETE`.  If `missing(s) intersect pending(s)` is nonempty, or
+`r_expected` is `VALUE(UNKNOWN,_,U)`, or `a` is
+`ABSTRACT_REASONING_RESULT(COMPLETED_INCONCLUSIVE(U))`, return
+`PROFILE_UNKNOWN(P_impl,U_profile)`, where `U_profile` is the nonempty exact
+union of the displayed task, reasoning, and pending reasons.  Otherwise return
+`PROFILE_INCOMPLETE(P_impl,missing(s))`; the set is necessarily nonempty and
+is the complete omitted-dimension set, never one selected omission.
+
+An `a=NO_ABSTRACT_RESULT`, a different admitted abstract result/certificate,
+or an abstract evidence payload with a different contract or snapshot is
+nonmatching and leaves `d_abs`
+in `missing`; a concrete payload with a different contract or snapshot is
+likewise nonmatching.  If such a mismatched payload uses the exact same
+reference as a matching payload, the store conflict rule returns evaluation
+error.  Any other admitted reasoning-result tag is decisive but covers no
+abstract dimension.  The symbolic profile service may itself return
+`REASONING_ERROR`; concrete invocation/protocol failure returns
+`EVALUATION_ERROR`; neither is produced by this coverage relation and neither
+is converted to profile unknown.  These equations cover every admitted
+subject field, both dimensions, complete, exact incomplete, unknown, and both
+failure families.
+
 ### 4.2 Semantic bindings and dependency closure
 
 | Binding(s) | Meaning / evidence / access / unknown / error ContractSpecs | Exact semantic roots beyond the declaration and these specs | Validation references |
@@ -693,7 +933,7 @@ the definitional path invents no certificate or validator dependency.
 
 The profile binding uses the exact profile/dimensions in section 3,
 `CS(PROFILE_COVERAGE,implementation_evidence)`,
-`CS(EVIDENCE_SCHEMA,verification)`, derived support on `task_accepts`,
+`CS(EVIDENCE_SCHEMA,implementation_profile)`, derived support on `task_accepts`,
 `evidence_pending`, `profile` evaluation error, and `profile` reasoning error.
 Its missing binding is open;
 checker absence gives no profile result.
@@ -795,7 +1035,7 @@ and no event occurs, permission succeeds but obligation fails.  When the
 condition is false and the event occurs, closed-world authorization fails.
 Evaluability of the guard, scope, or occurrence meaning grants no authority.
 
-Network prohibition uses `Forbidden(NETWORK_ANY)`.  Path-change permission
+Network prohibition uses `Forbidden(NET_ANY)`.  Path-change permission
 uses an exact `PATH_IN(PathSet)` pattern.  Release permission can be guarded by
 `verification_passed(spec,FINAL,EVIDENCE)`.  Test events are observational and do
 not enter K1 authorization compliance, but their payload does not substitute
@@ -858,9 +1098,11 @@ remain disjoint.
 
 ```text
 TP = (capknow.embedding,coding-fixture-policy,(1))
+ATP = (capknow.embedding,coding-authority-policy,(1))
 TR = (TP,coding,semantic-service-root,(1))
 TRB = (TP,coding,bounds-admission-root,(1))
 TRW = (TP,coding,witness-admission-root,(1))
+TRA = (ATP,coding,authority-admission-root,(1))
 
 SK(functions) = (CK,coding.service,functions,(1),FUNCTION_EVALUATION)
 CAP(functions)= (SK(functions),core_functions)
@@ -883,10 +1125,18 @@ CAP(validate_bounds) = (RVSK(bounds),validate_bundle_bounds)
 RVSK(witness) = (RVK,coding.validation,witness,(1),REASONING)
 CAP(validate_witness) = (RVSK(witness),validate_adapter_witness)
 
+APK = ((capknow.authority,coding-fixture-source),(1))
+ATK = ((capknow.attestation,coding-fixture-authority),(1))
+AVK = ((capknow.audit,coding-authority-validator),(1))
+AVSK = (AVK,coding.validation,authority,(1),AUTHORITY_VALIDATION)
+CAP(authority) = (AVSK,validate_coding_authority)
+
 BCERT = (PLUGIN_CERTIFICATE_ISSUER(CK),
          coding.certificate,bundle_bounds_unsat)
 WCERT = (PLUGIN_CERTIFICATE_ISSUER(AWK),
          coding.certificate,adapter_satisfying_witness)
+ACERT(z,i) = (PLUGIN_CERTIFICATE_ISSUER(ATK),
+              coding.authority.certificate,AUTHORITY_CERT_LOCAL(z,i))
 
 FUNCTION_TARGETS = {
   BINDING_TARGET(DF(snapshot_of)),
@@ -916,15 +1166,99 @@ ts_lt_100   = TASK({ARTIFACT_SIZE_LT(S_b,KIB(100))}, {})
 ts_ge_200   = TASK({ARTIFACT_SIZE_AT_LEAST(S_b,KIB(200))}, {})
 ```
 
-Every atom is sort-local logical data; `p_b` is not a host path.  Let `C_b` be the exact
-closed K1 Contract whose sole hard formula is
-`All({TA(ts_nonempty),TA(ts_lt_100),TA(ts_ge_200)})`, with a matching admitted
-authority adoption, empty grants/choices/profiles beyond mechanically required
-records, and all mechanically derived facets.  Here `TA` is the exact expansion
-in section 7.1.  Let `E_b` be the complete
-exact `SemanticEnvironment` mechanically required by `C_b`, let `D_b` be the
-complete `DependencyEnvironment` mechanically derived from `(C_b,E_b)` by K2
-§3.3, and define
+Every atom is sort-local logical data; `p_b` is not a host path.  Fix principal
+`fixture_principal` and exact clause
+
+```text
+f_b = All({TA(ts_nonempty),TA(ts_lt_100),TA(ts_ge_200)})
+cl_b = Attribute(coding.bounds.clause,SRC(b,1),Require(f_b))
+ad_b = Adopt(coding.bounds.clause,AUTH(b,1),fixture_principal)
+C_b = Contract(
+  AttributedClauses={cl_b},Adoptions={ad_b},Choices={},
+  ProfileRequirements={},PairRequirements={})
+```
+
+Here `TA` is the exact expansion in section 7.1 and `SRC/AUTH` are the finite
+authority records below.  To eliminate every environment alias, define the
+following one total finite constructor for the three closed fixtures.  For a
+finite Contract `C`, finite function/predicate key sets `F/Q`, finite literal
+value set `L`, finite profile set `P`, and finite admitted authority map `A`:
+
+```text
+types(C,F,Q,L,P) = the least finite set of T(n) containing every coding type
+  in C, every value in L, every signature in F union Q, and every profile
+  subject in P, closed under the exact nested-type rows of §3.2
+
+ENV(C,F,Q,L,P,A) = SemanticEnvironment(
+  abi_version=ABI0,
+  declarations=
+    {the exact §3.2 TypeDeclaration(t) | t in types(C,F,Q,L,P)} union
+    {LiteralDeclaration(type(v),v) | v in L} union
+    {the exact §3.3 declaration for k | k in F union Q},
+  pair_declarations=
+    {the exact §3.4 declaration for p | K1_PAIR(p) in required(C)},
+  bindings=
+    {the exact §3.2 literal SemanticBinding(type(v),v) | v in L} union
+    {the exact §4.2 ordinary SemanticBinding for k | k in F union Q},
+  pair_bindings=
+    {the exact retained definitional EventPairBinding(p) |
+       K1_PAIR(p) in required(C)},
+  profile_bindings={the exact §3.4/§4.2 ProfileBinding(p) | p in P},
+  authority_facts=A,
+  semantic_extensions={}, lexical_bindings={}, choice_bindings={},
+  mechanically_extracted_dependencies=required(CONTRACT_SUBJECT(C)),
+  chi_C={})
+
+MODELS(F,Q,L) =
+  {MC(BINDING_IDENTITY(k),local_name(k)) | k in F union Q} union
+  {MC(BINDING_IDENTITY(LiteralDeclaration(type(v),v).key),literal) |
+     v in L}
+
+contractFields(r) = the finite set containing exactly each value of every
+  `ContractSpec`-typed field displayed by K2 for record r; it is `{}` when r
+  has no such field
+
+RECORDS(C,F,Q,L,P,A) =
+  {ABI0,ENV(C,F,Q,L,P,A)} union
+  ENV(C,F,Q,L,P,A).declarations union
+  ENV(C,F,Q,L,P,A).pair_declarations union
+  ENV(C,F,Q,L,P,A).bindings union
+  ENV(C,F,Q,L,P,A).pair_bindings union
+  ENV(C,F,Q,L,P,A).profile_bindings union range(A) union
+  MODELS(F,Q,L) union
+  UNION(contractFields(r) | r in
+    ENV(C,F,Q,L,P,A).declarations union
+    ENV(C,F,Q,L,P,A).bindings union
+    ENV(C,F,Q,L,P,A).pair_bindings union
+    ENV(C,F,Q,L,P,A).profile_bindings union MODELS(F,Q,L))
+```
+
+`contractFields` is a field projection, not reachability or a prose closure;
+for example it returns the admitting domain for a `TypeDeclaration`, the five
+meaning/evidence/access/unknown/error contracts for a `SemanticBinding`, every
+contract in an occurrence bundle for an `EventPairBinding`, and the seven
+coverage/evidence/unknown/error fields for a `ProfileBinding`.  All
+comprehensions range over the displayed finite sets and select the unique
+records already defined field-by-field in §§3-4; this is an extensional record
+equation, not “the required environment” shorthand.  Model contracts and
+services remain separate package records exactly as K2 requires.  For bounds,
+
+```text
+F_b={DF(snapshot_of)}
+Q_b={DP(task_accepts)}
+L_b={ts_nonempty:T(TaskSpec),ts_lt_100:T(TaskSpec),
+     ts_ge_200:T(TaskSpec)}
+P_b={}
+E_b^0=ENV(C_b,F_b,Q_b,L_b,P_b,{})
+```
+
+The authority construction below yields exact binding `AFB(b,1)` and final
+`E_b=ENV(C_b,F_b,Q_b,L_b,P_b,{AF(b,1)->AFB(b,1)})`.  Let `D_b` be exactly
+`DependencyEnvironment(CONTRACT_SUBJECT(C_b),Omega_b)` under the K2 §3.3
+field equations in the finite universe
+`Omega_b=RECORDS(C_b,F_b,Q_b,L_b,P_b,{AF(b,1)->AFB(b,1)}) union
+AUTH_LOOKUPS({(b,1)})`; no
+dependency field is supplied.  Define
 
 ```text
 J_b = ENVIRONMENT_JUDGMENT_TARGET(
@@ -951,10 +1285,35 @@ f_c_d = Atom(SP(dependency_metadata_changed),
                    L(T(RepositorySnapshot),F_c)))
 ```
 
-Let `C_c` be the exact closed Contract with hard formulas
-`{Require(f_c_o),Require(f_c_d)}`, ABI-issued source/authority adoption, and no
-other clauses, grants, choices, pairs, or profiles.  Let `E_c` and `D_c` be its exact
-derived semantic and dependency environments and define
+Define the exact two-clause Contract and its admission stages:
+
+```text
+cl_c1 = Attribute(coding.confluence.observation,SRC(c,1),Require(f_c_o))
+cl_c2 = Attribute(coding.confluence.change,SRC(c,2),Require(f_c_d))
+ad_c1 = Adopt(coding.confluence.observation,AUTH(c,1),fixture_principal)
+ad_c2 = Adopt(coding.confluence.change,AUTH(c,2),fixture_principal)
+C_c = Contract(
+  AttributedClauses={cl_c1,cl_c2},Adoptions={ad_c1,ad_c2},Choices={},
+  ProfileRequirements={},PairRequirements={})
+F_c_keys={DF(observe),DF(changes_between)}
+Q_c={DP(observations_equal),DP(dependency_metadata_changed)}
+L_c={s_c:T(ObservationSpec),P_c:T(RepositorySnapshot),
+     F_c:T(RepositorySnapshot),O_c:T(ObservationResult)}
+P_c_keys={}
+E_c^0=ENV(C_c,F_c_keys,Q_c,L_c,P_c_keys,{})
+E_c^1=ENV(C_c,F_c_keys,Q_c,L_c,P_c_keys,
+          {AF(c,1)->AFB(c,1)})
+E_c=ENV(C_c,F_c_keys,Q_c,L_c,P_c_keys,
+        {AF(c,1)->AFB(c,1),AF(c,2)->AFB(c,2)})
+D_c=DependencyEnvironment(CONTRACT_SUBJECT(C_c),Omega_c)
+Omega_c=RECORDS(C_c,F_c_keys,Q_c,L_c,P_c_keys,
+  {AF(c,1)->AFB(c,1),AF(c,2)->AFB(c,2)}) union
+  AUTH_LOOKUPS({(c,1),(c,2)})
+```
+
+`Omega_c` is the displayed literal finite record universe.  Its dependency
+environment fields are therefore the exact K2 recomputation, not a caller
+list.  Define
 
 ```text
 J_c = ENVIRONMENT_JUDGMENT_TARGET(
@@ -989,16 +1348,206 @@ EVIDENCE_w = {}
 E_witness = {}
 ```
 
-Let `C_w` be exactly
-`Contract(Hard={Require(OBS_EQ(s_w)),Require(TA(t_w))},
-ProfileRequirements={PK(implementation_evidence)})`, with exact ABI-issued
-source/authority adoption, no choices, grants, or pair requirements.  Let `E_w`, `D_w`, and
-`J_w=ENVIRONMENT_JUDGMENT_TARGET(CONSISTENCY,(C_w),semanticIdentity(E_w))`
-be the exact derived records.  Fix one admitted abstract outcome
+Define the exact attributed/adopted Contract and environments:
+
+```text
+f_w1 = OBS_EQ(s_w)
+f_w2 = TA(t_w)
+cl_w1 = Attribute(coding.adapter.preservation,SRC(w,1),Require(f_w1))
+cl_w2 = Attribute(coding.adapter.acceptance,SRC(w,2),Require(f_w2))
+ad_w1 = Adopt(coding.adapter.preservation,AUTH(w,1),fixture_principal)
+ad_w2 = Adopt(coding.adapter.acceptance,AUTH(w,2),fixture_principal)
+C_w = Contract(
+  AttributedClauses={cl_w1,cl_w2},Adoptions={ad_w1,ad_w2},Choices={},
+  ProfileRequirements={PK(implementation_evidence)},PairRequirements={})
+F_w_keys={DF(snapshot_of),DF(observe)}
+Q_w={DP(observations_equal),DP(task_accepts)}
+L_w={s_w:T(ObservationSpec),t_w:T(TaskSpec)}
+P_w_keys={PK(implementation_evidence)}
+E_w^0=ENV(C_w,F_w_keys,Q_w,L_w,P_w_keys,{})
+E_w^1=ENV(C_w,F_w_keys,Q_w,L_w,P_w_keys,
+          {AF(w,1)->AFB(w,1)})
+E_w=ENV(C_w,F_w_keys,Q_w,L_w,P_w_keys,
+        {AF(w,1)->AFB(w,1),AF(w,2)->AFB(w,2)})
+D_w=DependencyEnvironment(CONTRACT_SUBJECT(C_w),Omega_w)
+Omega_w=RECORDS(C_w,F_w_keys,Q_w,L_w,P_w_keys,
+  {AF(w,1)->AFB(w,1),AF(w,2)->AFB(w,2)}) union
+  AUTH_LOOKUPS({(w,1),(w,2)})
+J_w=ENVIRONMENT_JUDGMENT_TARGET(CONSISTENCY,(C_w),semanticIdentity(E_w))
+```
+
+`Omega_w` is the displayed finite universe.  Fix one admitted abstract outcome
 `O_w=(P_w,TRACE_w,F_w,EVIDENCE_w)` with no controlled events, exact
 Contract-derived `chi_C={}`, direct task/preservation results equal to
 `VALUE(TRUE,E_witness,{})`, and evidence refs admitted by their displayed
 schemas.  `O_w` is finite semantic data, not a patch or construction method.
+
+The five normative adoptions above are closed by the following finite K2
+authority packet.  There is no `ABI-issued authority` shorthand.  Define:
+
+```text
+I_A={(b,1),(c,1),(c,2),(w,1),(w,2)}
+clause(b,1)=cl_b
+clause(c,1)=cl_c1   clause(c,2)=cl_c2
+clause(w,1)=cl_w1   clause(w,2)=cl_w2
+clause_id(b,1)=coding.bounds.clause
+clause_id(c,1)=coding.confluence.observation
+clause_id(c,2)=coding.confluence.change
+clause_id(w,1)=coding.adapter.preservation
+clause_id(w,2)=coding.adapter.acceptance
+base(b,1)=E_b^0
+base(c,1)=E_c^0     base(c,2)=E_c^0
+base(w,1)=E_w^0     base(w,2)=E_w^0
+
+SRC(z,i)=SourceRef(
+  issuer=PLUGIN_ISSUER(APK),source_kind=AUTHENTICATED_FIXTURE_INSTRUCTION,
+  stable_source_identity=CODING_SOURCE(z,i),
+  provenance_facts={AUTHENTICATED_BY(APK),
+                    CLAUSE_LOCAL_IDENTITY(clause_id(z,i))})
+AUTH(z,i)=AuthorityRef(
+  owner=PLUGIN_ISSUER(APK),authority_namespace=coding.fixture,
+  stable_attestation_identity=CODING_AUTHORITY(z,i))
+AF(z,i)=AuthorityFactKey(
+  AUTH(z,i),SRC(z,i),fixture_principal,REQUIRE)
+AE_REF(z,i)=EvidenceRef(
+  PLUGIN_ISSUER(ATK),coding.authority.attestation,
+  AUTHORITY_EVIDENCE_LOCAL(z,i),AREQUIRED.contract_key)
+ATTEST(z,i)=AUTHORITY_ATTESTATION_VALUE(
+  authority_ref=AUTH(z,i),source_ref=SRC(z,i),
+  principal=fixture_principal,normative_role=REQUIRE,
+  clause_identity=IDENTITY_OF(clause(z,i)))
+AC(z,i)=AuthorityFactCandidate(
+  authority_fact_key=AF(z,i),admission_subject_data=ATTEST(z,i),
+  offered_evidence_refs={AE_REF(z,i)})
+```
+
+The four service contracts are exact `ContractSpec[Service]` records:
+
+```text
+ASOUND.key=(AVK,coding.authority.contract,sound,(1),SOUND_FRAGMENT)
+ACOMPLETE.key=(AVK,coding.authority.contract,complete,(1),COMPLETE_FRAGMENT)
+AREQUIRED.key=(AVK,coding.authority.contract,evidence,(1),REQUIRED_EVIDENCE)
+AFAILURE.key=(AVK,coding.authority.contract,failure,(1),
+              SERVICE_FAILURE_BEHAVIOR)
+```
+
+All four have owner `AVK`, Service layer, their displayed role, and empty
+observation-query maps.  `ASOUND` and `ACOMPLETE` have primary domain
+`AuthorityFactCandidate`, codomain `IN_FRAGMENT|OUTSIDE_FRAGMENT`, and are
+`IN_FRAGMENT` exactly for the five candidates `AC(z,i)`; the independent K2
+request-formation checks separately require the exact target-excluded
+environment, dependency environment, and target displayed below.
+`AREQUIRED` has primary domain `(AuthorityFactCandidate,typed attestation
+payload,finset(EvidenceRef))` and admits exactly
+`(AC(z,i),ATTEST(z,i),{AE_REF(z,i)})` for `(z,i) in I_A`.
+`AFAILURE` admits exactly the K2 authority-validation `REASONING_ERROR` and
+interface-failure projections.  Their logical relations have no other branch;
+their supports are empty because every distinction is in primary input.
+
+For every `(z,i) in I_A`, define without omission:
+
+```text
+baseRecords(b,1)=RECORDS(C_b,F_b,Q_b,L_b,P_b,{})
+baseRecords(c,1)=baseRecords(c,2)=
+  RECORDS(C_c,F_c_keys,Q_c,L_c,P_c_keys,{})
+baseRecords(w,1)=baseRecords(w,2)=
+  RECORDS(C_w,F_w_keys,Q_w,L_w,P_w_keys,{})
+Omega_A(z,i)=baseRecords(z,i) union
+  {SRC(z,i),AUTH(z,i),AE_REF(z,i),
+   ASOUND,ACOMPLETE,AREQUIRED,AFAILURE}
+DA(z,i)=DependencyEnvironment(
+  AUTHORITY_ADMISSION_SUBJECT(AC(z,i),base(z,i)),Omega_A(z,i))
+JA(z,i)=ENVIRONMENT_JUDGMENT_TARGET(
+  AUTHORITY_FACT_ADMISSION,(AC(z,i)),semanticIdentity(base(z,i)))
+UA(z,i)=SERVICE_USE_TRUST_TARGET(
+  CAP(authority),AUTHORITY_FACT_ADMISSION,
+  ENVIRONMENT_USE(AUTHORITY_FACT_ADMISSION,(AC(z,i))),
+  semanticIdentity(base(z,i)))
+AA(z,i)=AUTHORITY_TRUST_TARGET(AF(z,i))
+```
+
+Each `Omega_A(z,i)` is the displayed finite fact-free record set.  Capability,
+root, request, envelope, validation request, admission, result, and binding
+records are deliberately outside the subject dependency universe and are
+supplied separately below; including any of them in proper subject closure
+would be a cycle/error.  No `Omega_A(z,i)` contains an authority-fact binding.
+K2 §3.3 therefore fixes every field of each `DA`:
+its syntax roots are the exact `required(AUTHORITY_ADMISSION_SUBJECT(...))`,
+its subject roots contain the displayed base environment, its association and
+proper closures are the least reachable sets, its validation-reference set is
+empty, and `AUTHORITY_FACT(AF(z,i))` is absent from all of them.
+
+The complete `CapabilityDescriptor(CAP(authority))` has ABI `ABI0`, plugin
+`AVK`, role `AUTHORITY_VALIDATION`, class
+`COMPLETE_FOR_DECLARED_FRAGMENT`, judgments `{AUTHORITY_FACT_ADMISSION}`, exact
+targets `{JA(z,i)|(z,i) in I_A}`, fragments `ASOUND/ACOMPLETE`, dependency
+scope `UNION(DA(z,i).transitive_dependency_closure)`, required evidence
+`AREQUIRED`, roots `{TRA}`, and failure contract `AFAILURE`; its proper
+dependencies and closure are the exact K2 derivation.
+
+```text
+ROOT_A=TrustRootRecord(
+  trust_root_key=TRA,owner=EMBEDDING_POLICY_PRODUCER(ATP),
+  trusted_validators={CAP(authority)},
+  permitted_certificate_kinds={AUTHORITY_FACT_ATTESTATION},
+  permitted_targets={UA(z,i)|(z,i) in I_A} union
+                    {AA(z,i)|(z,i) in I_A},
+  adoption=V0_EXTERNAL_TRUST_PREMISE)
+T_A=TrustEnvironment(
+  trust_policy_key=ATP,policy_owner=EMBEDDING_POLICY_PRODUCER(ATP),
+  root_judgments={TRA->TRUST_ROOT_ADMITTED(ROOT_A)})
+RA(z,i)=AuthorityAdmissionRequest(
+  abi_version=ABI0,candidate=AC(z,i),
+  environment_without_fact=base(z,i),trust_environment=T_A,
+  complete_dependencies=DA(z,i),capability_target=JA(z,i),
+  capability_key=CAP(authority))
+AENV(z,i)=CertificateEnvelope(
+  certificate_key=ACERT(z,i),
+  certificate_kind=AUTHORITY_FACT_ATTESTATION,
+  request_binding=RA(z,i),subjects=(AC(z,i)),environment=base(z,i),
+  capability_key=CAP(authority),fragment=ASOUND,dependencies=DA(z,i),
+  claimed_conclusion=AUTHORITY_FACT_ADMITTED(AF(z,i),ACERT(z,i)),
+  validator_key=CAP(authority),trust_root_key=TRA,
+  abstraction_class=SYMBOLIC,payload=ATTEST(z,i),
+  evidence_refs={AE_REF(z,i)})
+```
+
+K2 derives `certificateValidationRequest(AENV(z,i))` with validator role
+`AUTHORITY_VALIDATION`, target `JA(z,i)`, receiving rule
+`RECEIVE_AUTHORITY_FACT`, service-use target `UA(z,i)`, and certificate target
+`AA(z,i)`.  Its sole successful chain is
+
+```text
+AADMIT(z,i)=CertificateAdmission.ADMITTED(
+  ACERT(z,i),AUTHORITY_FACT_ADMITTED(AF(z,i),ACERT(z,i)))
+ARES(z,i)=AuthorityAdmissionResult.AUTHORITY_FACT_ADMITTED(
+  AF(z,i),ACERT(z,i))
+AADMIT(z,i) -> ARES(z,i)
+             -> AFB(z,i)=AuthorityFactBinding(AF(z,i),{ACERT(z,i)})
+AUTH_LOOKUPS(S)={ASOUND,ACOMPLETE,AREQUIRED,AFAILURE,
+  CapabilityDescriptor(CAP(authority)),ServiceIdentityRecord(AVSK),ROOT_A,T_A}
+  union {SRC(z,i),AUTH(z,i),AE_REF(z,i),RA(z,i),AENV(z,i),
+         AADMIT(z,i),ARES(z,i),AFB(z,i) | (z,i) in S}
+```
+
+The five candidates are admitted independently against their fact-free base
+environments; the singleton receiving maps are then composed by exact
+authority-map union to form the displayed final `E_b/E_c/E_w`.  This avoids
+self-support and a chain through a previous validator.  For every candidate,
+the validation-filtered subject producer set is exactly
+`{PLUGIN_PRODUCER(CK),PLUGIN_PRODUCER(APK),PLUGIN_PRODUCER(ATK),
+ABI_PRODUCER(ABI0)}`; `PLUGIN_PRODUCER(AVK)` and
+`EMBEDDING_POLICY_PRODUCER(ATP)` are outside it and distinct from the
+certificate producer.  After composition, each reasoning-subject producer
+set remains exactly
+`{PLUGIN_PRODUCER(CK),PLUGIN_PRODUCER(APK),PLUGIN_PRODUCER(ATK),
+ABI_PRODUCER(ABI0)}`: validation filtering excludes `AVK/ATP`, and the
+received binding retains only its independently admitted `ATK` certificate
+key.  The separate
+bounds/confluence/witness validators and `TP` roots below are therefore also
+producer-independent.  Every adopted tuple now has an exact source,
+authority, candidate, request, capability, certificate, envelope, root scope,
+validation, result, reception, and final binding.
 
 | Capability | Class and supported targets/judgments | Exact fragment and dependency scope | Required root/failure contract |
 |---|---|---|---|
@@ -1010,6 +1559,7 @@ schemas.  `O_w` is finite semantic data, not a patch or construction method.
 | `CAP(witness)` | `PARTIAL_SYMBOLIC_REASONING`; `{CONSISTENCY}`; supported targets exactly `{J_w}` | sound `CS(SOUND_FRAGMENT,adapter_witness)`, no complete fragment; dependency scope exactly equals `D_w.transitive_dependency_closure` | nonempty `{TRW}` and the same exact evidence/failure contracts |
 | `CAP(validate_bounds)` | `COMPLETE_FOR_DECLARED_FRAGMENT`; `{CONSISTENCY}`; supported targets exactly `{J_b}` | the same exact bounds sound/complete fragments; dependency scope exactly equals `D_b.transitive_dependency_closure` | nonempty `{TRB}` and the same exact evidence/failure contracts; producer `PLUGIN_PRODUCER(RVK)` |
 | `CAP(validate_witness)` | `PARTIAL_SYMBOLIC_REASONING`; `{CONSISTENCY}`; supported targets exactly `{J_w}` | sound `CS(SOUND_FRAGMENT,adapter_witness)`, no complete fragment; dependency scope exactly equals `D_w.transitive_dependency_closure` | nonempty `{TRW}` and the same exact evidence/failure contracts; producer `PLUGIN_PRODUCER(RVK)` |
+| `CAP(authority)` | `COMPLETE_FOR_DECLARED_FRAGMENT`; `{AUTHORITY_FACT_ADMISSION}`; supported targets exactly `{JA(z,i)|(z,i) in I_A}` | exact `ASOUND/ACOMPLETE`; dependency scope is the exact union of the five `DA(z,i)` closures | nonempty `{TRA}`; exact `AREQUIRED/AFAILURE`; producer `PLUGIN_PRODUCER(AVK)` |
 
 Every descriptor also has exact ABI/plugin/service identity, nonempty target
 set, derived proper dependencies/closure, and, only when it targets a binding,
@@ -1098,8 +1648,9 @@ complete `CertificateValidationRequest` with validator role `REASONING`, target
 certificate-admission targets, and the same environments/dependencies.
 
 The exact validation-filtered subject producer set is
-`{PLUGIN_PRODUCER(CK),ABI_PRODUCER(ABI0)}`: `CK` owns the coding meanings and
-ABI0 owns the fixed source/authority carriers.  The certificate producer is
+`{PLUGIN_PRODUCER(CK),PLUGIN_PRODUCER(APK),PLUGIN_PRODUCER(ATK),
+ABI_PRODUCER(ABI0)}`,
+the recomputed final `C_b/E_b` set.  The certificate producer is
 `PLUGIN_PRODUCER(CK)`, the validator producer is
 `PLUGIN_PRODUCER(RVK)`, and the root producer is
 `EMBEDDING_POLICY_PRODUCER(TP)`; all K2-required inequalities therefore hold.
@@ -1131,19 +1682,75 @@ abstraction `ABSTRACT`, payload `AdapterWitness`, and evidence refs exactly
 Its derived validation request has target `J_w`, validator role `REASONING`,
 receiving rule `RECEIVE_REASONING_JUDGMENT`, and both exact trust targets.  Its
 validation-filtered subject producer set is again
-`{PLUGIN_PRODUCER(CK),ABI_PRODUCER(ABI0)}`; certificate producer
+`{PLUGIN_PRODUCER(CK),PLUGIN_PRODUCER(APK),PLUGIN_PRODUCER(ATK),
+ABI_PRODUCER(ABI0)}`;
+certificate producer
 `PLUGIN_PRODUCER(AWK)`, validator producer `PLUGIN_PRODUCER(RVK)`, and root
 producer `EMBEDDING_POLICY_PRODUCER(TP)` are pairwise distinct from the
 subject as K2 requires.  Only
 `CertificateAdmission.ADMITTED(WCERT,CONSISTENCY_SAT)` yields
 `ReasoningResult.ADMITTED_JUDGMENT(CONSISTENCY_SAT,WCERT)`.  The separate
-profile request may still return `PROFILE_INCOMPLETE`.
+profile request is the following complete record, not an asserted outcome:
+
+```text
+e_abs_w=EvidenceRef(
+  PLUGIN_ISSUER(AWK),coding.implementation-profile,adapter_abstract_accepted,
+  CS(EVIDENCE_SCHEMA,implementation_profile))
+i_abs_w=EVIDENCE_ENTRY(
+  e_abs_w,IMPLEMENTATION_PROFILE_EVIDENCE(
+    ABSTRACT_ACCEPTANCE_EVIDENCE(
+      IDENTITY_OF(C_w),SNAPSHOT_IDENTITY(F_w),WCERT)))
+u_pending_abs_w=UnknownReason(
+  PLUGIN_ISSUER(AWK),coding.implementation-profile.pending,
+  (IDENTITY_OF(C_w),d_abs))
+i_pending_abs_w=EVIDENCE_ENTRY(
+  e_abs_w,IMPLEMENTATION_PROFILE_EVIDENCE(
+    DIMENSION_EVIDENCE_PENDING(
+      IDENTITY_OF(C_w),SNAPSHOT_IDENTITY(F_w),d_abs,u_pending_abs_w)))
+coding_entries(H_w)={i_abs_w}
+r_task_w=VALUE(TRUE,{}, {})
+r_abs_w=ABSTRACT_REASONING_RESULT(
+  ReasoningResult.ADMITTED_JUDGMENT(CONSISTENCY_SAT,WCERT))
+s_profile_w=IMPLEMENTATION_COVERAGE_SUBJECT(
+  IDENTITY_OF(C_w),t_w,F_w,H_w,r_task_w,r_abs_w)
+U_profile_w=SERVICE_USE_TRUST_TARGET(
+  CAP(profile),PROFILE_COVERAGE,
+  PROFILE_USE(PK(implementation_evidence)),semanticIdentity(E_w))
+ROOT_PROFILE_W=TrustRootRecord(
+  trust_root_key=TR,owner=EMBEDDING_POLICY_PRODUCER(TP),
+  trusted_validators={CAP(profile)},
+  permitted_certificate_kinds={PROFILE_COVERAGE_EVIDENCE},
+  permitted_targets={U_profile_w},adoption=V0_EXTERNAL_TRUST_PREMISE)
+T_profile_w=TrustEnvironment(
+  trust_policy_key=TP,policy_owner=EMBEDDING_POLICY_PRODUCER(TP),
+  root_judgments={TR->TRUST_ROOT_ADMITTED(ROOT_PROFILE_W)})
+Q_profile_w=ProfileRequest(
+  abi_version=ABI0,profile_key=PK(implementation_evidence),
+  semantic_environment=E_w,trust_environment=T_profile_w,
+  coverage_subject=s_profile_w,
+  capability_target=PROFILE_TARGET(PK(implementation_evidence)),
+  capability_key=CAP(profile))
+P_w_result=PROFILE_INCOMPLETE(
+  PK(implementation_evidence),
+  {(PK(implementation_evidence),concrete_implementation_evidence)})
+```
+
+`abstract_acceptance_evidence(e_abs_w,s_profile_w)` holds, no entry satisfies
+`concrete_implementation_evidence`, there is no pending marker, and the exact
+missing set is the singleton displayed in `P_w_result`.  Therefore
+`expectedProfile(Q_profile_w,E_w)=P_w_result`, which replaces invocability with
+`COMPLETED(P_w_result)`.  Adding a matching concrete evidence entry gives
+`PROFILE_COMPLETE`; adding only a pending concrete entry gives
+`PROFILE_UNKNOWN`; a conflicting entry or unequal supplied task result gives
+`EVALUATION_ERROR`; a symbolic service failure gives `REASONING_ERROR` and no
+profile judgment.
 
 ### 6.3 Trust and lifecycle
 
-`TP`, `TR`, `TRB`, and `TRW` are embedding-policy identities, not plugin
-records.  Their exact admitted `TrustRootRecord`s all have owner
-`EMBEDDING_POLICY_PRODUCER(TP)` and adoption `V0_EXTERNAL_TRUST_PREMISE`.
+`TP/ATP` and `TR/TRB/TRW/TRA` are embedding-policy identities, not plugin
+records.  The first three roots have owner `EMBEDDING_POLICY_PRODUCER(TP)`;
+`TRA` has owner `EMBEDDING_POLICY_PRODUCER(ATP)`; every root has adoption
+`V0_EXTERNAL_TRUST_PREMISE`.
 The permitted target family for `TR` consists only of ordinary service-use
 targets of `CAP(functions)`, `CAP(predicates)`, `CAP(profile)`, and
 `CAP(confluence)` for their displayed judgments, `ServiceUseSubject`s, and
@@ -1159,6 +1766,12 @@ and `ROOT_TR_c`; it contains no wildcard or unused target.  `TRB` lists exactly 
 is exactly that enumeration and nonempty.  No wildcard is permitted.  Every
 root producer is independent of its complete semantic subject, provider,
 validator, and certificate producer set.
+
+`TRA` is exactly `ROOT_A` and has only the ten targets and five certificate
+subjects enumerated by `UA/AA`; it permits only `CAP(authority)` and
+`AUTHORITY_FACT_ATTESTATION`.  It never appears in a coding evaluator,
+bounds, confluence, witness, or profile request.  Conversely `TR/TRB/TRW`
+cannot admit an authority fact.
 
 The five trust branches stay exact:
 
@@ -1436,53 +2049,66 @@ K2 carrier fields not specialized here retain their accepted K2 disposition.
 <!-- K3S-LEDGER-BEGIN -->
 | Record or exact fields | Disposition | Owner | Semantic role / signature and facets | Dependencies | Evidence/access/failure boundary | Identity/version and omission | Consumer | seed cases | separating pair |
 |---|---|---|---|---|---|---|---|---|---|
-| `PathSegment.SEGMENT.segment_atom`; `Path.PATH.segments`; `PathSet` membership | `RETAINED_DELTA` | `CK` Delta value algebra | canonical root-relative path identity and finite scope | segment then path admission | no host access or truth | exact structural equality; inadmitted values malformed in use | snapshots/selectors | C02,C06 | A05.a: segment/path/set distinctions |
-| all `ArtifactRole` tags and `OTHER_ROLE.role_atom` | `RETAINED_DELTA` | `CK` Delta value algebra | exact semantic artifact role | none | not authority or format | tag/payload equality | selectors/criteria | C04,C11 | A05.b: role versus path/format |
-| all `Format` tags and `OTHER_FORMAT.format_atom` | `RETAINED_DELTA` | `CK` Delta value algebra | artifact representation format | none | not backend choice | tag/payload equality | artifact/format criterion | C07 | A05.c: format versus backend |
-| `StorageBackend.{LOCAL_STORAGE,HOSTED_STORAGE}` | `RETAINED_DELTA` | `CK` Delta value algebra | controller-owned storage alternatives only | none | never artifact format | exact two-tag equality | K1 choice | C08 | A08.a: backend choice versus factual format |
-| `ByteSize.KIB.integer`; `ContentIdentity.CONTENT_ID.atom`; `FieldId.FIELD.atom`; all `FieldValue` and `BehaviorValue` tags/payloads | `RETAINED_DELTA` | `CK` Delta value algebra | exact scalar and behavior fields | sort-local only | no untyped atom coercion | tag and payload equality | artifacts/observations | C01,C11,C19 | A05.d: size/field/behavior sort separation |
-| four `ArtifactBody` tags and every payload; four `ArtifactContent` tags and every role/format/size field plus each content, fields-map, and observations-map payload field; total role/format/size/body projections | `RETAINED_DELTA` | `CK` Delta value algebra | exhaustive artifact content with total size/format | scalar roles/format/size/body | no filesystem or backend | complete tagged-field equality | snapshots/criteria | C01,C07,C11 | A05.e: each body/content constructor and projection |
-| `RepositorySnapshot` map fields; `ChangeEntry.{CREATED.new,DELETED.old,MODIFIED.old,new}`; `ChangeSet` map fields | `RETAINED_DELTA` | `CK` Delta value algebra | complete state and difference-value domains | path/content | no plan/event | extensional maps; modified requires inequality | functions/criteria | C02,C04-C06 | A05.f: snapshot/change entry variants |
-| three `ArtifactSelector` tags and all path/role fields | `RETAINED_DELTA` | `CK` Delta value algebra | finite supplied-snapshot selection | path set/role | no callback | tagged-field equality | observe/task/events | C01,C06,C11 | A05.g: paths versus role versus conjunction |
-| all `ArtifactProjection`, `SubjectId`, `Coverage`, and `ObservationValue` tags/payloads | `RETAINED_DELTA` | `CK` Delta value algebra | typed observation coordinates/results | artifact/scalar types | no truth in an observation | tagged-field equality | observation records | C02,C12,C19 | A05.h: presence/content/behavior/coverage |
-| five `ObservationSpec` tags and every selector/domain/metric/lanes/pairs field | `RETAINED_DELTA` | `CK` Delta value algebra | exhaustive requested projections | selector/subject/field | supplied snapshot only | tag plus complete fields | observe/task | C01,C02,C12,C19 | A04.a/A05.i: observation kinds and facets |
-| four `ObservationResult` tags and every `{spec_identity,coverage,values}` field | `RETAINED_DELTA` | `CK` Delta value algebra | exhaustive finite typed observations | exact spec/domain/value | contains no truth | tag/full map equality; admission enforces coverage | equality/task | C01,C02,C18 | A04.b/A10.a: result tag/coverage distinctions |
-| all `ObservationRelation` tags and bijection field | `RETAINED_DELTA` | `CK` Delta value algebra | exact comparison choice | result fields only | no callback/service | tag plus exact bijection | task criteria | C02,C12,C19 | A05.j: equality/order/correspondence |
-| `VerificationStatus` tags; `VerificationSpec.{protocol_identity,subject,evidence_schema_key}`; `VerificationRecord.{spec,snapshot_identity,status,observation,evidence_refs}` | `RETAINED_DELTA` | `CK` Delta value algebra | exact snapshot-bound factual record | spec/snapshot/result/schema | evidence distinct from truth | full field equality; wrong snapshot never matches | verification/task | C01,C09,C15 | A10.b: pass/fail/inconclusive/snapshot |
-| eight `Criterion` tags and every displayed field | `RETAINED_DELTA` | `CK` Delta value algebra | finite acceptance criteria, not task taxonomy | exact selector/spec/result/scalars | no service/expected answer | tag/full-field equality | direct task meaning | C01,C07,C11,C12,C19 | A09.a: every criterion constructor |
-| `TaskSpec.TASK.{criteria,required_verifications}` | `RETAINED_DELTA` | `CK` Delta value algebra | arbitrary finite broad predicate input | criterion/verification types | no evaluator/case field | complete set equality | task meaning | C01,C15,C16 | A09.b: zero/one/many verification requirements |
-| `ChangeKind` tags; seven `EventPattern` tags and every key/id/spec/status/path/kind/class/snapshot/selector field | `RETAINED_DELTA` | `CK` Delta value algebra | exhaustive structural event matching | event/payload value types | no command/endpoint | tag/full-field equality | event predicates/grants | C03-C06,C09 | A06.a: each event-pattern distinction |
-| all six payload types, all eight payload tags, and every command/purpose/spec/snapshot/status/evidence/path/content/contact/release/selector field | `RETAINED_DELTA` | `CK` Delta value algebra | exhaustive typed trace payloads | listed value types | immutable event class external | tag/full-field equality | Outcome admission | C03-C06,C09 | A06.b: payload and actor/class separation |
-| every `TypeDeclaration.{key,admitted_value_domain,proper_declaration_dependencies}` | `RETAINED_DELTA` | `CK` Delta | admission of all section 3 value rows | exact finite type DAG | rejected value malformed | exact `T(n)@(1)`; absence malformed | all typed records | C01-C19 | A05.k: admission versus meaning |
-| every literal `Declaration.{key,literal_identity,result_type,proper_declaration_dependencies}` | `RETAINED_DELTA` | `CK` Delta | exact typed constants | result type | no meaning/service | structural `L(T,v)@(1)` | K1 literals | C07,C08,C15 | A03.a: declaration versus binding |
-| three function `Declaration.{key,symbol_key,argument_types,result_type,facet_positions,proper_declaration_dependencies}` | `RETAINED_DELTA` | `CK` Delta | exact ordered signatures/facets | displayed types | no meaning/service | exact DF/SF `(1)` | terms | C01,C02,C19 | A04.c: pre/final positions |
-| eight predicate `Declaration.{key,symbol_key,argument_types,result_kind,facet_positions,proper_declaration_dependencies}` | `RETAINED_DELTA` | `CK` Delta | exact Boolean signatures, including snapshot-bound verification | displayed types | no meaning/service | exact DP/SP `(1)` | atoms/grants | C01-C16 | A01/A09.c: kind and signature |
-| six `EventDeclaration.{key,event_key,payload_type,event_class,proper_declaration_dependencies}` | `RETAINED_DELTA` | `CK` Delta | immutable class/payload | payload types | caller cannot set class | exact DE/EK `(1)` | outcome/AuthEval | C03-C06,C09 | A06.c: controlled versus observational |
-| `EventScopePairDeclaration.{pair_key,scope_symbol,occurrence_symbol,controlled_keys,proper_declaration_dependencies}` | `RETAINED_DELTA` | `CK` Delta | exact refresh companion | members/event | no meaning/proof | exact pair `(1)` | conditional requirement | C04,C05 | A07/A15.a: pair declaration/binding separation |
-| every literal `SemanticBinding` field | `RETAINED_SIGMA` | `CK` Sigma | exact `TERM_VALUE(v)` | declaration/spec roots | empty evidence/access; N/A unknown | derived key; absent open | literal evaluation/model | C07,C08 | A03.b: declaration is not meaning |
-| all three function `SemanticBinding` fields | `RETAINED_SIGMA` | `CK` Sigma | exact deterministic `TermResult` | declaration/spec/support | typed input only | exact `(1)`; absent open | term evaluator | C01,C02 | A05.l: supplied snapshot only |
-| all seven ordinary predicate `SemanticBinding` fields | `RETAINED_SIGMA` | `CK` Sigma | exact deterministic `Eval`; direct total task/verification meanings | declaration/spec/support | explicit schema/access/unknown/error | exact `(1)`; absent open | atom evaluator | C01-C16 | A09.d/A10.c: reuse and result families |
-| `EventPairBinding` and complete pair-owned `OccurrenceBindingProjection` fields | `RETAINED_SIGMA` | `CK` Sigma | definitional T3/A1 occurrence | pair/scope/model/lifts | full Eval aggregation | no second ordinary binding | conditional event | C04,C05 | A15.b: semantic DAG versus validation |
-| `ProfileBinding` fields and both `ProfileDimensionKey`s | `RETAINED_SIGMA` | `CK` Sigma | implementation evidence coverage | direct task result/evidence | five profile/failure outcomes | exact profile `(1)`; absent open | profile checker | C19 | A18.a: SAT versus profile |
-| all Sigma meaning/profile `ContractSpec` fields, including direct task and snapshot-bound verification relations | `RETAINED_SIGMA` | `CK` Sigma | exact extensional denotations | exact support | explicit primary input only | exact key/role `(1)` | result validator | C01-C19 | A09.e: general relation versus oracle |
-| all Sigma evidence-schema/access-boundary `ContractSpec` fields | `RETAINED_SIGMA` | `CK` Sigma | exact evidence admission/positional access | typed schema/support | undeclared access error | exact key/role `(1)` | evaluator/model | C01,C09,C15 | A05.m/A10.d: evidence/access |
-| all Sigma unknown/evaluation/reasoning-error `ContractSpec` fields | `RETAINED_SIGMA` | `CK` Sigma | honest disjoint outcomes | no hidden support | nonempty stable reasons | exact key/role `(1)` | status boundary | C09,C12,C15 | A10.e: false/unknown/errors |
-| every ordinary/pair `ModelContract` and `ModelCapabilitySummary` field | `RETAINED_SIGMA` | exact target projection | complete model/machine identity | binding contracts/descriptors | prose diagnostic only | named exact key; absent open/wrong malformed | model-facing lookup | C05,C13,C15 | A16: every projection field |
-| verification `EvidenceRef.{issuer_scope,evidence_namespace,local_identity,schema_binding}` | `RETAINED_SIGMA` | K1 carrier under coding schema | stable support identity only | schema key | no embedded truth/authority | full identity equality | verification meaning | C01,C09,C15 | A10.f: record versus reference/truth |
-| every field of `CS(SOUND_FRAGMENT,{functions,predicates,profile,bundle_bounds,adapter_witness,confluence_fixture})`, `CS(COMPLETE_FRAGMENT,bundle_bounds)`, `CS(REQUIRED_EVIDENCE,service)`, `CS(SERVICE_FAILURE_BEHAVIOR,service)`, `PSOUND`, `PCOMPLETE`, `PEVIDENCE`, and `PFAILURE` | `RETAINED_SERVICE` | owning service layer | exact target fragments and failure boundaries | exact target closures/two-node DAG | no denotation/truth shortcut | exact role/key; omission incompatible | capabilities | C01,C11,C19 | A11.a/A15.c: fragment/support distinctions |
-| every field of `CAP(functions)`, `CAP(predicates)`, and `CAP(profile)` descriptors | `RETAINED_SERVICE` | `CK` Service | concrete binding/profile targets | complete closures | exact service-use roots | exact service/capability `(1)` | invocation | C01-C16,C19 | A03.c/A09.f: service availability |
-| every field of provider descriptors `CAP(bounds)`, `CAP(confluence)`, and `CAP(witness)` | `RETAINED_SERVICE` | `CK`/`AWK` Service | exact finite environment targets | `D_b/D_c/D_w` | admitted proof or permitted inconclusive/error | exact target/version; no fallback | reasoning requests | C11,C19 | A11.b/A18.b: provider versus validator |
-| every field of `CAP(validate_bounds)` and `CAP(validate_witness)` descriptors | `RETAINED_SERVICE` | independent `RVK` Service | exact certificate validation capabilities | complete subject dependency sets | separately trusted validation | exact validator/version; missing evaluability status | derived validator request | C11,C19 | A11.c/A18.c: producer independence |
-| exact `ReasoningRequest` fields of `R_b` and `R_w`; exact confluence descriptor target `J_c` | `RETAINED_SERVICE` | request former | exact subject/environment/fragment/capability | `D_b/D_w/D_c` | no alternate `chi_C` | complete request identity | reasoner/certificate | C11,C19 | A11.d/A18.d: request-bound claim |
-| `BCERT`/`WCERT` keys; every `CertificateEnvelope` field of `BENV`/`WENV`; every `BundleBoundsProof`/`AdapterWitness` payload field | `RETAINED_SERVICE` | `CK`/`AWK` certificate producer | exact contradiction/witness claims | full requests/environments/dependencies | exact validator/root/abstraction/evidence | certificate/key equality; no fallback | certificate gate | C11,C19 | A11.e/A18.e: kind-specific certificate |
-| `TrustPolicyKey TP`; root keys `TR/TRB/TRW`; every admitted `TrustRootRecord` permission/owner/adoption field and all five `TrustRootJudgment` variants/reason fields | `RETAINED_SERVICE` | embedding policy | independent exact service/certificate trust | full producer sets | five branches distinct | exact policy/root versions | discovery/admission | C01,C11,C19 | A03.d/A13/A18.f: trust is not authority/self-trust |
-| alternate pair-proof `PVC`, `PCERT`, complete occurrence bundle/envelope/root permissions supplied by §9 | `RETAINED_SERVICE` | independent pair-validator/certificate producers | exact independent pair admission fixture | pair subject plus validation references | rejection/failure proves nothing | exact fixture keys | pair validator | C05 | A15.d: supplied validation records are not derived away |
+| `PathSegment.SEGMENT.segment_atom`; `Path.PATH.segments`; `PathSet` membership | `RETAINED_DELTA` | `CK` Delta value algebra | canonical root-relative path identity and finite scope | segment then path admission | no host access or truth | exact structural equality; inadmitted values malformed in use | snapshots/selectors | C02,C06 | `SEP_PATH` |
+| all `ArtifactRole` tags and `OTHER_ROLE.role_atom` | `RETAINED_DELTA` | `CK` Delta value algebra | exact semantic artifact role | none | not authority or format | tag/payload equality | selectors/criteria | C04,C11 | `SEP_ROLE` |
+| all `Format` tags and `OTHER_FORMAT.format_atom` | `RETAINED_DELTA` | `CK` Delta value algebra | artifact representation format | none | not backend choice | tag/payload equality | artifact/format criterion | C07 | `SEP_FORMAT` |
+| `StorageBackend.{LOCAL_STORAGE,HOSTED_STORAGE}` | `RETAINED_DELTA` | `CK` Delta value algebra | controller-owned storage alternatives only | none | never artifact format | exact two-tag equality | K1 choice | C08 | `SEP_BACKEND_CHOICE` |
+| `ByteSize.KIB.integer`; `ContentIdentity.CONTENT_ID.atom`; `FieldId.FIELD.atom`; all `FieldValue` and metric-keyed `BehaviorValue` tags/payloads | `RETAINED_DELTA` | `CK` Delta value algebra | exact scalar and behavior fields | sort-local only | no untyped atom coercion | tag and payload equality | artifacts/observations | C01,C11,C19 | `SEP_SCALAR` |
+| all `ArtifactBodyKind` tags; four `ArtifactBody` tags and every payload; four `ArtifactContent` tags and every role/format/size field plus each content, fields-map, and observations-map payload field; total role/format/size/body projections | `RETAINED_DELTA` | `CK` Delta value algebra | exhaustive artifact content with total size/format | scalar roles/format/size/body | no filesystem or backend | complete tagged-field equality | snapshots/criteria | C01,C07,C11 | `SEP_CONTENT` |
+| `RepositorySnapshot` map fields; `ChangeEntry.{CREATED.new,DELETED.old,MODIFIED.old,new}`; `ChangeSet` map fields | `RETAINED_DELTA` | `CK` Delta value algebra | complete state and difference-value domains | path/content | no plan/event | extensional maps; modified requires inequality | functions/criteria | C02,C04-C06 | `SEP_CHANGE` |
+| three `ArtifactSelector` tags and all path/role fields | `RETAINED_DELTA` | `CK` Delta value algebra | finite supplied-snapshot selection | path set/role | no callback | tagged-field equality | observe/task/events | C01,C06,C11 | `SEP_SELECTOR` |
+| all `ArtifactProjection`, `SubjectId`, `Coverage`, and exhaustive request/workload/lane/client `ObservationValue` tags/payloads including absence, role/projection mismatch, and behavior conflict | `RETAINED_DELTA` | `CK` Delta value algebra | typed observation coordinates/results | artifact/scalar types | no truth in an observation | tagged-field equality | observation records | C02,C12,C19 | `SEP_OBSERVATION_VALUE` |
+| five `ObservationSpec` tags and every selector/domain/metric/lanes/pairs field | `RETAINED_DELTA` | `CK` Delta value algebra | exhaustive requested projections | selector/subject/field | supplied snapshot only | tag plus complete fields | observe/task | C01,C02,C12,C19 | `SEP_OBSERVATION_SPEC` |
+| four `ObservationResult` tags and every `{spec_identity,coverage,values}` field | `RETAINED_DELTA` | `CK` Delta value algebra | exhaustive finite typed observations | exact spec/domain/value | contains no truth | tag/full map equality; admission enforces coverage | equality/task | C01,C02,C18 | `SEP_OBSERVATION_RESULT` |
+| all `ObservationRelation` tags and bijection field | `RETAINED_DELTA` | `CK` Delta value algebra | exact comparison choice | result fields only | no callback/service | tag plus exact bijection | task criteria | C02,C12,C19 | `SEP_OBSERVATION_RELATION` |
+| `VerificationStatus` tags; `VerificationSpec.{protocol_identity,subject,evidence_schema_key}`; `VerificationRecord.{spec,snapshot_identity,status,observation,evidence_refs}` | `RETAINED_DELTA` | `CK` Delta value algebra | exact snapshot-bound factual record | spec/snapshot/result/schema | evidence distinct from truth | full field equality; wrong snapshot never matches | verification/task | C01,C09,C15 | `SEP_VERIFICATION_RECORD` |
+| `ImplementationEvidence`, `CodingEvidencePayload`, `CodingEvidenceEntry`, `AbstractCoverageResult`, and `ImplementationCoverageSubject`: every constructor and displayed field | `RETAINED_DELTA` | `CK` Delta value algebra | exact verification/profile evidence and admitted coverage input | snapshot/task/result fields | reference and payload remain separate | tag/full-field equality | verification/profile | C01,C09,C15,C19 | `SEP_EVIDENCE_PAYLOAD` |
+| eight `Criterion` tags and every displayed field | `RETAINED_DELTA` | `CK` Delta value algebra | finite acceptance criteria, not task taxonomy | exact selector/spec/result/scalars | no service/expected answer | tag/full-field equality | direct task meaning | C01,C07,C11,C12,C19 | `SEP_CRITERION` |
+| `TaskSpec.TASK.{criteria,required_verifications}` | `RETAINED_DELTA` | `CK` Delta value algebra | arbitrary finite broad predicate input | criterion/verification types | no evaluator/case field | complete set equality | task meaning | C01,C15,C16 | `SEP_TASK_CARDINALITY` |
+| `ChangeKind` tags; seven `EventPattern` tags and every key/id/spec/status/path/kind/class/snapshot/selector field | `RETAINED_DELTA` | `CK` Delta value algebra | exhaustive structural event matching | event/payload value types | no command/endpoint | tag/full-field equality | event predicates/grants | C03-C06,C09 | `SEP_EVENT_PATTERN` |
+| all six payload types, all eight payload tags, and every command/purpose/spec/snapshot/status/evidence/path/content/contact/release/selector field | `RETAINED_DELTA` | `CK` Delta value algebra | exhaustive typed trace payloads | listed value types | immutable event class external | tag/full-field equality | Outcome admission | C03-C06,C09 | `SEP_EVENT_PAYLOAD` |
+| every `TypeDeclaration.{key,admitted_value_domain,proper_declaration_dependencies}` | `RETAINED_DELTA` | `CK` Delta | admission of all section 3 value rows | exact finite type DAG | rejected value malformed | exact `T(n)@(1)`; absence malformed | all typed records | C01-C19 | `SEP_TYPE_DECLARATION` |
+| every literal `Declaration.{key,literal_identity,result_type,proper_declaration_dependencies}` | `RETAINED_DELTA` | `CK` Delta | exact typed constants | result type | no meaning/service | structural `L(T,v)@(1)` | K1 literals | C07,C08,C15 | `SEP_LITERAL_DECLARATION` |
+| three function `Declaration.{key,symbol_key,argument_types,result_type,facet_positions,proper_declaration_dependencies}` | `RETAINED_DELTA` | `CK` Delta | exact ordered signatures/facets | displayed types | no meaning/service | exact DF/SF `(1)` | terms | C01,C02,C19 | `SEP_FUNCTION_DECLARATION` |
+| eight predicate `Declaration.{key,symbol_key,argument_types,result_kind,facet_positions,proper_declaration_dependencies}` | `RETAINED_DELTA` | `CK` Delta | exact Boolean signatures, including snapshot-bound verification | displayed types | no meaning/service | exact DP/SP `(1)` | atoms/grants | C01-C16 | `SEP_PREDICATE_DECLARATION` |
+| six `EventDeclaration.{key,event_key,payload_type,event_class,proper_declaration_dependencies}` | `RETAINED_DELTA` | `CK` Delta | immutable class/payload | payload types | caller cannot set class | exact DE/EK `(1)` | outcome/AuthEval | C03-C06,C09 | `SEP_EVENT_DECLARATION` |
+| `EventScopePairDeclaration.{pair_key,scope_symbol,occurrence_symbol,controlled_keys,proper_declaration_dependencies}` | `RETAINED_DELTA` | `CK` Delta | exact refresh companion | members/event | no meaning/proof | exact pair `(1)` | conditional requirement | C04,C05 | `SEP_PAIR_DECLARATION` |
+| every literal `SemanticBinding` field | `RETAINED_SIGMA` | `CK` Sigma | exact `TERM_VALUE(v)` | declaration/spec roots | empty evidence/access; N/A unknown | derived key; absent open | literal evaluation/model | C07,C08 | `SEP_LITERAL_BINDING` |
+| all three function `SemanticBinding` fields | `RETAINED_SIGMA` | `CK` Sigma | exact deterministic `TermResult` | declaration/spec/support | typed input only | exact `(1)`; absent open | term evaluator | C01,C02 | `SEP_FUNCTION_BINDING` |
+| all seven ordinary predicate `SemanticBinding` fields | `RETAINED_SIGMA` | `CK` Sigma | exact deterministic `Eval`; direct total task/verification meanings | declaration/spec/support | explicit schema/access/unknown/error | exact `(1)`; absent open | atom evaluator | C01-C16 | `SEP_PREDICATE_BINDING` |
+| `EventPairBinding` and complete pair-owned `OccurrenceBindingProjection` fields | `RETAINED_SIGMA` | `CK` Sigma | definitional T3/A1 occurrence | pair/scope/model/lifts | full Eval aggregation | no second ordinary binding | conditional event | C04,C05 | `SEP_PAIR_BINDING` |
+| `ProfileBinding` fields and both `ProfileDimensionKey`s | `RETAINED_SIGMA` | `CK` Sigma | implementation evidence coverage | direct task result/evidence | five profile/failure outcomes | exact profile `(1)`; absent open | profile checker | C19 | `SEP_PROFILE_BINDING` |
+| all Sigma meaning/profile `ContractSpec` fields, including direct task and snapshot-bound verification relations | `RETAINED_SIGMA` | `CK` Sigma | exact extensional denotations | exact support | explicit primary input only | exact key/role `(1)` | result validator | C01-C19 | `SEP_MEANING_CONTRACT` |
+| all Sigma evidence-schema/access-boundary `ContractSpec` fields | `RETAINED_SIGMA` | `CK` Sigma | exact evidence admission/positional access | typed schema/support | undeclared access error | exact key/role `(1)` | evaluator/model | C01,C09,C15 | `SEP_EVIDENCE_ACCESS` |
+| all Sigma unknown/evaluation/reasoning-error `ContractSpec` fields | `RETAINED_SIGMA` | `CK` Sigma | honest disjoint outcomes | no hidden support | nonempty stable reasons | exact key/role `(1)` | status boundary | C09,C12,C15 | `SEP_STATUS_FAMILY` |
+| every ordinary/pair `ModelContract` and `ModelCapabilitySummary` field | `RETAINED_SIGMA` | exact target projection | complete model/machine identity | binding contracts/descriptors | prose diagnostic only | named exact key; absent open/wrong malformed | model-facing lookup | C05,C13,C15 | `SEP_MODEL` |
+| coding `EvidenceRef.{issuer_scope,evidence_namespace,local_identity,schema_binding}` values: every verification reference plus `e_abs_w` and `e0` | `RETAINED_SIGMA` | K1 carrier under exact coding schema | stable support identity only | exact schema key | no embedded truth/authority | full identity equality; unique reference-to-payload map | verification/profile meaning | C01,C09,C15,C19 | `SEP_EVIDENCE_REFERENCE` |
+| every field of `CS(SOUND_FRAGMENT,{functions,predicates,profile,bundle_bounds,adapter_witness,confluence_fixture})`, `CS(COMPLETE_FRAGMENT,bundle_bounds)`, `CS(REQUIRED_EVIDENCE,service)`, `CS(SERVICE_FAILURE_BEHAVIOR,service)`, `PSOUND`, `PCOMPLETE`, `PEVIDENCE`, and `PFAILURE` | `RETAINED_SERVICE` | owning service layer | exact target fragments and failure boundaries | exact target closures/two-node DAG | no denotation/truth shortcut | exact role/key; omission incompatible | capabilities | C01,C11,C19 | `SEP_FRAGMENT` |
+| every field of `CAP(functions)`, `CAP(predicates)`, and `CAP(profile)` descriptors | `RETAINED_SERVICE` | `CK` Service | concrete binding/profile targets | complete closures | exact service-use roots | exact service/capability `(1)` | invocation | C01-C16,C19 | `SEP_EVALUATOR_CAPABILITY` |
+| every field of provider descriptors `CAP(bounds)`, `CAP(confluence)`, and `CAP(witness)` | `RETAINED_SERVICE` | `CK`/`AWK` Service | exact finite environment targets | `D_b/D_c/D_w` | admitted proof or permitted inconclusive/error | exact target/version; no fallback | reasoning requests | C11,C19 | `SEP_PROVIDER_CAPABILITY` |
+| every field of `CAP(validate_bounds)` and `CAP(validate_witness)` descriptors | `RETAINED_SERVICE` | independent `RVK` Service | exact certificate validation capabilities | complete subject dependency sets | separately trusted validation | exact validator/version; missing evaluability status | derived validator request | C11,C19 | `SEP_VALIDATOR_CAPABILITY` |
+| exact `ReasoningRequest` fields of `R_b`, `R_w`, and `R_c`; exact `J_b/J_w/J_c` targets | `RETAINED_SERVICE` | request former | exact subject/environment/trust/fragment/dependencies/target/capability | `D_b/D_w/D_c` | no alternate `chi_C` | complete request identity | reasoner/certificate | C11,C19 | `SEP_REASONING_REQUEST` |
+| `BCERT`/`WCERT` keys; every `CertificateEnvelope` field of `BENV`/`WENV`; every `BundleBoundsProof`/`AdapterWitness` payload field; `BPROOF_REF/WPROOF_REF` | `RETAINED_SERVICE` | `CK`/`AWK` certificate producer | exact contradiction/witness claims | full requests/environments/dependencies | exact validator/root/abstraction/evidence | certificate/key equality; no fallback | certificate gate | C11,C19 | `SEP_REASONING_CERTIFICATE` |
+| `TrustPolicyKey TP`; root keys `TR/TRB/TRW`; every admitted `TrustRootRecord` permission/owner/adoption field and all five `TrustRootJudgment` variants/reason fields | `RETAINED_SERVICE` | embedding policy | independent exact service/certificate trust | full producer sets | five branches distinct | exact policy/root versions | discovery/admission | C01,C11,C19 | `SEP_TRUST` |
+| alternate pair-proof keys `PVC/PCERT`; every field of `PSOUND/PCOMPLETE/PEVIDENCE/PFAILURE`, `CapabilityDescriptor(PVC)`, `ROOT_p/T_p`, complete occurrence bundle, and `PAIR_PROOF_REF` | `RETAINED_SERVICE` | independent pair-validator/certificate producers | exact independent pair admission fixture | pair subject plus validation references | rejection/failure proves nothing | exact fixture keys | pair validator | C05 | `SEP_PAIR_PROOF` |
+| every `SourceRef.{issuer,source_kind,stable_source_identity,provenance_facts}` value `SRC(z,i)` and `src0`; every `AuthorityRef.{owner,authority_namespace,stable_attestation_identity}` value `AUTH(z,i)` and `auth0` | `RETAINED_SIGMA` | inherited K1 carrier; attributed-source/authority producers | provenance and authority identities remain disjoint | no semantic support | neither record admits authority | complete structural identity | origins/adoption | C13,C19 | `SEP_SOURCE_AUTHORITY` |
+| every field of `AC(z,i).{authority_fact_key,admission_subject_data,offered_evidence_refs}`, `ATTEST(z,i)`, and `AE_REF(z,i)` for the five members of `I_A` | `RETAINED_SERVICE` | inherited K1 carrier at the `APK/ATK` authority-admission boundary | exact finite authority candidate | fact-free base and attestation schema | evidence is not admission | exact tuple/ref identity | authority validator | C13,C19 | `SEP_AUTHORITY_CANDIDATE` |
+| every field of the five `AFB(z,i)=AuthorityFactBinding(AF(z,i),{ACERT(z,i)})` and their final authority-map entries | `RETAINED_SIGMA` | admitted Sigma receiving rule | exact normative adoption binding | successful independent admission | certificate set is mandatory | exact fact-key map identity; absent stays open | Contract closure | C13,C19 | `SEP_AUTHORITY_BINDING` |
+| every field of `ASOUND/ACOMPLETE/AREQUIRED/AFAILURE`, `ServiceIdentityRecord(AVSK)`, and `CapabilityDescriptor(CAP(authority))` | `RETAINED_SERVICE` | independent `AVK` Service | exact five-target authority validation fragment | union of five fact-free dependency closures | only typed attestations and exact error mapping | exact ATP/AVK versions | authority requests | C13,C19 | `SEP_AUTHORITY_CAPABILITY` |
+| `ATP/TRA`; every field of `ROOT_A/T_A`; every field of the five `RA(z,i)` and `AENV(z,i)`; all five `ACERT(z,i)` keys | `RETAINED_SERVICE` | external embedding policy / attestation validator | exact service-use and authority target scopes | exact `DA/JA/UA/AA` records | proper producer independence | request/envelope/root exact identity | authority certificate gate | C13,C19 | `SEP_AUTHORITY_REQUEST` |
+| every field of the five `Q_t[T_x]`, `R_lex`, and `Q_profile_w`; exact request-specific Semantic/Trust/DependencyEnvironment carriers (ProfileRequest has no dependency-environment field) | `RETAINED_SERVICE` | inherited K2 invocation carrier; request former | predicate, formula, and profile invocations | exact `E_t/D_t`, `E_lex/D_lex`, and profile-closed `E_w` | trust and evidence remain explicit fields | complete request identity | discovery/invocation | C01,C09,C15,C19 | `SEP_FINITE_REQUEST` |
+| every field of `R_p`, its `PairFullEvalProof`, `PENV`, and its exact `PairAdmissionResult` | `RETAINED_SERVICE` | inherited K2 pair-admission carrier; pair request/proof former | exact independent full-Eval equality admission | `E_p/D_p` plus three non-proper validation refs | sole `PAIR_PROOF_REF` in pair-service row | request/result/certificate exact | pair admission | C05 | `SEP_PAIR_REQUEST` |
+| `m0.{migration_key,source_environment,target_environment,semantic_relation,relation_contract}`; `x0/x1.{extension_key,target_record_identity,owner_layer,semantic_effect,payload}`; every field of `a0/a1`; every field of `MR0/XE0/XP0` | `RETAINED_SIGMA` | exact `EOK` Sigma/evolution owners | explicit migration relation, extension effect/payload, and aliases | exact target/source keys/environments | no implicit migration or alias substitution | exact record keys and versions | K3-X missing matrix | C10,C17 | `SEP_EVOLUTION_RECORD` |
+| `m0.{certificate_key,validator_key,trust_root_key}`; every field of `c0/CC0`; `x0/x1.{certificate_key,validator_key,trust_root_key}`; every field of the three `PKG_evo_*` package membership records | `RETAINED_SERVICE` | K2 evolution-validation/package surface with exact declared owners | compatibility and mandatory independent validation references | exact source/target/certificate/capability/root keys | absent admission gives no migration/compatibility/effect | exact record/package identities | K3-X missing matrix | C10,C17 | `SEP_EVOLUTION_SERVICE_RECORD` |
+| every field of `EVCAP_z/ES_z/ECOMP_z/EE_z/EF_z`, `ROOT_E/T_evo`, `R_m/R_c0/R_x0/R_x1`, `EENV_z/EADMIT_z`, and `ER_z` for exactly `z in Z` | `RETAINED_SERVICE` | independent `EVK/EPK/TP` | four finite evolution admissions | exact `D_ev_z/TARGET_z` and non-proper triples | one typed proof/ref per row | exact request/envelope/admission identity | evolution validation | C10,C17 | `SEP_EVOLUTION_ADMISSION` |
 | `SNAPSHOT_IDENTITY(F)`, `changes_between(P,F)`, `observe(spec,F)`, and direct per-criterion/per-verification task projections | `DERIVED` | exact coding relations | total extensional outputs | supplied typed values | no ambient access | complete logical equality | meanings/payloads | C01-C19 | A04/A05/A09: derived output versus primitive assertion |
+| `coding_entries`, `evidence_map`, exact schema/ref membership, equal-duplicate coalescence, unequal-payload conflict, and metric-keyed behavior aggregation | `DERIVED` | K3-S total projection | unique extensional observation/evidence maps | finite supplied artifact/evidence records | absent/mismatch/conflict constructors exhaustive | no prose selection alias | observe/verification/profile | C01,C09,C11,C15,C19 | `SEP_TOTAL_PROJECTION` |
 | K1 goal/preserve/forbid/allow/conditional/alternative patterns | `DERIVED` | K1 | exact macro/composition | syntax dependencies | K1 T1-T4/A1-A2 | no coding key | Contracts | C01-C09 | A06-A08: normative roles |
 | K2 binding keys, supports, closures, observation maps, summaries, lifecycle, service identity, and validation-reference projections | `DERIVED` | K2 | mechanical views | exhaustive graph | owner-specific missing/error | cannot be supplied | validators | C01-C19 | A03/A14/A15: lifecycle/graph/conflict |
-| derived `CertificateValidationRequest` fields and `CertificateAdmission`/receiving projections for BENV/WENV/pair fixture | `DERIVED` | K2 certificate gate | exact independent validation invocation/result | original request/envelope/root | failures yield no claim | derived identity only | reasoning/pair result | C05,C11,C19 | A11.f/A15.e/A18.g: producer request versus validator request |
+| derived `CertificateValidationRequest` fields and `CertificateAdmission`/receiving projections for BENV/WENV/pair fixture | `DERIVED` | K2 certificate gate | exact independent validation invocation/result | original request/envelope/root | failures yield no claim | derived identity only | reasoning/pair result | C05,C11,C19 | `SEP_CERTIFICATE_RECEPTION` |
+| five derived authority validation requests, five exact admissions/results/receptions, and recomputed subject-producer sets | `DERIVED` | K2 authority gate | one fact-free validation per adoption then exact map union | `RA/AENV/ROOT_A` | no self-support or prior-fact chain | derived request/result identities only | authority map | C13,C19 | `SEP_AUTHORITY_RECEPTION` |
 | equal-duplicate coalescence, conflict sets, package/record permutation result, and `missingStatus` projection | `DERIVED` | K2 composition | order-independent exact outcome | record identities | no last-writer fallback | finite set/map equality | composition/K3-X | C01-C19 | A14: equality/conflict/order |
-| exact two-node observation maps for the two valid confluence topological orders | `DERIVED` | K2 §3.3 | identical complete maps/results/statuses | `observe` and `changes_between` nodes | interface failure aborts | map equality | K3-X check 9 | C01,C02 | A15.f: independent order confluence |
+| exact two-node observation maps for the two valid confluence topological orders | `DERIVED` | K2 §3.3 | identical complete maps/results/statuses | `observe` and `changes_between` nodes | interface failure aborts | map equality | K3-X check 9 | C01,C02 | `SEP_CONFLUENCE` |
 | change set as patch/action sequence; event payload as executable command/endpoint | `EXCLUDED` | none | no declarative denotation | none | presence violates access boundary | never an identity | none | C03-C06,C19 | K3S-A18: satisfying semantics without implementation |
 | universal string/map/opaque handle for path, task, evidence, result, or expected answer | `EXCLUDED` | none | destroys typed distinction | none | presence malformed/oracular | never an identity | none | C01,C02,C09,C15 | K3S-A05,A17: typed reusable values versus escape hatch |
 | task taxonomy, phrase-indexed symbols, challenge IDs, expected mappings, gold Contracts/patches | `EXCLUDED` | none | no semantic role | none | presence rejects | never an identity | none | C01,C15,C18 | K3S-A17: equivalent phrasing shares symbols |
@@ -1490,9 +2116,10 @@ K2 carrier fields not specialized here retain their accepted K2 disposition.
 | implementation, parser, binder, planner, executor, repository/filesystem/network operation, model/prompt/benchmark | `EXCLUDED` | none | outside K3-S | none | no semantic result | never an identity | none | C01-C19 | K3S-A18: abstract outcome is not construction |
 <!-- K3S-LEDGER-END -->
 
-Ledger count: **52** rows: 23 `RETAINED_DELTA`, 10 `RETAINED_SIGMA`,
-8 `RETAINED_SERVICE`, 6 `DERIVED`, and 5 `EXCLUDED`, under the exact body-row
-convention above.  The split is recomputable from the second cell alone.
+Ledger count: **65** rows: 24 `RETAINED_DELTA`, 13 `RETAINED_SIGMA`,
+15 `RETAINED_SERVICE`, 8 `DERIVED`, and 5 `EXCLUDED`, under the exact body-row
+convention above.  The split is
+recomputable from the second cell alone.
 
 ### 8.2 Exactly eighteen adversarial cases
 
@@ -1524,57 +2151,76 @@ request, result, certificate, or evidence record receives them.
 
 Case count: **18**, in the required order.
 
-The following lettered items are mandatory variants of those eighteen rows,
-not additional cases.  Each variant reuses its parent `K3S-Axx` label.
+Every retained or supplied ledger row instead names one finite exact paired
+fixture.  This avoids sub-case labels.  Define
 
-- `A05.a-k` separately exercise: admitted versus inadmitted path segments and
-  positional paths/path sets; every `ArtifactRole`; every `Format` plus the
-  distinct two-tag `StorageBackend`; `ByteSize`, content, field, and behavior
-  scalar sorts; all four `ArtifactContent` tags and every total projection;
-  all three change entries; all three selectors; all projection, subject,
-  coverage, and observation-value tags; all five observation-spec and four
-  observation-result tags including exact incomplete domains; all five
-  observation relations; every type-admission field; and all six payload
-  types, including all three path-change tags.  Each paired variant differs in
-  exactly the named tag or field and therefore cannot be accepted by an
-  untyped map, a partial `size`/`format` projection, or a storage/format cast.
-- `A09.a-e` use `TASK` values with zero criteria/verifications, one criterion
-  and zero verifications, one verification, two distinct verifications, two
-  criteria of the same tag, and one instance of each of the eight criterion
-  tags.  All are constructible and
-  determined by the direct three-input relation; the exact task observation
-  map is empty in every variant.
-- `A10.a-f` fix one verification spec and current snapshot, then use no
-  record, an exact `INCONCLUSIVE`, exact `PASS`, exact `FAIL`, equal duplicate
-  `PASS`, opposite decisive records, a wrong-snapshot `PASS`, and a
-  wrong-schema record.  The results are respectively unknown, unknown, true,
-  false, true, error, unknown, and error; evidence-reference equality and all
-  complete `Eval` fields remain visible.
-- `A11.a-f` separately remove or corrupt `R_b`, `BENV`, `BCERT`,
-  `CAP(validate_bounds)`, `TRB`, its service-use target, its certificate target,
-  the bounds payload, and the returned `CertificateAdmission`.  Only the exact
-  fully formed and independently validated branch yields
-  `ADMITTED(BCERT,CONSISTENCY_UNSAT)`; every other branch retains K2's exact
-  no-admission, trust, evaluability, malformed, or failure family.
-- `A13.a-d` separately vary `SourceRef`, authenticated provenance,
-  `AuthorityRef`, exact admitted authority fact, service trust, and certificate
-  trust.  No pair of those coordinates is interchangeable and none lets the
-  subject producer, certificate producer, validator, or embedding-policy
-  producer satisfy an independence inequality by self-assertion.
-- `A14.a-d` permute the exact package sequence, each package's exact record
-  sequence, equal duplicates, and unequal same-key records.  The first three
-  preserve the complete result map; the last yields the same conflict set in
-  either order.
-- `A15.a-f` run both the retained definitional pair and the complete independent
-  pair fixture in §9, omit each non-proper certificate/validator/root lookup in
-  turn, reverse both valid topological orders, and add either a pair proper
-  self-edge or a two-node proper back-edge.  Validation references never enter
-  the semantic DAG; each genuine proper cycle is malformed.
-- `A18.a-g` separately omit `R_w`, `WENV`, `WCERT`,
-  `CAP(validate_witness)`, `TRW`, one exact trust target, the abstract outcome,
-  and concrete implementation-profile evidence.  Only the complete independent
-  certificate route establishes `CONSISTENCY_SAT`; even there the last
-  omission leaves `PROFILE_INCOMPLETE`.
+```text
+SeparationRecord = SEPARATES(
+  exact_id,left_records,right_records,left_status,right_status)
+```
+
+and let `r[f:=v]` mean the complete record `r` with exactly field `f` replaced
+by exact value `v`; all undisplayed fields are definitionally equal.  The
+following is the entire finite `SeparationRecord` set:
+
+| exact record | left records / status | right records / status |
+|---|---|---|
+| `SEP_PATH` | `{PATH((SEGMENT(dependency),SEGMENT(lock)))}` / `WELL_FORMED` | `{PATH((SEGMENT(lock),SEGMENT(dependency)))}` / `WELL_FORMED` |
+| `SEP_ROLE` | `{DEPENDENCY_LOCK}` / `WELL_FORMED` | `{PUBLIC_SCHEMA}` / `WELL_FORMED` |
+| `SEP_FORMAT` | `{TEXT}` / `WELL_FORMED` | `{JSON}` / `WELL_FORMED` |
+| `SEP_BACKEND_CHOICE` | `{LOCAL_STORAGE}` / `WELL_FORMED` | `{HOSTED_STORAGE}` / `WELL_FORMED` |
+| `SEP_SCALAR` | `{KIB(1),FIELD(request_field),BEHAVIOR_METRIC(FIELD(latency),1)}` / `WELL_FORMED` | `{KIB(2),FIELD(client_field),BEHAVIOR_METRIC(FIELD(latency),2)}` / `WELL_FORMED` |
+| `SEP_CONTENT` | `{a_b}` / `WELL_FORMED` | `{a_b[format:=JSON]}` / `WELL_FORMED` |
+| `SEP_CHANGE` | `{CREATED(a_b)}` / `WELL_FORMED` | `{DELETED(a_b)}` / `WELL_FORMED` |
+| `SEP_SELECTOR` | `{SELECT_PATHS({p_b})}` / `WELL_FORMED` | `{SELECT_ROLE(DEPENDENCY_LOCK)}` / `WELL_FORMED` |
+| `SEP_OBSERVATION_VALUE` | `{PRESENT_CONTENT(a_b)}` / `WELL_FORMED` | `{ABSENT}` / `WELL_FORMED` |
+| `SEP_OBSERVATION_SPEC` | `{s_c}` / `WELL_FORMED` | `{WORKLOAD_METRIC_VIEW({WORKLOAD_SUBJECT(main)},FIELD(latency))}` / `WELL_FORMED` |
+| `SEP_OBSERVATION_RESULT` | `{O_c}` / `WELL_FORMED` | `{O_c[values:={p_b->ABSENT}]}` / `WELL_FORMED` |
+| `SEP_OBSERVATION_RELATION` | `{EQUAL}` / `WELL_FORMED` | `{FIELD_CORRESPONDENCE(m_w)}` / `WELL_FORMED` |
+| `SEP_VERIFICATION_RECORD` | `{vr0}` / `WELL_FORMED` | `{vr0[status:=FAIL]}` / `WELL_FORMED` |
+| `SEP_EVIDENCE_PAYLOAD` | `{i_abs_w}` / `WELL_FORMED` | `{i_pending_abs_w}` / `WELL_FORMED` |
+| `SEP_CRITERION` | `{ARTIFACTS_NONEMPTY(S_b)}` / `WELL_FORMED` | `{ARTIFACT_SIZE_LT(S_b,KIB(100))}` / `WELL_FORMED` |
+| `SEP_TASK_CARDINALITY` | `{TASK({},{})}` / `WELL_FORMED` | `{TASK({ARTIFACT_SIZE_LT(S_b,KIB(100))},{})}` / `WELL_FORMED` |
+| `SEP_EVENT_PATTERN` | `{ANY_EVENT(EK(command))}` / `WELL_FORMED` | `{ANY_EVENT(EK(network_contact))}` / `WELL_FORMED` |
+| `SEP_EVENT_PAYLOAD` | `{COMMAND_EVENT(command0,build)}` / `WELL_FORMED` | `{NETWORK_CONTACT(public_registry,build)}` / `WELL_FORMED` |
+| `SEP_TYPE_DECLARATION` | `{E_c}` / `WELL_FORMED` | `{E_c[declarations:=E_c.declarations minus {TypeDeclaration(T(Path))}]}` / `MALFORMED` |
+| `SEP_LITERAL_DECLARATION` | `{E_b}` / `WELL_FORMED` | `{E_b[declarations:=E_b.declarations minus {LiteralDeclaration(T(TaskSpec),ts_nonempty)}]}` / `MALFORMED` |
+| `SEP_FUNCTION_DECLARATION` | `{Declaration(DF(observe))}` / `WELL_FORMED` | `{Declaration(DF(observe))[facet_positions:=({}, {})]}` / `MALFORMED` |
+| `SEP_PREDICATE_DECLARATION` | `{Declaration(DP(task_accepts))}` / `WELL_FORMED` | `{d_bad}` / `MALFORMED` |
+| `SEP_EVENT_DECLARATION` | `{Declaration(DE(network_contact))}` / `WELL_FORMED` | `{Declaration(DE(network_contact))[event_class:=OBSERVATIONAL]}` / `MALFORMED` |
+| `SEP_PAIR_DECLARATION` | `{E_p}` / `WELL_FORMED` | `{E_p[pair_declarations:={}]}` / `MALFORMED` |
+| `SEP_LITERAL_BINDING` | `{E_b}` / `CLOSED` | `{E_b[bindings:=E_b.bindings minus {SemanticBinding(L(T(TaskSpec),ts_nonempty))}]}` / `OPEN_BINDINGS` |
+| `SEP_FUNCTION_BINDING` | `{E_c}` / `CLOSED` | `{E_c[bindings:=E_c.bindings minus {SemanticBinding(DF(observe))}]}` / `OPEN_BINDINGS` |
+| `SEP_PREDICATE_BINDING` | `{E_t}` / `CLOSED` | `{E_t[bindings:={}]}` / `OPEN_BINDINGS` |
+| `SEP_PAIR_BINDING` | `{E_p}` / `CLOSED` | `{E_p[pair_bindings:={}]}` / `OPEN_BINDINGS` |
+| `SEP_PROFILE_BINDING` | `{E_w}` / `CLOSED` | `{E_w[profile_bindings:={}]}` / `OPEN_BINDINGS` |
+| `SEP_MEANING_CONTRACT` | `{CS(PREDICATE_MEANING,task_accepts)}` / `CLOSED` | `{CS(PREDICATE_MEANING,task_accepts)[logical_relation:={}]}` / `MALFORMED` |
+| `SEP_EVIDENCE_ACCESS` | `{CS(EVIDENCE_SCHEMA,verification)}` / `WELL_FORMED` | `{CS(EVIDENCE_SCHEMA,implementation_profile)}` / `WELL_FORMED` |
+| `SEP_STATUS_FAMILY` | `{VALUE(FALSE,{},{})}` / `TRUTH_FALSE` | `{VALUE(UNKNOWN,{},{u0})}` / `TRUTH_UNKNOWN` |
+| `SEP_MODEL` | `Omega_t` / `CLOSED` | `Omega_t minus {MC(BINDING_IDENTITY(DP(task_accepts)),task_accepts)}` / `OPEN_BINDINGS(model contract)` |
+| `SEP_EVIDENCE_REFERENCE` | `{e_abs_w}` / `WELL_FORMED` | `{e_abs_w[schema_binding:=CS(EVIDENCE_SCHEMA,verification)]}` / `WELL_FORMED` |
+| `SEP_FRAGMENT` | `{CS(SOUND_FRAGMENT,bundle_bounds)}` / `WELL_FORMED` | `{CS(SOUND_FRAGMENT,adapter_witness)}` / `WELL_FORMED` |
+| `SEP_EVALUATOR_CAPABILITY` | `{Q_t[T_admitted],CAP(predicates)}` / `INVOCABLE_FOR(Q_t[T_admitted])` | `{Q_t[T_admitted]}` with `CAP(predicates)` absent / `EVALUABILITY_MISSING` |
+| `SEP_PROVIDER_CAPABILITY` | `{R_b,CAP(bounds)}` / `INVOCABLE_FOR(R_b)` | `{R_b,CAP(witness)}` with `CAP(bounds)` absent / `EVALUABILITY_MISSING` |
+| `SEP_VALIDATOR_CAPABILITY` | `{certificateValidationRequest(BENV),CAP(validate_bounds)}` / `INVOCABLE_FOR(certificateValidationRequest(BENV))` | `{certificateValidationRequest(BENV)}` with `CAP(validate_bounds)` absent / `EVALUABILITY_MISSING` |
+| `SEP_REASONING_REQUEST` | `{R_b}` / `INVOCABLE_FOR(R_b)` | `{R_b[complete_dependencies:=D_w]}` / `MALFORMED_REQUEST` |
+| `SEP_REASONING_CERTIFICATE` | `{BENV}` / `CertificateAdmission.ADMITTED(BCERT,CONSISTENCY_UNSAT)` | `{BENV[payload:=AdapterWitness]}` / `CertificateAdmission.MALFORMED_ENVELOPE` |
+| `SEP_TRUST` | `{Q_t[T_undecided]}` / `EVALUABILITY_UNKNOWN` | `{Q_t[T_incompatible]}` / `EVALUABILITY_MISSING` |
+| `SEP_PAIR_PROOF` | `{PENV}` / `CertificateAdmission.ADMITTED(PCERT,PAIR_COHERENCE_ADMITTED(PAIR(refresh),PCERT))` | `{PENV[payload:=BundleBoundsProof]}` / `CertificateAdmission.MALFORMED_ENVELOPE` |
+| `SEP_SOURCE_AUTHORITY` | `{SRC(b,1)}` / `WELL_FORMED` | `{AUTH(b,1)}` / `WELL_FORMED` |
+| `SEP_AUTHORITY_CANDIDATE` | `{AC(b,1)}` / `WELL_FORMED` | `{AC(b,1)[offered_evidence_refs:={}]}` / `WELL_FORMED` |
+| `SEP_AUTHORITY_BINDING` | `{E_b}` / `CLOSED` | `{E_b^0}` / `OPEN_BINDINGS({AUTHORITY_FACT(AF(b,1))})` |
+| `SEP_AUTHORITY_CAPABILITY` | `{RA(b,1),CAP(authority)}` / `INVOCABLE_FOR(RA(b,1))` | `{RA(b,1)}` with `CAP(authority)` absent / `EVALUABILITY_MISSING` |
+| `SEP_AUTHORITY_REQUEST` | `{RA(b,1)}` / `INVOCABLE_FOR(RA(b,1))` | `{RA(b,1)[environment_without_fact:=E_b]}` / `MALFORMED_REQUEST` |
+| `SEP_FINITE_REQUEST` | `{Q_t[T_admitted]}` / `INVOCABLE_FOR(Q_t[T_admitted])` | `{Q_t[T_failed]}` / `DISCOVERY_FAILED` |
+| `SEP_PAIR_REQUEST` | `{R_p}` / `INVOCABLE_FOR(R_p)` | `{R_p[complete_dependencies:=D_t]}` / `MALFORMED_REQUEST` |
+| `SEP_EVOLUTION_RECORD` | `{PKG_evo_EOK}` / `WELL_FORMED` | `{PKG_evo_EOK[aliases:={a0}]}` / `MALFORMED(missing alias AK1)` |
+| `SEP_EVOLUTION_SERVICE_RECORD` | `{PKG_evo_EOK}` / `WELL_FORMED` | `{PKG_evo_EOK[migrations:={}]}` / `NO_MIGRATION(MK0)` |
+| `SEP_EVOLUTION_ADMISSION` | `{EENV_m}` / `CertificateAdmission.ADMITTED(EC_m,MIGRATION_RELATION_ADMITTED(MK0,EC_m))` | `{EENV_m[trust_root_key:=TR]}` / `CertificateAdmission.MALFORMED_ENVELOPE` |
+
+There are exactly 52 `SeparationRecord` rows, one for each retained
+ledger row.  The pair table does not add adversarial cases; each record cites
+the applicable one of the 18 `K3S-A01..A18` case rows through its ledger row.
 
 ## 9. K3-X semantic input boundary
 
@@ -1584,20 +2230,79 @@ This section freezes semantic inputs only.  It does not select a language,
 module, representation, path, command, output directory, test framework, or
 implementation technique.
 
-The packet contains the complete transitive type/declaration closure of every
-section 2 value used below, including `T(StorageBackend)`, all four artifact
-and observation-result tags, all six payload types, snapshot identity,
-verification/task types, and their exact finite literal families.  It contains
-all three function bindings; all seven ordinary predicate bindings; the
-pair-owned occurrence projection; their ContractSpecs, exact supports,
-closures, access/evidence/failure records, and complete model contracts.  It
-contains all six event declarations, `PAIR(refresh)`, the profile record,
-`CAP(functions)`, `CAP(predicates)`, `CAP(profile)`, `CAP(bounds)`,
-`CAP(confluence)`, `CAP(witness)`, both reasoning-certificate validators, and
-the pair validator frozen below.  Finally it contains the exact requests,
-results, certificates, roots, environments, lifecycle coordinates, and
-missing/conflict variants in §§9.2-9.5.  No declaration or support root needed
-by one of those records is implicit.
+The packet is the following closed finite family.  First fix the only coding
+literal values registered by the fixtures:
+
+```text
+L_X=L_b union L_c union L_w union
+    {t_t:T(TaskSpec),F_t:T(RepositorySnapshot),
+     LOCAL_STORAGE:T(StorageBackend),HOSTED_STORAGE:T(StorageBackend)}
+F_X={DF(snapshot_of),DF(changes_between),DF(observe)}
+Q_X={DP(observations_equal),DP(task_accepts),
+     DP(dependency_metadata_changed),DP(verification_passed),
+     DP(event_matches),DP(event_occurred),DP(refresh_scope)}
+EV_X={DE(command),DE(test),DE(path_change),DE(network_contact),
+      DE(release),DE(dependency_refresh)}
+TYPE_X=the least finite §3.2 nested-type closure of the exact types of L_X,
+       the signatures of F_X/Q_X/EV_X, and
+       {T(ImplementationCoverageSubject),T(CodingEvidenceEntry)}
+DELTA_X={TypeDeclaration(k)|k in TYPE_X} union
+        {LiteralDeclaration(type(v),v)|v in L_X} union
+        {the exact §3.3 Declaration(k)|k in F_X union Q_X} union
+        {the exact §3.4 EventDeclaration(k)|k in EV_X} union
+        {the exact EventScopePairDeclaration(PAIR(refresh))}
+BIND_X={the exact §3.2 literal SemanticBinding(type(v),v)|v in L_X} union
+       {the exact §4.2 SemanticBinding(k)|k in F_X union Q_X} union
+       {the retained EventPairBinding(PAIR(refresh)),
+        ProfileBinding(PK(implementation_evidence))}
+MODEL_X=MODELS(F_X,Q_X,L_X) union
+        {the exact pair-owned occurrence ModelContract}
+SIGMA_X=BIND_X union MODEL_X union
+        UNION(contractFields(r)|r in DELTA_X union BIND_X union MODEL_X)
+```
+
+Define `serviceRecords(d)` to be exactly `{d,ServiceIdentityRecord(d.service_key)}`
+plus every value of the six displayed `ContractSpec` fields of descriptor `d`;
+this is a finite field projection.  The service record set is
+
+```text
+SERVICE_X=UNION(serviceRecords(d)|d in {
+  CAP(functions),CAP(predicates),CAP(profile),CAP(bounds),CAP(confluence),
+  CAP(witness),CAP(validate_bounds),CAP(validate_witness),CAP(authority),PVC,
+  EVCAP_m,EVCAP_c,EVCAP_x0,EVCAP_x1})
+```
+
+The supplied fixture-record set is exactly
+
+```text
+FIXTURE_X={C_b,C_c,C_w,E_b,E_c,E_w,D_b,D_c,D_w,J_b,J_c,J_w,
+  R_b,R_c,R_w,BENV,WENV,BundleBoundsProof,AdapterWitness,
+  BPROOF_REF,WPROOF_REF,ROOT_B,ROOT_W,T_b,T_w,
+  R_p,PENV,PairFullEvalProof,PAIR_PROOF_REF,ROOT_p,T_p,
+  t_t,F_t,EVIDENCE_t,E_t,D_t,r_t,R_lex,E_lex,D_lex,LEX_SOUND,
+  e0,v0,vr0,i0,H0,ev0,te0,src0,auth0,u0,F_noresult,
+  ROOT_TR_t,T_admitted,T_absent,T_undecided,T_incompatible,T_failed,
+  Q_profile_w,ROOT_PROFILE_W,T_profile_w,P_w_result,
+  u_pending_abs_w,i_pending_abs_w,
+  m0,c0,x0,x1,a0,a1,MR0,CC0,XE0,XP0,ROOT_E,T_evo,
+  R_m,R_c0,R_x0,R_x1,EENV_m,EENV_c,EENV_x0,EENV_x1,
+  PKG_evo_EOK,PKG_evo_EPK,PKG_evo_EVK,
+  M_c,Y_c,L_c_ready,L_c_final,K_c,
+  PKG_pi1,PKG_pi2,D_pi11,D_pi12,D_pi21,D_pi22,
+  A_pi11,A_pi12,A_pi21,A_pi22} union
+  {SRC(z,i),AUTH(z,i),AF(z,i),AC(z,i),ATTEST(z,i),AE_REF(z,i),
+   DA(z,i),JA(z,i),UA(z,i),AA(z,i),RA(z,i),AENV(z,i),
+   AADMIT(z,i),ARES(z,i),AFB(z,i)
+     | (z,i) in I_A} union
+  {ES_z,ECOMP_z,EE_z,EF_z,EVCAP_z,ER_z,EADMIT_z|z in Z} union
+  {Q_t[T]|T in {T_admitted,T_absent,T_undecided,T_incompatible,T_failed}}
+PACKET_X={ABI0} union DELTA_X union SIGMA_X union SERVICE_X union FIXTURE_X
+```
+
+Every comprehension ranges over an explicitly displayed finite set.  The two
+permutation packages and their four literal record sequences are enumerated
+in §9.5; the three evolution packages are enumerated in §9.4.  No declaration,
+record field, support root, request, result, or package member is implicit.
 
 Every fixture value is finite logical data: abstract segments/content,
 snapshots, task/verification specs, EvidenceRefs, event payloads, exact keys,
@@ -1663,11 +2368,13 @@ PFAILURE.key  = (PVK,coding.validation.contract,refresh_failure,
 ```
 
 Each has owner `PVK`, owner layer `Service`, and role equal to its key's final
-field.  `PSOUND` and `PCOMPLETE` have primary input `PairAdmissionRequest`,
-codomain `IN_FRAGMENT|OUTSIDE_FRAGMENT`, the complete pair closure as their
-query-map domain, and the exact relation that returns `IN_FRAGMENT` iff
-`B_alt`'s complete `Eval` is equal to the K2 T3/A1 aggregate for every admitted
-finite trace.
+field.  `PSOUND` and `PCOMPLETE` have primary input
+`(EventScopePairKey,OccurrenceSemanticContractBundle)`, codomain
+`IN_FRAGMENT|OUTSIDE_FRAGMENT`, the complete pair closure as their query-map
+domain, and the exact relation that returns `IN_FRAGMENT` iff its input is
+exactly `(PAIR(refresh),B_alt)` and `B_alt`'s complete `Eval` is equal to the
+K2 T3/A1 aggregate for every admitted finite trace; every unequal admitted
+input is `OUTSIDE_FRAGMENT`.
 `PEVIDENCE` admits exactly the typed payload below and its displayed evidence
 references; `PFAILURE` admits exactly the K2 pair-validation evaluation and
 reasoning failure tags.  Their logical relations have no other branch, and
@@ -1682,10 +2389,31 @@ transitive proper closure of the pair subject, required evidence `PEVIDENCE`,
 required roots `{TRP}`, and failure contract `PFAILURE`; its proper
 dependencies and closure are exactly the K2 derivation from those fields.
 
-Let `E_p` be the complete semantic environment containing `PB_alt` and all
-records reachable from the pair/member/model roots, with no ordinary
-`SemanticBinding(DP(refresh_occurred))`.  Let `D_p` be its exact pair-request
-dependency environment.  Its validation-reference set is exactly
+The pair environment and its finite record domain are literally
+
+```text
+types_p=the least §3.2 nested-type closure of
+  {T(DependencyRefreshEventPayload)}
+Delta_p={TypeDeclaration(k)|k in types_p} union
+  {the exact PredicateDeclaration(DP(refresh_scope)),
+   the exact PredicateDeclaration(DP(refresh_occurred)),
+   the exact EventDeclaration(DE(dependency_refresh))}
+Sigma_p={sb,
+  MC(BINDING_IDENTITY(DP(refresh_scope)),refresh_scope),
+  MC(BINDING_IDENTITY(DP(refresh_occurred)),refresh_occurred)} union
+  contractFields(sb) union contractFields(B_alt) union contractFields(PB_alt)
+E_p=SemanticEnvironment(
+  abi_version=ABI0,declarations=Delta_p,pair_declarations={pd},
+  bindings={sb},pair_bindings={PB_alt},profile_bindings={},
+  authority_facts={},semantic_extensions={},lexical_bindings={},
+  choice_bindings={},mechanically_extracted_dependencies=
+    required(PAIR_ADMISSION_SUBJECT(PAIR(refresh))),chi_C={})
+Omega_p={ABI0,E_p,pd,PB_alt,B_alt} union Delta_p union Sigma_p
+D_p=DependencyEnvironment(PAIR_ADMISSION_SUBJECT(PAIR(refresh)),Omega_p)
+```
+
+There is no ordinary `SemanticBinding(DP(refresh_occurred))`.  `D_p`'s
+validation-reference set is exactly
 `{VALIDATION_CERTIFICATE(PCERT),VALIDATION_CAPABILITY(PVC)}`; neither reference
 is in `D_p.proper_dependencies` or its transitive proper closure.  Define
 
@@ -1742,10 +2470,48 @@ never coalesced.
 
 ### 9.3 Five exact trust-state fixtures
 
-Fix admitted `t_t:T(TaskSpec)`, `F_t:T(RepositorySnapshot)`, and
-`EVIDENCE_t:EvidenceStore`; let `E_t` and `D_t` be the complete exact semantic
-and dependency environments of the direct `task_accepts` invocation.  For a
-supplied trust environment `T`, define the otherwise identical request
+Fix the following literal values and records:
+
+```text
+t_t=TASK({OBSERVATION_EQUALS(s_c,O_c)},{})
+F_t=F_c
+coding_entries(EVIDENCE_t)={}
+r_t=VALUE(TRUE,{}, {})
+S_t=PREDICATE_SUBJECT(
+  SP(task_accepts),DP(task_accepts),(t_t,F_t,EVIDENCE_t))
+types_t=the least exact §3.2 nested-type closure of
+  {T(TaskSpec),T(RepositorySnapshot)} and the admitted values t_t,F_t
+Delta_t={TypeDeclaration(k)|k in types_t} union
+        {the exact PredicateDeclaration(DP(task_accepts))}
+Sigma_t={the exact §4.2 SemanticBinding(DP(task_accepts)),
+         MC(BINDING_IDENTITY(DP(task_accepts)),task_accepts),
+         CS(PREDICATE_MEANING,task_accepts),
+         CS(EVIDENCE_SCHEMA,verification),
+         CS(ACCESS_BOUNDARY,task_accepts),
+         CS(UNKNOWN_BEHAVIOR,task),
+         CS(EVALUATION_ERROR_BEHAVIOR,predicate)}
+E_t=SemanticEnvironment(
+  abi_version=ABI0,
+  declarations=Delta_t,
+  pair_declarations={},
+  bindings={the exact §4.2 SemanticBinding(DP(task_accepts))},
+  pair_bindings={},profile_bindings={},authority_facts={},
+  semantic_extensions={},lexical_bindings={},choice_bindings={},
+  mechanically_extracted_dependencies=required(S_t),chi_C={})
+Omega_t={ABI0,E_t} union Delta_t union Sigma_t
+D_t=DependencyEnvironment(S_t,Omega_t)
+```
+
+`Omega_t` has exactly `2+|Delta_t|+7` records; no capability, trust, request,
+result, lifecycle, or carrier projection is a semantic dependency record for
+`S_t`.  Those independently required request fields are supplied below.  The
+`D_t` equation fixes all seven displayed K2 fields: syntax roots
+`required(S_t)`, subject root `BINDING(DP(task_accepts))`, its derived
+association edges, expanded roots, proper dependencies, least transitive
+closure, and empty validation-reference set.  Direct task evaluation on the
+single observation-equality criterion is exactly `r_t`; no evidence entry or
+ambient value is consulted.  For a supplied trust environment `T`, define the
+otherwise identical request
 
 ```text
 Q_t[T] = PredicateRequest(
@@ -1802,12 +2568,68 @@ The otherwise auxiliary keys/values used only to exercise the total missing
 function are fixed as follows:
 
 ```text
-m0 = (CK,coding.migration,missing_fixture,(1))
-c0 = (CK,coding.compatibility,missing_fixture,(1))
-x0 = (CK,coding.extension,optional_missing_fixture,(1))
-x1 = (CK,coding.extension,required_missing_fixture,(1))
-a0 = (CK,coding.alias,optional_missing_fixture)
-a1 = (CK,coding.alias,required_missing_fixture)
+EOK=((capknow.fixture,evolution-owner),(1))
+MK0 = (EOK,coding.migration,missing_fixture,(1))
+CCK0 = (EOK,coding.compatibility,missing_fixture,(1))
+XK0 = (EOK,coding.extension,optional_missing_fixture,(1))
+XK1 = (EOK,coding.extension,required_missing_fixture,(1))
+AK0 = (EOK,coding.alias,optional_missing_fixture)
+AK1 = (EOK,coding.alias,required_missing_fixture)
+MR0 = ContractSpec(
+  contract_key=(EOK,coding.migration.relation,missing_fixture,(1),
+                MIGRATION_RELATION),owner_layer=Sigma,
+  contract_role=MIGRATION_RELATION,
+  primary_input_domain=(SemanticEnvironment,SemanticEnvironment),
+  codomain={FULL_CONTRACT_EQUIVALENCE},observation_queries={},
+  logical_relation={(E_t,E_t)->FULL_CONTRACT_EQUIVALENCE})
+CC0 = ContractSpec(
+  contract_key=(EOK,coding.compatibility.validation,missing_fixture,(1),
+                COMPATIBILITY_VALIDATION),owner_layer=Service,
+  contract_role=COMPATIBILITY_VALIDATION,
+  primary_input_domain=(AbiVersion,AbiVersion,finset(DependencyKey),
+                        finset(DependencyKey)),
+  codomain={COMPATIBLE,INCOMPATIBLE},observation_queries={},
+  logical_relation={(ABI0,ABI0,{MIGRATION(MK0)},
+                    {BINDING(DP(task_accepts))})->COMPATIBLE;
+                    every unequal admitted tuple->INCOMPATIBLE})
+XE0 = ContractSpec(
+  contract_key=(EOK,coding.extension.effect,missing_fixture,(1),
+                SEMANTIC_EXTENSION_EFFECT),owner_layer=Sigma,
+  contract_role=SEMANTIC_EXTENSION_EFFECT,
+  primary_input_domain=AliasBinding,codomain={PRESERVE_EXACT_TARGET},
+  observation_queries={},logical_relation={a0->PRESERVE_EXACT_TARGET,
+                                            a1->PRESERVE_EXACT_TARGET})
+XP0 = ContractSpec(
+  contract_key=(EOK,coding.extension.payload,missing_fixture,(1),
+                SEMANTIC_EXTENSION_PAYLOAD),owner_layer=Sigma,
+  contract_role=SEMANTIC_EXTENSION_PAYLOAD,
+  primary_input_domain=AliasBinding,codomain={NO_ADDITIONAL_MEANING},
+  observation_queries={},logical_relation={a0->NO_ADDITIONAL_MEANING,
+                                            a1->NO_ADDITIONAL_MEANING})
+
+a0 = AliasBinding(
+  alias_key=AK0,exact_target_key=DP(task_accepts),
+  target_kind=PREDICATE,target_exact_version=(1))
+a1 = AliasBinding(
+  alias_key=AK1,exact_target_key=DP(task_accepts),
+  target_kind=PREDICATE,target_exact_version=(1))
+m0 = MigrationDeclaration(
+  migration_key=MK0,source_environment=E_t,target_environment=E_t,
+  semantic_relation=FULL_CONTRACT_EQUIVALENCE,relation_contract=MR0,
+  certificate_key=EC_m,validator_key=EVC_m,trust_root_key=TRE)
+c0 = CompatibilityClaim(
+  claim_key=CCK0,source_abi=ABI0,target_abi=ABI0,
+  source_keys={MIGRATION(MK0)},target_keys={BINDING(DP(task_accepts))},
+  compatibility_contract=CC0,certificate_key=EC_c,
+  validator_key=EVC_c,trust_root_key=TRE)
+x0 = SemanticExtension(
+  extension_key=XK0,target_record_identity=ALIAS_RECORD(AK0),
+  owner_layer=Sigma,semantic_effect=XE0,payload=XP0,
+  certificate_key=EC_x0,validator_key=EVC_x0,trust_root_key=TRE)
+x1 = SemanticExtension(
+  extension_key=XK1,target_record_identity=ALIAS_RECORD(AK1),
+  owner_layer=Sigma,semantic_effect=XE0,payload=XP0,
+  certificate_key=EC_x1,validator_key=EVC_x1,trust_root_key=TRE)
 C_choice = Contract(
   Hard={},Grants={},Choices={
     Choice(storage,T(StorageBackend),
@@ -1819,21 +2641,218 @@ src0 = SourceRef(
 auth0 = AuthorityRef(
   ABI_REASON_ISSUER,coding.fixture,storage_choice_authority)
 af0 = (auth0,src0,user,BIND_CHOICE(storage))
-lk0 = LexicalBindingKey(
-  LexicalScopeIdentity(PREDICATE_REQUEST,subjectOf(Q_t[T_admitted])),
-  task_argument,T(TaskSpec))
+x_task = Variable(task_argument,T(TaskSpec))
+f_lex = Atom(
+  SP(task_accepts),Var(x_task),
+  Apply(SF(snapshot_of),Anchor(final)),Anchor(evidence))
+g_lex = All({})
+scope_lex = LexicalScopeIdentity(FORMULA_ENTAILMENT,(f_lex,g_lex))
+S_lex = FORMULA_SUBJECT({f_lex,g_lex},scope_lex)
+lk0 = LexicalBindingKey(scope_lex,x_task,T(TaskSpec))
+lb0 = LexicalBinding(lexical_binding_key=lk0,admitted_value=t_t)
+Delta_lex=Delta_t union {the exact FunctionDeclaration(DF(snapshot_of))}
+Sigma_lex=Sigma_t union {
+  the exact §4.1 SemanticBinding(DF(snapshot_of)),
+  MC(BINDING_IDENTITY(DF(snapshot_of)),snapshot_of),
+  CS(FUNCTION_MEANING,snapshot_of),CS(EVIDENCE_SCHEMA,none),
+  CS(ACCESS_BOUNDARY,snapshot_of),
+  CS(UNKNOWN_BEHAVIOR,not_applicable),
+  CS(EVALUATION_ERROR_BEHAVIOR,term)}
+E_lex=SemanticEnvironment(
+  abi_version=ABI0,declarations=Delta_lex,pair_declarations={},
+  bindings={b|b in Sigma_lex and b is a SemanticBinding},
+  pair_bindings={},profile_bindings={},authority_facts={},
+  semantic_extensions={},lexical_bindings={lk0->lb0},choice_bindings={},
+  mechanically_extracted_dependencies=required(S_lex),chi_C={})
+Omega_lex={ABI0,E_lex,lb0} union Delta_lex union Sigma_lex
+D_lex = DependencyEnvironment(S_lex,Omega_lex)
+LEX_SOUND = ContractSpec(
+  contract_key=(CK,coding.fixture,lexical_entailment,(1),SOUND_FRAGMENT),
+  owner_layer=Service,contract_role=SOUND_FRAGMENT,
+  primary_input_domain=(Formula,Formula),codomain={IN_FRAGMENT,OUTSIDE_FRAGMENT},
+  observation_queries={},
+  logical_relation={(f_lex,g_lex)->IN_FRAGMENT;
+                    every unequal admitted pair->OUTSIDE_FRAGMENT})
+CAP_lex=((CK,coding.fixture,lexical_entailment,(1),REASONING),
+         formula_entailment)
+R_lex = ReasoningRequest(
+  abi_version=ABI0,judgment=FORMULA_ENTAILMENT,
+  subjects=(f_lex,g_lex),semantic_environment=E_lex,
+  trust_environment=T_absent,required_fragment=LEX_SOUND,
+  complete_dependencies=D_lex,
+  capability_target=ENVIRONMENT_JUDGMENT_TARGET(
+    FORMULA_ENTAILMENT,(f_lex,g_lex),semanticIdentity(E_lex)),
+  capability_key=CAP_lex)
+EPK=((capknow.audit,evolution-proof),(1))
+EVK=((capknow.audit,evolution-validator),(1))
+TRE=(TP,coding,evolution-admission-root,(1))
+EC_m=(PLUGIN_CERTIFICATE_ISSUER(EPK),coding.evolution,migration_m0)
+EC_c=(PLUGIN_CERTIFICATE_ISSUER(EPK),coding.evolution,compatibility_c0)
+EC_x0=(PLUGIN_CERTIFICATE_ISSUER(EPK),coding.evolution,extension_x0)
+EC_x1=(PLUGIN_CERTIFICATE_ISSUER(EPK),coding.evolution,extension_x1)
+EVSK_m=(EVK,coding.validation,migration_m0,(1),MIGRATION_VALIDATION)
+EVSK_c=(EVK,coding.validation,compatibility_c0,(1),COMPATIBILITY_VALIDATION)
+EVSK_x0=(EVK,coding.validation,extension_x0,(1),
+         SEMANTIC_EXTENSION_VALIDATION)
+EVSK_x1=(EVK,coding.validation,extension_x1,(1),
+         SEMANTIC_EXTENSION_VALIDATION)
+EVC_m=(EVSK_m,migration_relation)
+EVC_c=(EVSK_c,compatibility_claim)
+EVC_x0=(EVSK_x0,semantic_extension)
+EVC_x1=(EVSK_x1,semantic_extension)
 e0 = EvidenceRef(
   PLUGIN_ISSUER(CK),coding.verification,missing_matrix_record,
   CS(EVIDENCE_SCHEMA,verification))
 v0 = VERIFY(coding.missing-matrix,s_c,CS(EVIDENCE_SCHEMA,verification))
 vr0 = VERIFICATION_RECORD(
   v0,SNAPSHOT_IDENTITY(F_c),PASS,O_c,{e0})
+i0=EVIDENCE_ENTRY(e0,VERIFICATION_EVIDENCE(vr0))
+coding_entries(H0)={i0}
 ev0 = EventValue(
   EK(dependency_refresh),DEPENDENCY_REFRESH(S_b,SNAPSHOT_IDENTITY(F_c)))
 te0 = TraceEvent(ev0,user)
 u0 = UnknownReason(
   PLUGIN_ISSUER(CK),coding.missing-matrix,(DP(task_accepts)))
+fr_noresult=failureReason(
+  CONCRETE_INVOCATION,PROTOCOL_FAILURE,Q_t[T_admitted],NO_RESULT_SENTINEL)
+F_noresult=InterfaceFailure(
+  domain=CONCRETE_INVOCATION,kind=PROTOCOL_FAILURE,reasons={fr_noresult})
 ```
+
+All validation objects for the four evolution records are finite and exact.
+Let `Z={m,c,x0,x1}` and use only this total table:
+
+| `z` | subject/key | request / judgment | validator / certificate / kind | certificate target / received result |
+|---|---|---|---|---|
+| `m` | `m0/MK0` | `MigrationAdmissionRequest` / `MIGRATION_RELATION_ADMISSION` | `EVC_m/EC_m/MIGRATION_RELATION_PROOF` | `MIGRATION_TRUST_TARGET(MK0)` / `MIGRATION_RELATION_ADMITTED(MK0,EC_m)` |
+| `c` | `c0/CCK0` | `CompatibilityAdmissionRequest` / `COMPATIBILITY_CLAIM_ADMISSION` | `EVC_c/EC_c/COMPATIBILITY_CLAIM_PROOF` | `COMPATIBILITY_TRUST_TARGET(CCK0)` / `COMPATIBILITY_CLAIM_ADMITTED(CCK0,EC_c)` |
+| `x0` | `x0/XK0` | `SemanticExtensionAdmissionRequest` / `SEMANTIC_EXTENSION_ADMISSION` | `EVC_x0/EC_x0/SEMANTIC_EXTENSION_VALIDATION` | `SEMANTIC_EXTENSION_TRUST_TARGET(XK0)` / `SEMANTIC_EXTENSION_ADMITTED(XK0,EC_x0)` |
+| `x1` | `x1/XK1` | `SemanticExtensionAdmissionRequest` / `SEMANTIC_EXTENSION_ADMISSION` | `EVC_x1/EC_x1/SEMANTIC_EXTENSION_VALIDATION` | `SEMANTIC_EXTENSION_TRUST_TARGET(XK1)` / `SEMANTIC_EXTENSION_ADMITTED(XK1,EC_x1)` |
+
+For each displayed `z`, the four complete `ContractSpec[Service]` records
+`ES_z,ECOMP_z,EE_z,EF_z` have keys
+`(EVK,coding.evolution.contract,z,(1),role)` for respectively roles
+`SOUND_FRAGMENT`, `COMPLETE_FRAGMENT`, `REQUIRED_EVIDENCE`, and
+`SERVICE_FAILURE_BEHAVIOR`; their owner/layer are `EVK/Service`.
+`ES_z` and `ECOMP_z` take the row's exact subject-record type, have codomain
+`{IN_FRAGMENT,OUTSIDE_FRAGMENT}`, empty query map/support, and return
+`IN_FRAGMENT` exactly on the displayed subject.  `EE_z` takes
+`EVOLUTION_PROOF`, has codomain `{ADMISSIBLE,INADMISSIBLE}`, empty query
+map/support, and admits exactly
+`EVOLUTION_PROOF(z,recordIdentity(subject(z)),certificateTarget(z))` with the
+single reference
+
+```text
+ER_z=EvidenceRef(PLUGIN_ISSUER(EPK),coding.evolution,z,EE_z.contract_key).
+```
+
+`EF_z` takes `InterfaceFailure`, has the row's exact K2 role-specific nonempty
+reasoning-error codomain, empty query map/support, and uses the total §5.4
+failure mapping.  The four descriptors are exactly
+
+```text
+EVCAP_z=CapabilityDescriptor(
+  capability_key=EVC_z,abi_version=ABI0,plugin_key=EVK,
+  service_role=role(z),capability_class=COMPLETE_FOR_DECLARED_FRAGMENT,
+  supported_judgments={judgment(z)},supported_targets={TARGET_z},
+  sound_fragment=ES_z,complete_fragment=ECOMP_z,
+  dependency_scope=D_ev_z.transitive_dependency_closure,
+  proper_semantic_dependencies=D_ev_z.proper_dependencies,
+  dependency_closure=D_ev_z.transitive_dependency_closure,
+  required_evidence=EE_z,required_trust_roots={TRE},failure_contract=EF_z)
+TARGET_m=ENVIRONMENT_JUDGMENT_TARGET(
+  MIGRATION_RELATION_ADMISSION,(m0),semanticIdentity(E_t))
+TARGET_c=ENVIRONMENT_JUDGMENT_TARGET(
+  COMPATIBILITY_CLAIM_ADMISSION,(c0),semanticIdentity(E_t))
+TARGET_x0=ENVIRONMENT_JUDGMENT_TARGET(
+  SEMANTIC_EXTENSION_ADMISSION,(x0),semanticIdentity(E_t))
+TARGET_x1=ENVIRONMENT_JUDGMENT_TARGET(
+  SEMANTIC_EXTENSION_ADMISSION,(x1),semanticIdentity(E_t))
+Omega_ev_m=Omega_t union {m0,MR0}
+Omega_ev_c=Omega_t union {c0,CC0,m0}
+Omega_ev_x0=Omega_t union {x0,a0,XE0,XP0}
+Omega_ev_x1=Omega_t union {x1,a1,XE0,XP0}
+D_ev_z=DependencyEnvironment(subject(z),Omega_ev_z)
+```
+
+Here `subject(m)=MIGRATION_SUBJECT(m0)`,
+`subject(c)=COMPATIBILITY_SUBJECT(c0)`, and
+`subject(xi)=SEMANTIC_EXTENSION_SUBJECT(xi)`.  The K2 projection puts exactly
+`{VALIDATION_CERTIFICATE(EC_z),VALIDATION_CAPABILITY(EVC_z),
+VALIDATION_TRUST_ROOT(TRE)}` in `D_ev_z.validation_references`, never in proper
+closure.  Define the finite trust and request records:
+
+```text
+U_z=SERVICE_USE_TRUST_TARGET(
+  EVC_z,judgment(z),ENVIRONMENT_USE(judgment(z),(subjectRecord(z))),
+  semanticIdentity(E_t))
+ROOT_E=TrustRootRecord(
+  trust_root_key=TRE,owner=EMBEDDING_POLICY_PRODUCER(TP),
+  trusted_validators={EVC_m,EVC_c,EVC_x0,EVC_x1},
+  permitted_certificate_kinds={MIGRATION_RELATION_PROOF,
+    COMPATIBILITY_CLAIM_PROOF,SEMANTIC_EXTENSION_VALIDATION},
+  permitted_targets={U_m,U_c,U_x0,U_x1,
+    MIGRATION_TRUST_TARGET(MK0),COMPATIBILITY_TRUST_TARGET(CCK0),
+    SEMANTIC_EXTENSION_TRUST_TARGET(XK0),
+    SEMANTIC_EXTENSION_TRUST_TARGET(XK1)},
+  adoption=V0_EXTERNAL_TRUST_PREMISE)
+T_evo=TrustEnvironment(
+  trust_policy_key=TP,policy_owner=EMBEDDING_POLICY_PRODUCER(TP),
+  root_judgments={TRE->TRUST_ROOT_ADMITTED(ROOT_E)})
+R_m=MigrationAdmissionRequest(ABI0,m0,E_t,T_evo,D_ev_m,TARGET_m,EVC_m)
+R_c0=CompatibilityAdmissionRequest(ABI0,c0,E_t,T_evo,D_ev_c,TARGET_c,EVC_c)
+R_x0=SemanticExtensionAdmissionRequest(
+  ABI0,x0,E_t,T_evo,D_ev_x0,TARGET_x0,EVC_x0)
+R_x1=SemanticExtensionAdmissionRequest(
+  ABI0,x1,E_t,T_evo,D_ev_x1,TARGET_x1,EVC_x1)
+```
+
+`R_z` below means exactly the corresponding one of
+`R_m,R_c0,R_x0,R_x1`.  The sole envelope and admission for each row are
+
+```text
+EENV_z=CertificateEnvelope(
+  certificate_key=EC_z,certificate_kind=kind(z),request_binding=R_z,
+  subjects=(subjectRecord(z)),environment=E_t,capability_key=EVC_z,
+  fragment=ES_z,dependencies=D_ev_z,
+  claimed_conclusion=received(z),validator_key=EVC_z,
+  trust_root_key=TRE,abstraction_class=SYMBOLIC,
+  payload=EVOLUTION_PROOF(z,recordIdentity(subjectRecord(z)),
+                          certificateTarget(z)),
+  evidence_refs={ER_z})
+EADMIT_z=CertificateAdmission.ADMITTED(EC_z,received(z))
+```
+
+The four-row table is the exhaustive definition of
+`subjectRecord/judgment/role/kind/certificateTarget/received`; none is a prose
+alias.  The exact subject producer set is
+`{PLUGIN_PRODUCER(EOK),PLUGIN_PRODUCER(CK)}`.  Certificate, validator, and root producers are
+`PLUGIN_PRODUCER(EPK)`, `PLUGIN_PRODUCER(EVK)`, and
+`EMBEDDING_POLICY_PRODUCER(TP)`, respectively, and are pairwise distinct.
+The complete package records used by this fixture are
+
+```text
+PKG_evo_EOK=PluginPackage(
+  ABI0,EOK,declarations={},pair_declarations={},bindings={},pair_bindings={},
+  profile_bindings={},model_contracts={},aliases={a0,a1},services={},
+  certificates={},authority_facts={},compatibility_claims={c0},
+  migrations={m0},semantic_extensions={x0,x1},diagnostics=NONE)
+PKG_evo_EPK=PluginPackage(
+  ABI0,EPK,declarations={},pair_declarations={},bindings={},pair_bindings={},
+  profile_bindings={},model_contracts={},aliases={},services={},
+  certificates={EENV_m,EENV_c,EENV_x0,EENV_x1},authority_facts={},
+  compatibility_claims={},migrations={},semantic_extensions={},
+  diagnostics=NONE)
+PKG_evo_EVK=PluginPackage(
+  ABI0,EVK,declarations={},pair_declarations={},bindings={},pair_bindings={},
+  profile_bindings={},model_contracts={},aliases={},
+  services={EVCAP_m,EVCAP_c,EVCAP_x0,EVCAP_x1},certificates={},
+  authority_facts={},compatibility_claims={},migrations={},
+  semantic_extensions={},diagnostics=NONE)
+```
+
+These three packages are finite missing-record fixtures only; they do not
+replace the retained coding package.
 
 | missing kind | exact fixture reference | exact `missingStatus` / resulting family |
 |---|---|---|
@@ -1843,28 +2862,28 @@ u0 = UnknownReason(
 | `SYMBOL` | `SP(task_accepts)` from that declaration | `MALFORMED` |
 | `EVENT` | `EVENT_VALUE_RECORD`'s required `EK(dependency_refresh)` declaration | `MALFORMED` |
 | `PAIR_DECLARATION` | `PAIR_DECLARATION_RECORD(PAIR(refresh))` | `MALFORMED` |
-| required Delta `CARRIER` | exact `vr0` required by `CS(EVIDENCE_SCHEMA,verification)` | `MALFORMED` |
+| required `CARRIER(OUTCOME,IDENTITY_OF(O_w))` | `OUTCOME_RECORD(IDENTITY_OF(O_w))` required by the exact satisfying-witness envelope | `MALFORMED` |
 | `BINDING` | `BINDING_RECORD(DP(task_accepts))` | `OPEN_BINDINGS` |
 | `PROFILE_BINDING` | `PROFILE_BINDING_RECORD(PK(implementation_evidence))` | `OPEN_BINDINGS` |
 | `PAIR_BINDING` | `PAIR_BINDING_RECORD(PAIR(refresh))` | `OPEN_BINDINGS` |
 | `AUTHORITY_FACT` | `af0` | `OPEN_BINDINGS` |
 | required `CHOICE_BINDING` | `cb0` | `OPEN_BINDINGS` |
-| `LEXICAL_BINDING` | required `lk0`; the same key in a subject with no matching free variable | respectively `MALFORMED_REQUEST`; `OPEN_BINDINGS` only when the exact K1 closure premise names that unbound coordinate |
+| `LEXICAL_BINDING` | remove `LEXICAL_BINDING_RECORD(lk0)` from exact free-variable request `R_lex`; separately add an extraneous `lk0` to closed request `Q_t[T_admitted]` | respectively `OPEN_BINDINGS({LEXICAL_BINDING(lk0)})`; `MALFORMED_REQUEST(EXTRANEOUS_LEXICAL_BINDING(lk0))` |
 | `SERVICE` | `SERVICE_RECORD(SK(predicates))` | `EVALUABILITY_MISSING` |
 | `CAPABILITY` | `CAPABILITY_RECORD(CAP(predicates))` | `EVALUABILITY_MISSING` |
 | `TRUST_POLICY` | exact derived `TRUST_POLICY_RECORD(TP)` coordinate | `TRUST_ROOT_ABSENT` and no service use |
 | `TRUST_ROOT` | `TRUST_ROOT_RECORD(TR)` required by `Q_t` | `TRUST_ROOT_ABSENT(TR)` and no service use |
 | `CERTIFICATE` | `CERTIFICATE_RECORD(BCERT)` required by `R_b` | `NO_CERTIFICATE_ADMISSION`; no `CONSISTENCY_UNSAT` |
-| `MIGRATION` | one exact referenced `MigrationKey m0` | `NO_MIGRATION(m0)` |
-| `COMPATIBILITY_CLAIM` | one exact referenced `CompatibilityClaimKey c0` | `NO_COMPATIBILITY(c0)` |
-| `SEMANTIC_EXTENSION` | exact optional extension `x0`; exact required offered extension `x1` | respectively `NO_EFFECT(x0)`; `INCOMPATIBLE(x1)` |
+| `MIGRATION` | remove `MIGRATION_RECORD(MK0)` while retaining `c0.source_keys={MIGRATION(MK0)}` | `NO_MIGRATION(MK0)` |
+| `COMPATIBILITY_CLAIM` | remove `COMPATIBILITY_RECORD(CCK0)` while retaining the exact compatibility-admission context `R_c0` | `NO_COMPATIBILITY(CCK0)` |
+| `SEMANTIC_EXTENSION` | remove unreferenced `SEMANTIC_EXTENSION_RECORD(XK0)` from the optional package context; remove `SEMANTIC_EXTENSION_RECORD(XK1)` while retaining `R_x1` | respectively `NO_EFFECT(XK0)`; `INCOMPATIBLE(XK1)` |
 | `MODEL_CONTRACT` | model record for `DP(task_accepts)` | `OPEN_BINDINGS(model contract)` |
-| `ALIAS` | unreferenced exact alias `a0`; required exact alias `a1` | respectively `NO_ALIAS(a0)`; `MALFORMED(missing alias a1)` |
+| `ALIAS` | remove unreferenced `ALIAS_RECORD(AK0)` after also omitting optional `x0`; remove `ALIAS_RECORD(AK1)` while retaining `x1.target_record_identity=ALIAS_RECORD(AK1)` | respectively `NO_ALIAS(AK0)`; `MALFORMED(missing alias AK1)` |
 | `CONTRACT_SPEC` | `CS(PREDICATE_MEANING,task_accepts)` | Sigma owner incompatibility and the binding stays open; a missing Service spec makes its descriptor incompatible |
 | `REQUEST` | `REQUEST_RECORD(IDENTITY_OF(Q_t[T_admitted]))` at invocation | `MALFORMED_REQUEST` |
-| `RESULT` | the completed result record for that exact request | exact `NO_RESULT_SENTINEL` protocol failure, with no returned truth |
-| non-Delta environment `CARRIER` | each of `SEMANTIC_ENVIRONMENT_RECORD(E_t)`, `TRUST_ENVIRONMENT_RECORD(T_admitted)`, `DEPENDENCY_ENVIRONMENT_RECORD(D_t)`, and the required observation-environment record | `MALFORMED_REQUEST` when absent from request formation; an unequal completed projection is protocol failure |
-| non-Delta lifecycle/value `CARRIER` | lifecycle coordinate of `Q_t[T_admitted]`; `O_w`; `ev0`; `te0`; `src0`; `auth0`; `e0`; `u0`; and the exact conflict of `d/d_bad` in §9.5 | respectively derived-coordinate nonconformance; malformed request; malformed event/trace/source/authority carriers; factual unknown for the absent referenced verification record; malformed result for an omitted required nonempty reason; and no independently omittable derived conflict record |
+| `RESULT` | `RESULT_RECORD((IDENTITY_OF(Q_t[T_admitted]),Eval,IDENTITY_OF(r_t)))` | exact `F_noresult` and `INVOCATION_FAILED(PROTOCOL,{fr_noresult})`; no truth is returned |
+| environment `CARRIER` | `SEMANTIC_ENVIRONMENT_RECORD(semanticIdentity(E_t))`; `TRUST_ENVIRONMENT_RECORD(trustEnvironmentIdentity(T_admitted))`; `DEPENDENCY_ENVIRONMENT_RECORD(IDENTITY_OF(D_t))`; `OBSERVATION_ENVIRONMENT_RECORD(IDENTITY_OF(M_c))` | exact absent request field is `MALFORMED_REQUEST`; unequal completed projection is `MALFORMED_RESULT(SEMANTIC_MISMATCH)` |
+| lifecycle/other value `CARRIER` | derived `LIFECYCLE_RECORD((J_c,IDENTITY_OF(R_c)))`; `EVENT_VALUE_RECORD(IDENTITY_OF(ev0))`; `TRACE_EVENT_RECORD(IDENTITY_OF(te0))`; `SOURCE_RECORD(IDENTITY_OF(src0))`; `AUTHORITY_REF_RECORD(IDENTITY_OF(auth0))`; `EVIDENCE_RECORD(e0)`; `REASON_RECORD(UnknownReason,IDENTITY_OF(u0))`; `CONFLICT_RECORD(CONFLICT_OF(d,d_bad))` | lifecycle and conflict are recomputed and have no independently removable supplied record; the other six exact absences yield respectively malformed event, trace, source, authority, factual `UNKNOWN` for the referenced verification evidence, and malformed result for a required nonempty reason |
 
 There is no generic carrier/result selector in this matrix: every retained K2
 missing-status constructor has an exact named row or exhaustive named
@@ -1878,9 +2897,9 @@ node results
 ```text
 N_o = BINDING(DF(observe))
 N_d = BINDING(DF(changes_between))
-V_o = TERM_VALUE(O_c)
-V_d = TERM_VALUE(X_c)
-M_c = {N_o -> V_o, N_d -> V_d}
+V_o = TERM_OBS(TERM_VALUE(O_c))
+V_d = TERM_OBS(TERM_VALUE(X_c))
+M_c = DependencyObservationEnvironment({N_o -> V_o, N_d -> V_d})
 ```
 
 The `CS(SOUND_FRAGMENT,confluence_fixture)` query at `N_o` is exactly
@@ -1924,30 +2943,101 @@ T_c = TrustEnvironment(
   root_judgments={TR -> TRUST_ROOT_ADMITTED(ROOT_TR_c)})
 ```
 
-The nonempty certificate-kind set grants no admission target.  Under both
-orders, the exact status vector is
-`(WELL_FORMED,CLOSED,CAPABILITY_DISCOVERED,INVOCABLE_FOR(R_c),COMPLETED(Y_c),
-CONSISTENCY_UNKNOWN)`.  Adding `N_o -> N_d` still permits only `O_1`; adding
+The nonempty certificate-kind set grants no admission target.  The ordered
+invocation transition under either topological order is
+
+```text
+L_c_ready = LifecycleState(
+  DECLARATION_NOT_REQUIRED,BINDING_NOT_REQUIRED,
+  CAPABILITY_DISCOVERED,INVOCABLE_FOR(R_c))
+L_c_final = LifecycleState(
+  DECLARATION_NOT_REQUIRED,BINDING_NOT_REQUIRED,
+  CAPABILITY_DISCOVERED,COMPLETED(Y_c))
+K_c = (WELL_FORMED,CLOSED,EVALUABILITY_AVAILABLE,
+       LIFECYCLE_RECORD((J_c,IDENTITY_OF(R_c)))->L_c_final,
+       OBSERVATION_ENVIRONMENT_RECORD(IDENTITY_OF(M_c))->M_c,
+       RESULT_RECORD((IDENTITY_OF(R_c),ReasoningResult,
+                      IDENTITY_OF(Y_c)))->Y_c,
+       CONSISTENCY_UNKNOWN)
+```
+
+`L_c_ready -> L_c_final` is one ordered state transition.  `L_c_final` has
+exactly one `InvocationState`, `COMPLETED(Y_c)`; it does not retain
+`INVOCABLE_FOR(R_c)`.  Thus both orders have the identical complete map,
+result, final lifecycle, and `K_c`.  Adding `N_o -> N_d` still permits only
+`O_1`; adding
 both `N_o -> N_d` and `N_d -> N_o`, or a self-edge, is `MALFORMED`.  This DAG
 is independent of direct, empty-support `task_accepts`.
 
-Let `PKG_CK`, `PKG_AWK`, `PKG_RVK`, `PKG_PPK`, and `PKG_PVK` denote the exact
-complete finite K2 packages whose fields are the records frozen in §§3-6 and
-§9.2 for their respective plugin keys.  Define the finite package set
-`G={PKG_CK,PKG_AWK,PKG_RVK,PKG_PPK,PKG_PVK}` and two presentations
+The package-order fixture is a separate finite literal construction.  Fix
 
 ```text
-Pi_pkg_1 = [PKG_CK,PKG_AWK,PKG_RVK,PKG_PPK,PKG_PVK]
-Pi_pkg_2 = [PKG_PVK,PKG_PPK,PKG_RVK,PKG_AWK,PKG_CK]
+P_pi1=((capknow.fixture,permutation-one),(1))
+P_pi2=((capknow.fixture,permutation-two),(1))
+T_pi11=(P_pi1,TYPE,fixture_unit_one,(1))
+T_pi12=(P_pi1,TYPE,fixture_unit_two,(1))
+T_pi21=(P_pi2,TYPE,fixture_unit_three,(1))
+T_pi22=(P_pi2,TYPE,fixture_unit_four,(1))
 ```
 
-For each package, its record set is exhaustively ordered first by the K2
-`RecordIdentity` constructor order and then by complete identity-field tuple;
-call that sequence `Pi_rec_1(P)` and its reversal `Pi_rec_2(P)`.  This is a
-reproducible order over every record, not a name/display sort or an omitted
-subset.  Composition of either package presentation and either record
-presentation yields the same set `G`, environments, observation map `M_c`,
-status vector, and result `Y_c`.
+For `ij in {11,12,21,22}`, `A_piij` is the complete
+`ContractSpec[Delta]` whose key is
+`(owner(T_piij),coding.fixture.type-admission,local(T_piij),(1),TYPE_ADMISSION)`,
+owner layer and role are `Delta/TYPE_ADMISSION`, primary domain is the exact
+sort `Value`, codomain is `ValueAdmissionResult`, observation-query map and
+support are `{}`, and logical relation returns
+`VALUE_ADMITTED(T_piij,UNIT_piij)` exactly on `UNIT_piij` and
+`VALUE_NOT_ADMITTED(T_piij,v)` on every unequal supplied `v`.  Define the four
+complete declarations
+
+```text
+D_piij = TypeDeclaration(
+  key=T_piij,admitted_value_domain=A_piij,
+  proper_declaration_dependencies={})
+```
+
+and the two literal packages (every omitted-looking field is displayed):
+
+```text
+PKG_pi1 = PluginPackage(
+  abi_version=ABI0,plugin_key=P_pi1,
+  declarations={D_pi11,D_pi12},pair_declarations={},bindings={},
+  pair_bindings={},profile_bindings={},model_contracts={},aliases={},
+  services={},certificates={},authority_facts={},compatibility_claims={},
+  migrations={},semantic_extensions={},diagnostics=NONE)
+PKG_pi2 = PluginPackage(
+  abi_version=ABI0,plugin_key=P_pi2,
+  declarations={D_pi21,D_pi22},pair_declarations={},bindings={},
+  pair_bindings={},profile_bindings={},model_contracts={},aliases={},
+  services={},certificates={},authority_facts={},compatibility_claims={},
+  migrations={},semantic_extensions={},diagnostics=NONE)
+G_pi={PKG_pi1,PKG_pi2}
+R_pi1={PACKAGE_RECORD(ABI0,P_pi1),
+       DECLARATION_RECORD(T_pi11),DECLARATION_RECORD(T_pi12),
+       CONTRACT_SPEC_RECORD(A_pi11.contract_key),
+       CONTRACT_SPEC_RECORD(A_pi12.contract_key)}
+R_pi2={PACKAGE_RECORD(ABI0,P_pi2),
+       DECLARATION_RECORD(T_pi21),DECLARATION_RECORD(T_pi22),
+       CONTRACT_SPEC_RECORD(A_pi21.contract_key),
+       CONTRACT_SPEC_RECORD(A_pi22.contract_key)}
+```
+
+The only two package presentations and their two literal per-package record
+presentations are
+
+```text
+Pi_pkg_1=[PKG_pi1,PKG_pi2]
+Pi_pkg_2=[PKG_pi2,PKG_pi1]
+Pi_rec_1(PKG_pi1)=[PKG_pi1,D_pi11,A_pi11,D_pi12,A_pi12]
+Pi_rec_2(PKG_pi1)=[A_pi12,D_pi12,A_pi11,D_pi11,PKG_pi1]
+Pi_rec_1(PKG_pi2)=[PKG_pi2,D_pi21,A_pi21,D_pi22,A_pi22]
+Pi_rec_2(PKG_pi2)=[A_pi22,D_pi22,A_pi21,D_pi21,PKG_pi2]
+```
+
+There is no implicit constructor ordering or unlisted record.  All four
+combinations yield exactly `(G_pi,R_pi1 union R_pi2,
+{T_pi11->D_pi11,T_pi12->D_pi12,T_pi21->D_pi21,T_pi22->D_pi22},
+WELL_FORMED,CLOSED)`.  Separately, `O_1/O_2` yield exactly `(M_c,Y_c,K_c)`.
 
 Finally, let `d` and `d'` be independently constructed complete equal copies
 of the exact `DP(task_accepts)` declaration, and let `d_bad` have the same key
@@ -1976,13 +3066,13 @@ writer or package-order rule exists.
 
 ### 9.7 Intentionally excluded executable branches
 
-The finite slice intentionally omits every retained K3-S type, function,
-predicate, event, profile, or capability not enumerated in section 9.1,
-including concrete profile checking, path-scope/dependency-change evaluation,
-command/test/path-change event payload branches, migration, compatibility,
-semantic extensions, aliases, authority admission, general cross-plugin joint
-reasoning, public relation services, independent non-pair certificate kinds,
-and every K2 branch not required by the thirteen checks.  It also omits byte
+The finite slice intentionally omits every literal value, request, target, and
+capability not enumerated in `L_X/FIXTURE_X/SERVICE_X`.  In particular it
+omits general cross-plugin joint reasoning, public relation services,
+evolution records beyond the four `Z` fixtures, authority facts beyond the
+five `I_A` fixtures, certificate kinds/targets beyond the enumerated
+pair/authority/evolution/bounds/witness records, and every K2 branch not
+required by the thirteen checks.  It also omits byte
 serialization, discovery transport, real repository state, real commands,
 network activity, concurrency, retry behavior, planning, mutation, and models.
 Omission from this finite slice is not a semantic rejection of K2 or K3-S.
