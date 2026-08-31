@@ -106,7 +106,7 @@ def _replay_assertion(universe: ref.Universe, replayed: object) -> fx.ReplayAsse
         outcome = (
             "PAIR", replayed.formation, replayed.closure,
             _key_literal(replayed.result.pair_key),
-            _key_literal(replayed.result.certificate_key), replayed.result.result,
+            _key_literal(replayed.result.certificate_key), replayed.result.result.tag,
         )
     elif isinstance(replayed, ref.LookupReplay):
         outcome = ("LOOKUP", *_judgment_literal(replayed.result))
@@ -159,6 +159,34 @@ class K3XReferenceTests(unittest.TestCase):
         self.assertEqual(empty_result.formation, ref.Formation.MALFORMED)
         removed_result = ref.replay(_rewrite(construction.universe, {construction.package: None}))
         self.assertEqual(removed_result.formation, ref.Formation.MALFORMED)
+
+        task_type = next(
+            item for item in ref.compose_records(construction.universe.records).records
+            if isinstance(item.value, ref.TypeDeclaration)
+            and item.identity.key.local == "TaskSpec"
+        )
+        reduced_type = replace(
+            task_type,
+            value=replace(task_type.value, proper_declaration_dependencies=frozenset()),
+        )
+        self.assertEqual(
+            ref.replay(_rewrite(construction.universe, {task_type.identity: reduced_type})).formation,
+            ref.Formation.MALFORMED,
+        )
+        changed_domain = replace(
+            task_type,
+            value=replace(
+                task_type.value,
+                admitted_value_domain=replace(
+                    task_type.value.admitted_value_domain,
+                    admitted_constructor_tags=frozenset({"FOREIGN_TASK"}),
+                ),
+            ),
+        )
+        self.assertEqual(
+            ref.replay(_rewrite(construction.universe, {task_type.identity: changed_domain})).formation,
+            ref.Formation.MALFORMED,
+        )
 
         missing_path = cp.Path((cp.PathSegment("missing.py"),))
         missing_spec = cp.ObservationSpec(cp.ObservationSpecTag.ARTIFACT_VIEW, cp.ArtifactSelector(cp.SelectorTag.PATHS_WITH_ROLE, frozenset({missing_path}), cp.ArtifactRole.SOURCE), cp.ArtifactProjection(cp.ProjectionTag.CONTENT))
@@ -306,7 +334,7 @@ class K3XReferenceTests(unittest.TestCase):
         construction = fx.pair_construction()
         admitted = ref.replay(construction.universe)
         self.assertIsInstance(admitted, ref.PairReplay)
-        self.assertEqual(admitted.result.result, "PAIR_COHERENCE_ADMITTED")
+        self.assertEqual(admitted.result.result.tag, "PAIR_COHERENCE_ADMITTED")
         binding = _at(construction.universe, construction.pair_binding)
         self.assertEqual(len(binding.value.validation_references), 2)
         self.assertFalse(binding.value.validation_references & binding.value.proper_semantic_dependencies)
@@ -334,9 +362,42 @@ class K3XReferenceTests(unittest.TestCase):
         empty_pair_package = replace(empty_pair_package, value=replace(empty_pair_package.value, declarations=(), pair_declarations=(), bindings=(), pair_bindings=(), profile_bindings=(), model_contracts=(), aliases=(), services=(), certificates=(), authority_facts=(), compatibility_claims=(), migrations=(), semantic_extensions=()))
         self.assertNotEqual(ref.replay(_rewrite(construction.universe, {empty_pair_package.identity: empty_pair_package})), admitted)
 
+        pair_models = tuple(
+            item for item in ref.compose_records(construction.universe.records).records
+            if isinstance(item.value, ref.ModelContract)
+        )
+        self.assertEqual(len(pair_models), 2)
+        for model in pair_models:
+            with self.subTest(removed_pair_model=model.identity):
+                self.assertNotIsInstance(
+                    ref.replay(_rewrite(construction.universe, {model.identity: None})),
+                    ref.PairReplay,
+                )
+        dependency = _at(construction.universe, pair_request.value.complete_dependencies)
+        for field_name in (
+            "syntax_root_keys", "subject_root_keys", "binding_association_edges",
+            "expanded_root_keys", "proper_dependencies",
+            "transitive_dependency_closure", "validation_references",
+        ):
+            changed = replace(
+                dependency,
+                value=replace(dependency.value, **{field_name: frozenset()}),
+            )
+            with self.subTest(pair_dependency_field=field_name):
+                self.assertNotIsInstance(
+                    ref.replay(_rewrite(construction.universe, {dependency.identity: changed})),
+                    ref.PairReplay,
+                )
+
         cycle = ref.replay(fx.cycle_universe())
         self.assertEqual(cycle[:2], (ref.Formation.MALFORMED, ref.Closure.NOT_APPLICABLE))
         self.assertEqual(cycle[2], ref.Judgment("MALFORMED", ("dependency cycle",)))
+        cycle_model = next(
+            item for item in ref.compose_records(fx.cycle_universe().records).records
+            if isinstance(item.value, ref.ModelContract)
+        )
+        malformed_cycle = ref.replay(_rewrite(fx.cycle_universe(), {cycle_model.identity: None}))
+        self.assertNotEqual(malformed_cycle[2], ref.Judgment("MALFORMED", ("dependency cycle",)))
 
     def test_k3x_06_five_trust_lifecycle_and_discovery_branches(self) -> None:
         projections = {}
@@ -455,6 +516,24 @@ class K3XReferenceTests(unittest.TestCase):
         self.assertEqual(ref.validate_contract_spec(service_bad_kind).tag, "WELL_FORMED")
         duplicate_query = replace(service_bad_kind, observation_queries=service_bad_kind.observation_queries * 2)
         self.assertEqual(ref.validate_contract_spec(duplicate_query).details[0], "DUPLICATE_OBSERVATION_QUERY")
+        dependency = _at(forward.universe, forward.universe.request.dependency_environment)
+        foreign = fx.rid(ref.RecordKind.DECLARATION, "foreign", namespace="confluence")
+        dependency_mutations = {
+            "syntax_root_keys": dependency.value.syntax_root_keys | frozenset({foreign}),
+            "subject_root_keys": frozenset(),
+            "binding_association_edges": frozenset({(foreign, foreign)}),
+            "expanded_root_keys": dependency.value.expanded_root_keys | frozenset({foreign}),
+            "proper_dependencies": frozenset(),
+            "transitive_dependency_closure": frozenset(),
+            "validation_references": frozenset({foreign}),
+        }
+        for field_name, value in dependency_mutations.items():
+            changed = replace(
+                dependency,
+                value=replace(dependency.value, **{field_name: value}),
+            )
+            with self.subTest(confluence_dependency_field=field_name), self.assertRaises(ValueError):
+                ref.replay(_rewrite(forward.universe, {dependency.identity: changed}))
         permutation_results = [ref.replay(fx.permutation_universe(package_order, record_order)) for package_order in fx.PackageOrderTag for record_order in fx.RecordOrderTag]
         self.assertTrue(all(result.composition == permutation_results[0].composition for result in permutation_results))
         permutation_records = permutation_results[0].composition.records
@@ -569,6 +648,32 @@ class K3XReferenceTests(unittest.TestCase):
         )
         with self.assertRaises(ref.FiniteProfileError):
             ref.replay(replace(lexical.variant, request=arbitrary))
+        trust = fx.missing_construction(fx.MissingRowId.TRUST_ROOT)
+        original_consumer = trust.variant.request.coordinate.consumer
+        assert original_consumer is not None
+        foreign_consumer = replace(
+            original_consumer,
+            key=replace(original_consumer.key, owner="foreign.owner"),
+        )
+        foreign_coordinate = replace(
+            trust.variant.request.coordinate, consumer=foreign_consumer
+        )
+        foreign_context = tuple(
+            foreign_consumer if item == original_consumer else item
+            for item in trust.variant.request.context_roots
+        )
+        consumer_record = _at(trust.variant, original_consumer)
+        foreign_record = replace(consumer_record, identity=foreign_consumer)
+        with self.assertRaises(ref.FiniteProfileError):
+            ref.replay(replace(
+                trust.variant,
+                records=(*trust.variant.records, foreign_record),
+                request=replace(
+                    trust.variant.request,
+                    coordinate=foreign_coordinate,
+                    context_roots=foreign_context,
+                ),
+            ))
 
     def test_k3x_12_all_102_replays_without_identifier_or_assertion_input(self) -> None:
         packet = fx.fixture_packet()
