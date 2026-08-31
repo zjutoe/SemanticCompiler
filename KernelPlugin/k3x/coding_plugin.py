@@ -36,7 +36,7 @@ class OtherArtifactRole:
     atom: str
 
     def __post_init__(self) -> None:
-        if not self.atom:
+        if type(self.atom) is not str or not self.atom:
             raise ValueError("OTHER_ROLE atom is nonempty")
 
 
@@ -55,7 +55,7 @@ class OtherFormat:
     atom: str
 
     def __post_init__(self) -> None:
-        if not self.atom:
+        if type(self.atom) is not str or not self.atom:
             raise ValueError("OTHER_FORMAT atom is nonempty")
 
 
@@ -217,7 +217,7 @@ class PathSegment:
     atom: str
 
     def __post_init__(self) -> None:
-        if not self.atom or self.atom in {".", ".."}:
+        if type(self.atom) is not str or not self.atom or self.atom in {".", ".."}:
             raise ValueError("inadmitted PathSegment")
 
 
@@ -226,7 +226,7 @@ class Path:
     segments: tuple[PathSegment, ...]
 
     def __post_init__(self) -> None:
-        if not self.segments:
+        if not self.segments or any(not isinstance(item, PathSegment) for item in self.segments):
             raise ValueError("Path is nonempty")
 
 
@@ -235,7 +235,7 @@ class ByteSize:
     kib: int
 
     def __post_init__(self) -> None:
-        if self.kib < 0:
+        if type(self.kib) is not int or self.kib < 0:
             raise ValueError("ByteSize is nonnegative")
 
 
@@ -244,7 +244,7 @@ class ContentIdentity:
     atom: str
 
     def __post_init__(self) -> None:
-        if not self.atom:
+        if type(self.atom) is not str or not self.atom:
             raise ValueError("ContentIdentity atom is nonempty")
 
 
@@ -253,7 +253,7 @@ class FieldId:
     atom: str
 
     def __post_init__(self) -> None:
-        if not self.atom:
+        if type(self.atom) is not str or not self.atom:
             raise ValueError("FieldId atom is nonempty")
 
 
@@ -332,6 +332,11 @@ class ArtifactContent:
     observations: tuple[tuple[SubjectId, BehaviorValue], ...] = ()
 
     def __post_init__(self) -> None:
+        if (not isinstance(self.tag, ArtifactTag)
+                or not isinstance(self.role, (ArtifactRole, OtherArtifactRole))
+                or not isinstance(self.format, (Format, OtherFormat))
+                or not isinstance(self.size, ByteSize)):
+            raise ValueError("ArtifactContent nested sort")
         if len({key for key, _ in self.fields}) != len(self.fields):
             raise ValueError("duplicate structured field")
         if len({key for key, _ in self.observations}) != len(self.observations):
@@ -366,6 +371,8 @@ class RepositorySnapshot:
     entries: tuple[tuple[Path, ArtifactContent], ...]
 
     def __post_init__(self) -> None:
+        if any(not isinstance(path, Path) or not isinstance(value, ArtifactContent) for path, value in self.entries):
+            raise ValueError("RepositorySnapshot is Path -> ArtifactContent")
         if len({path for path, _ in self.entries}) != len(self.entries):
             raise ValueError("duplicate snapshot path")
         object.__setattr__(self, "entries", tuple(sorted(self.entries, key=lambda item: item[0])))
@@ -381,6 +388,10 @@ class ArtifactSelector:
     role: ArtifactRole | OtherArtifactRole | None = None
 
     def __post_init__(self) -> None:
+        if (not isinstance(self.tag, SelectorTag)
+                or any(not isinstance(path, Path) for path in self.paths)
+                or (self.role is not None and not isinstance(self.role, (ArtifactRole, OtherArtifactRole)))):
+            raise ValueError("ArtifactSelector nested sort")
         valid = (
             self.tag is SelectorTag.PATHS and self.role is None
         ) or (
@@ -473,7 +484,7 @@ class ObservationValue:
             ObservationValueTag.PRESENT_FORMAT: lambda values: isinstance(values[0], (Format, OtherFormat)),
             ObservationValueTag.PRESENT_FIELD: lambda values: isinstance(values[0], FieldValue),
             ObservationValueTag.PRESENT_SIZE: lambda values: isinstance(values[0], ByteSize),
-            ObservationValueTag.METRIC_VALUE: lambda values: isinstance(values[0], int),
+            ObservationValueTag.METRIC_VALUE: lambda values: type(values[0]) is int,
             ObservationValueTag.RESOLUTION_VALUE: lambda values: isinstance(values[0], ContentIdentity),
             ObservationValueTag.CORRESPONDENCE_VALUE: lambda values: all(isinstance(value, tuple) for value in values),
             ObservationValueTag.BEHAVIOR_CONFLICT: lambda values: isinstance(values[0], frozenset) and all(isinstance(value, BehaviorValue) for value in values[0]),
@@ -982,7 +993,7 @@ def _selector_domain(selector: ArtifactSelector, snapshot: RepositorySnapshot) -
     if selector.tag in {SelectorTag.PATHS, SelectorTag.PATHS_WITH_ROLE}:
         return selector.paths
     assert selector.role is not None
-    return frozenset(path for path, artifact in snapshot.entries if artifact.role is selector.role)
+    return frozenset(path for path, artifact in snapshot.entries if artifact.role == selector.role)
 
 
 def _selected_present(selector: ArtifactSelector, snapshot: RepositorySnapshot) -> tuple[ArtifactContent, ...]:
@@ -992,7 +1003,7 @@ def _selected_present(selector: ArtifactSelector, snapshot: RepositorySnapshot) 
         artifact = snapshot_map.get(path)
         if artifact is None:
             continue
-        if selector.tag is SelectorTag.PATHS_WITH_ROLE and artifact.role is not selector.role:
+        if selector.tag is SelectorTag.PATHS_WITH_ROLE and artifact.role != selector.role:
             continue
         values.append(artifact)
     return tuple(values)
@@ -1027,7 +1038,7 @@ def _artifact_observation(spec: ObservationSpec, snapshot: RepositorySnapshot) -
         artifact = snapshot_map.get(path)
         if artifact is None:
             value = ObservationValue(ObservationValueTag.ABSENT)
-        elif spec.selector.tag is SelectorTag.PATHS_WITH_ROLE and artifact.role is not spec.selector.role:
+        elif spec.selector.tag is SelectorTag.PATHS_WITH_ROLE and artifact.role != spec.selector.role:
             value = ObservationValue(
                 ObservationValueTag.ROLE_MISMATCH,
                 (artifact.role, spec.selector.role),
@@ -1049,7 +1060,7 @@ def _behavior_candidates(spec: ObservationSpec, subject: SubjectId, snapshot: Re
         value
         for path, artifact in snapshot.entries
         if path in selected_paths
-        if spec.selector is None or spec.selector.tag is not SelectorTag.PATHS_WITH_ROLE or artifact.role is spec.selector.role
+        if spec.selector is None or spec.selector.tag is not SelectorTag.PATHS_WITH_ROLE or artifact.role == spec.selector.role
         if artifact.tag is ArtifactTag.BEHAVIOR
         for key, value in artifact.observations
         if key == subject

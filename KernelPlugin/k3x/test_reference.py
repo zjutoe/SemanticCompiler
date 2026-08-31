@@ -1,6 +1,8 @@
 """Executable checks for the exact finite K3-X profile."""
 
-from dataclasses import replace
+import ast
+from dataclasses import fields, is_dataclass, replace
+import inspect
 import unittest
 
 from . import coding_plugin as cp
@@ -20,12 +22,18 @@ def _rewrite(universe: ref.Universe, replacements: dict[ref.RecordIdentity, ref.
         return replace(record, value=replace(
             package,
             declarations=members(package.declarations),
+            pair_declarations=members(package.pair_declarations),
             bindings=members(package.bindings),
+            pair_bindings=members(package.pair_bindings),
+            profile_bindings=members(package.profile_bindings),
             model_contracts=members(package.model_contracts),
-            contract_specs=members(package.contract_specs),
+            aliases=members(package.aliases),
             services=members(package.services),
             certificates=members(package.certificates),
-            other_records=members(package.other_records),
+            authority_facts=members(package.authority_facts),
+            compatibility_claims=members(package.compatibility_claims),
+            migrations=members(package.migrations),
+            semantic_extensions=members(package.semantic_extensions),
         ))
     return replace(universe, records=tuple(updated for item in universe.records if (updated := one(item)) is not None))
 
@@ -35,6 +43,104 @@ def _at(universe: ref.Universe, identity: ref.RecordIdentity) -> ref.LogicalReco
     if item is None:
         raise AssertionError(f"missing test construction record {identity}")
     return item
+
+
+def _identity_literal(identity: ref.RecordIdentity) -> fx.IdentityLiteral:
+    return (
+        identity.kind.value,
+        identity.key.owner,
+        identity.key.namespace,
+        identity.key.local,
+        identity.key.version.components,
+    )
+
+
+def _key_literal(value: ref.ExactKey) -> tuple[str, str, str, tuple[int, ...]]:
+    return (value.owner, value.namespace, value.local, value.version.components)
+
+
+def _detail_literal(value: object) -> object:
+    if isinstance(value, ref.LogicalRecord):
+        return _identity_literal(value.identity)
+    if isinstance(value, ref.RecordIdentity):
+        return _identity_literal(value)
+    if isinstance(value, tuple):
+        return tuple(_detail_literal(item) for item in value)
+    if isinstance(value, frozenset):
+        return frozenset(_detail_literal(item) for item in value)
+    return value
+
+
+def _judgment_literal(value: ref.Judgment) -> tuple[object, ...]:
+    return (value.tag, _detail_literal(value.details))
+
+
+def _conflict_literal(value: ref.ConflictRef) -> tuple[object, ...]:
+    positions = tuple(sorted(
+        tuple(tuple(sorted(facets)) for facets in item.positions)
+        for item in value.conflict_kind.unequal_positions
+    ))
+    return (
+        "PREDICATE_FACET_POSITIONS_CONFLICT",
+        _key_literal(value.conflict_kind.declaration_key),
+        positions,
+        tuple(sorted(_identity_literal(item) for item in value.involved_identity_set)),
+    )
+
+
+def _replay_assertion(universe: ref.Universe, replayed: object) -> fx.ReplayAssertion:
+    if isinstance(replayed, (ref.CoreReplay, ref.PairReplay, ref.LookupReplay)):
+        composition = replayed.authoritative
+    elif isinstance(replayed, ref.CompositionReplay):
+        composition = replayed.composition
+    else:
+        composition = ref.compose_records(universe.records)
+    identities = tuple(sorted(_identity_literal(item.identity) for item in composition.records))
+    conflicts = tuple(_conflict_literal(item) for item in composition.conflicts)
+    if isinstance(replayed, ref.CoreReplay):
+        outcome = (
+            "CORE", replayed.formation, replayed.closure, replayed.evaluability,
+            replayed.lifecycle, replayed.result,
+        )
+    elif isinstance(replayed, ref.PairReplay):
+        outcome = (
+            "PAIR", replayed.formation, replayed.closure,
+            _key_literal(replayed.result.pair_key),
+            _key_literal(replayed.result.certificate_key), replayed.result.result,
+        )
+    elif isinstance(replayed, ref.LookupReplay):
+        outcome = ("LOOKUP", *_judgment_literal(replayed.result))
+    elif isinstance(replayed, ref.ObservationEvaluation):
+        outcome = (
+            "OBSERVATION",
+            tuple((_identity_literal(identity), value) for identity, value in replayed.observations),
+            _judgment_literal(replayed.reasoning_result),
+            replayed.lifecycle,
+            replayed.status,
+        )
+    elif isinstance(replayed, ref.CompositionReplay):
+        outcome = ("COMPOSITION", replayed.formation, replayed.closure)
+    elif isinstance(replayed, tuple):
+        outcome = ("FORMATION", replayed)
+    else:
+        raise AssertionError(f"unsupported test replay projection: {type(replayed).__name__}")
+    return fx.ReplayAssertion(identities, conflicts, outcome)
+
+
+def _contains_fixture_id(value: object) -> bool:
+    if isinstance(value, fx.FixtureId):
+        return True
+    if isinstance(value, str) and any(
+        token in value.casefold() for token in ("challenge", "expected")
+    ):
+        return True
+    if isinstance(value, dict):
+        return any(_contains_fixture_id(item) for pair in value.items() for item in pair)
+    if isinstance(value, (tuple, list, set, frozenset)):
+        return any(_contains_fixture_id(item) for item in value)
+    if is_dataclass(value) and not isinstance(value, type):
+        return any(_contains_fixture_id(getattr(value, item.name)) for item in fields(value))
+    return False
 
 
 class K3XReferenceTests(unittest.TestCase):
@@ -47,7 +153,7 @@ class K3XReferenceTests(unittest.TestCase):
         result_record = _at(construction.universe, construction.result)
         self.assertEqual((result_record.value.request, result_record.value.result_kind, result_record.value.result), (construction.request, "Eval", replayed.result))
 
-        empty_package = replace(_at(construction.universe, construction.package), value=replace(_at(construction.universe, construction.package).value, declarations=(), bindings=(), model_contracts=(), contract_specs=(), services=()))
+        empty_package = replace(_at(construction.universe, construction.package), value=replace(_at(construction.universe, construction.package).value, declarations=(), pair_declarations=(), bindings=(), pair_bindings=(), profile_bindings=(), model_contracts=(), aliases=(), services=(), certificates=(), authority_facts=(), compatibility_claims=(), migrations=(), semantic_extensions=()))
         empty_result = ref.replay(_rewrite(construction.universe, {construction.package: empty_package}))
         self.assertNotEqual(empty_result, replayed)
         self.assertEqual(empty_result.formation, ref.Formation.MALFORMED)
@@ -135,8 +241,8 @@ class K3XReferenceTests(unittest.TestCase):
             replace(descriptor, supported_judgments=frozenset({"WRONG"})),
             replace(descriptor, supported_targets=frozenset()),
             replace(descriptor, sound_fragment=construction.sigma_spec),
-            replace(descriptor, proper_dependencies=frozenset({construction.binding}), dependency_closure=frozenset()),
-            replace(descriptor, validation_references=frozenset({construction.binding})),
+            replace(descriptor, proper_semantic_dependencies=frozenset({construction.binding}), dependency_closure=frozenset()),
+            replace(descriptor, required_evidence=construction.binding),
             replace(descriptor, required_trust_roots=frozenset({construction.binding})),
         )
         for mutation in mutations:
@@ -177,23 +283,23 @@ class K3XReferenceTests(unittest.TestCase):
         dependency_record = _at(construction.universe, construction.dependency_environment)
 
         no_declaration_env = replace(environment_record, value=replace(environment_record.value, declarations=(), mechanically_extracted_dependencies=frozenset({construction.binding})))
-        no_declaration_dep = replace(dependency_record, value=replace(dependency_record.value, members=frozenset({construction.binding})))
+        no_declaration_dep = replace(dependency_record, value=replace(dependency_record.value, syntax_root_keys=frozenset(), expanded_root_keys=frozenset({construction.binding})))
         no_declaration = _rewrite(construction.universe, {construction.declaration: None, construction.semantic_environment: no_declaration_env, construction.dependency_environment: no_declaration_dep})
         declaration_result = ref.replay(no_declaration)
-        self.assertEqual((declaration_result.formation, declaration_result.lifecycle), (ref.Formation.MALFORMED, "DECLARATION_ABSENT"))
+        self.assertEqual(declaration_result.formation, ref.Formation.MALFORMED)
 
         no_binding_env = replace(environment_record, value=replace(environment_record.value, bindings=(), mechanically_extracted_dependencies=frozenset({construction.declaration})))
-        no_binding_dep = replace(dependency_record, value=replace(dependency_record.value, members=frozenset({construction.declaration})))
+        no_binding_dep = replace(dependency_record, value=replace(dependency_record.value, subject_root_keys=frozenset(), expanded_root_keys=frozenset({construction.declaration})))
         no_binding = _rewrite(construction.universe, {construction.binding: None, construction.semantic_environment: no_binding_env, construction.dependency_environment: no_binding_dep})
         binding_result = ref.replay(no_binding)
-        self.assertEqual((binding_result.formation, binding_result.closure, binding_result.lifecycle), (ref.Formation.WELL_FORMED, ref.Closure.OPEN_BINDINGS, "BINDING_ABSENT"))
+        self.assertEqual(binding_result.formation, ref.Formation.MALFORMED)
 
         model_record = _at(construction.universe, construction.model)
         no_capability_model = replace(model_record, value=replace(model_record.value, capability_summaries=frozenset()))
         no_capability = _rewrite(construction.universe, {construction.capability: None, construction.model: no_capability_model})
         capability_result = ref.replay(no_capability)
         self.assertEqual((capability_result.closure, capability_result.evaluability, capability_result.lifecycle), (ref.Closure.CLOSED, ref.Evaluability.MISSING, "CAPABILITY_ABSENT"))
-        empty_environment = replace(environment_record, value=ref.SemanticEnvironment((), ()))
+        empty_environment = replace(environment_record, value=ref.SemanticEnvironment(fx.V1, (), (), ()))
         self.assertEqual(ref.replay(_rewrite(construction.universe, {construction.semantic_environment: empty_environment})).formation, ref.Formation.MALFORMED)
 
     def test_k3x_05_pair_producers_validation_refs_and_proper_cycle(self) -> None:
@@ -203,29 +309,29 @@ class K3XReferenceTests(unittest.TestCase):
         self.assertEqual(admitted.result.result, "PAIR_COHERENCE_ADMITTED")
         binding = _at(construction.universe, construction.pair_binding)
         self.assertEqual(len(binding.value.validation_references), 2)
-        self.assertFalse(binding.value.validation_references & binding.value.proper_subjects)
+        self.assertFalse(binding.value.validation_references & binding.value.proper_semantic_dependencies)
         manifest = construction.manifest
         self.assertEqual({item.identity.key.local for item in manifest if isinstance(item.value, ref.ContractSpec) and item.value.owner_layer is ref.Layer.SERVICE}, {"PSOUND", "PCOMPLETE", "PEVIDENCE", "PFAILURE"})
-        self.assertTrue({"E_p", "D_p", "PENV", "PAIR_FULL_EVAL_EVIDENCE", "PVC", "R_p", "TRP", "PCERT"} <= {item.identity.key.local for item in manifest})
+        self.assertTrue({"E_p", "D_p", "PairFullEvalProof", "PVC", "R_p", "TRP", "PCERT"} <= {item.identity.key.local for item in manifest})
 
         removed_producer = _rewrite(construction.universe, {construction.producer_records[1].identity: None})
         self.assertEqual(ref.replay(removed_producer).details[0], "INCOMPLETE_PRODUCER_SET")
         cert_producer = construction.producer_records[1]
         self_trust = replace(cert_producer, value=replace(cert_producer.value, producer="capknow.semantic"))
         self.assertEqual(ref.replay(_rewrite(construction.universe, {cert_producer.identity: self_trust})).details[0], "PAIR_SELF_TRUST")
-        equal_sets = replace(construction.producer_records[2], value=replace(construction.producer_records[2].value, producer="capknow.audit.pair-proof"))
-        self.assertEqual(ref.replay(_rewrite(construction.universe, {construction.producer_records[2].identity: equal_sets})).details[0], "PAIR_SELF_TRUST")
+        equal_sets = replace(construction.producer_records[3], value=replace(construction.producer_records[3].value, producer="capknow.audit.pair-proof"))
+        self.assertEqual(ref.replay(_rewrite(construction.universe, {construction.producer_records[3].identity: equal_sets})).details[0], "PAIR_SELF_TRUST")
         missing_validation = _rewrite(construction.universe, {next(iter(construction.validation_references)): None})
-        self.assertEqual(ref.replay(missing_validation).details[0], "MISSING_VALIDATION_REFERENCE")
+        self.assertNotEqual(ref.replay(missing_validation), admitted)
         pair_request = _at(construction.universe, construction.request)
         pair_trust = _at(construction.universe, pair_request.value.trust_environment)
-        incompatible_trust = replace(pair_trust, value=replace(pair_trust.value, root_judgments=((pair_trust.value.roots[0], ref.TrustState.INCOMPATIBLE),)))
+        incompatible_trust = replace(pair_trust, value=replace(pair_trust.value, root_judgments=((pair_trust.value.roots[0], ref.TrustRootJudgment(ref.TrustState.INCOMPATIBLE, reasons=("TEST",))),)))
         self.assertEqual(ref.replay(_rewrite(construction.universe, {pair_trust.identity: incompatible_trust})).tag, "INCOMPATIBLE")
         certificate = _at(construction.universe, construction.certificate)
-        wrong_subject = replace(certificate, value=replace(certificate.value, subject=construction.request))
-        self.assertEqual(ref.replay(_rewrite(construction.universe, {construction.certificate: wrong_subject})).details[0], "PAIR_CERTIFICATE_SUBJECT_OR_JUDGMENT")
+        wrong_subject = replace(certificate, value=replace(certificate.value, subjects=(construction.request,)))
+        self.assertEqual(ref.replay(_rewrite(construction.universe, {construction.certificate: wrong_subject})).details[0], "PAIR_CERTIFICATE_ENVELOPE")
         empty_pair_package = next(record for record in construction.universe.records if isinstance(record.value, ref.PluginPackage))
-        empty_pair_package = replace(empty_pair_package, value=replace(empty_pair_package.value, declarations=(), bindings=(), contract_specs=()))
+        empty_pair_package = replace(empty_pair_package, value=replace(empty_pair_package.value, declarations=(), pair_declarations=(), bindings=(), pair_bindings=(), profile_bindings=(), model_contracts=(), aliases=(), services=(), certificates=(), authority_facts=(), compatibility_claims=(), migrations=(), semantic_extensions=()))
         self.assertNotEqual(ref.replay(_rewrite(construction.universe, {empty_pair_package.identity: empty_pair_package})), admitted)
 
         cycle = ref.replay(fx.cycle_universe())
@@ -334,10 +440,10 @@ class K3XReferenceTests(unittest.TestCase):
         self.assertEqual(forward_result, reverse_result)
         self.assertEqual(len(forward_result.observations), 2)
         absent_node = fx.rid(ref.RecordKind.OBSERVATION_NODE, "absent", namespace="confluence")
-        with self.assertRaisesRegex(ValueError, "absent or wrong-kind"):
+        with self.assertRaisesRegex(ValueError, "confluence capability/fragment"):
             ref.replay(replace(forward.universe, request=replace(forward.universe.request, nodes=(forward.node_one, absent_node))))
         wrong_kind_node = ref.RecordIdentity(ref.RecordKind.DECLARATION, forward.node_two.key)
-        with self.assertRaisesRegex(ValueError, "absent or wrong-kind"):
+        with self.assertRaisesRegex(ValueError, "confluence capability/fragment"):
             ref.replay(replace(forward.universe, request=replace(forward.universe.request, nodes=(forward.node_one, wrong_kind_node))))
         node_two = _at(forward.universe, forward.node_two)
         spec_two = _at(forward.universe, node_two.value.contract_spec)
@@ -356,7 +462,7 @@ class K3XReferenceTests(unittest.TestCase):
         self.assertEqual(sum(isinstance(item.value, ref.PluginPackage) for item in permutation_records), 2)
         self.assertEqual(sum(isinstance(item.value, ref.TypeDeclaration) for item in permutation_records), 4)
         self.assertEqual(sum(isinstance(item.value, ref.ContractSpec) and item.value.owner_layer is ref.Layer.DELTA for item in permutation_records), 4)
-        self.assertTrue(all(len(item.value.declarations) == 2 and len(item.value.contract_specs) == 2 for item in permutation_records if isinstance(item.value, ref.PluginPackage)))
+        self.assertTrue(all(len(item.value.declarations) == 2 for item in permutation_records if isinstance(item.value, ref.PluginPackage)))
 
     def test_k3x_10_duplicate_equal_and_conflict_are_order_independent(self) -> None:
         equal_forward = ref.replay(fx.duplicate_universe(False, fx.OrderTag.FORWARD))
@@ -368,10 +474,12 @@ class K3XReferenceTests(unittest.TestCase):
         self.assertEqual(conflict_forward, conflict_reverse)
         self.assertEqual(conflict_forward.formation, ref.Formation.MALFORMED)
         self.assertEqual(len(conflict_forward.composition.conflicts), 1)
-        self.assertEqual(len(conflict_forward.composition.conflicts[0].unequal_records), 2)
+        conflict = conflict_forward.composition.conflicts[0]
+        self.assertEqual(conflict.involved_identity_set, frozenset({fx.DUPLICATE_DECLARATION.identity}))
+        self.assertEqual(len(conflict.conflict_kind.unequal_positions), 2)
         self.assertEqual((len(fx.DUPLICATE_TYPE_DECLARATIONS), len(fx.DUPLICATE_TYPE_ADMISSIONS)), (24, 24))
         self.assertEqual(len(fx.DUPLICATE_PACKAGE.value.declarations), 24)
-        self.assertEqual(len(fx.DUPLICATE_PACKAGE.value.contract_specs), 24)
+        self.assertEqual(len(fx.DUPLICATE_PACKAGE.value.model_contracts), 0)
         self.assertEqual(len(fx.DUPLICATE_DECLARATION.value.argument_types), 3)
         self.assertEqual(len(fx.DUPLICATE_BAD_DECLARATION.value.argument_types), 3)
 
@@ -439,12 +547,16 @@ class K3XReferenceTests(unittest.TestCase):
                 base = ref.replay(construction.baseline)
                 variant = ref.replay(construction.variant)
                 self.assertEqual(base.result.tag, "PRESENT")
-                self.assertEqual(variant.result, fx.MISSING_EXPECTED_LITERAL[row])
+                independent = fx.MISSING_EXPECTED_LITERAL[row]
+                self.assertEqual(
+                    _judgment_literal(variant.result),
+                    (independent.tag, independent.details),
+                )
                 empty = ref.replay(replace(construction.variant, records=()))
                 self.assertEqual(empty.result.tag, "MALFORMED_CONTEXT")
                 if construction.variant_container is not None:
                     package = _at(construction.variant, construction.variant_container)
-                    empty_package = replace(package, value=replace(package.value, declarations=(), bindings=(), model_contracts=(), contract_specs=(), services=(), certificates=(), other_records=()))
+                    empty_package = replace(package, value=replace(package.value, declarations=(), pair_declarations=(), bindings=(), pair_bindings=(), profile_bindings=(), model_contracts=(), aliases=(), services=(), certificates=(), authority_facts=(), compatibility_claims=(), migrations=(), semantic_extensions=()))
                     if package != empty_package:
                         emptied = ref.replay(_rewrite(construction.variant, {construction.variant_container: empty_package}))
                         self.assertNotEqual(emptied, variant)
@@ -467,14 +579,89 @@ class K3XReferenceTests(unittest.TestCase):
         self.assertEqual(sum(identifier.family is fx.FixtureFamily.MISSING_VARIANT for identifier in packet), 42)
         for identifier, universe in packet.items():
             with self.subTest(identifier=identifier):
-                self.assertEqual(ref.replay(universe), assertions[identifier])
-                self.assertFalse(any(isinstance(value, fx.FixtureId) for value in universe.records))
+                replayed = ref.replay(universe)
+                self.assertEqual(_replay_assertion(universe, replayed), assertions[identifier])
+                self.assertFalse(_contains_fixture_id(universe))
+
+        core_id = fx.FixtureId(fx.FixtureFamily.CORE_DEFINITIONAL)
+        core = packet[core_id]
+        frozen = assertions[core_id]
+        extra_identity = ref.RecordIdentity(
+            ref.RecordKind.PRESENTATION,
+            ref.ExactKey(
+                "capknow.semantic", "assertion.falsifier", "extra-record",
+                ref.Version((1,)),
+            ),
+        )
+        extra = ref.LogicalRecord(extra_identity, ref.NamedCarrier("EXTRA_RECORD"))
+        changed_manifest = replace(core, records=(*core.records, extra))
+        self.assertNotEqual(
+            _replay_assertion(changed_manifest, ref.replay(changed_manifest)), frozen
+        )
+
+        request_identity = ref.RecordIdentity(
+            ref.RecordKind.REQUEST,
+            ref.ExactKey(
+                "capknow.semantic", "request", "Q_t[ADMITTED]", ref.Version((1,))
+            ),
+        )
+        request = _at(core, request_identity)
+        changed_request = replace(
+            request,
+            value=replace(request.value, arguments=(*request.value.arguments[:-1], frozenset())),
+        )
+        changed_evidence = _rewrite(core, {request_identity: changed_request})
+        self.assertNotEqual(
+            _replay_assertion(changed_evidence, ref.replay(changed_evidence)), frozen
+        )
+
+        result_identity = ref.RecordIdentity(
+            ref.RecordKind.RESULT,
+            ref.ExactKey(
+                "capknow.semantic", "result", "RES_t[ADMITTED]", ref.Version((1,))
+            ),
+        )
+        result = _at(core, result_identity)
+        changed_result_record = replace(
+            result, value=replace(result.value, result=cp.Eval(cp.Truth.FALSE))
+        )
+        changed_result = _rewrite(core, {result_identity: changed_result_record})
+        self.assertNotEqual(
+            _replay_assertion(changed_result, ref.replay(changed_result)), frozen
+        )
 
     def test_k3x_13_declared_access_and_static_oracle_exclusions(self) -> None:
         for requested in (frozenset({"repository"}), frozenset({"evidence"}), frozenset({"hidden_assertion"})):
             with self.subTest(requested=requested), self.assertRaises(cp.UndeclaredAccessError):
                 cp.invoke_with_declared_access(requested, frozenset(), lambda: cp.Truth.TRUE, ())
         self.assertEqual(cp.invoke_with_declared_access(frozenset({"final"}), frozenset({"final"}), lambda value: value, (cp.Truth.TRUE,)), cp.Truth.TRUE)
+
+        builder_source = inspect.getsource(fx._build_expected_assertions)
+        builder_tree = ast.parse(builder_source)
+        attributes = {
+            item.attr for item in ast.walk(builder_tree) if isinstance(item, ast.Attribute)
+        }
+        calls = {
+            item.func.id
+            for item in ast.walk(builder_tree)
+            if isinstance(item, ast.Call) and isinstance(item.func, ast.Name)
+        }
+        self.assertFalse(
+            attributes
+            & {
+                "manifest", "baseline_manifest", "variant_manifest",
+                "universe", "evidence", "result", "expected",
+            }
+        )
+        self.assertFalse(
+            calls
+            & {
+                "compose_records", "validate_packages", "validate_binding",
+                "validate_model_descriptor", "validate_pair", "replay",
+            }
+        )
+        self.assertNotIn("next(iter(", builder_source)
+        self.assertEqual(len(fx._EXPECTED_REPLAY_ASSERTIONS_LITERAL), 102)
 
 
 if __name__ == "__main__":

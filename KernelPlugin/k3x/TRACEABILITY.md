@@ -1,9 +1,12 @@
-# K3-X repair-2 traceability
+# K3-X repair-3 traceability
 
 This file describes the implemented finite profile, not a claim of general K2
 execution. `reference.py`, `coding_plugin.py`, and `__init__.py` never receive
 a fixture tag or assertion-map value. `fixtures.py` constructs the 102 input
-universes and, separately, the assertion-only result map.
+universes and separately enumerates 102 assertion-only projections. Each
+projection freezes its authoritative identity tuple, conflict coordinate, and
+semantic outcome without reading a constructed universe, manifest, request,
+evidence value, result value, or replay.
 
 ## Thirteen executable checks
 
@@ -20,7 +23,7 @@ universes and, separately, the assertion-only result map.
 | 9 | `validate_contract_spec`, `evaluate_observation_graph` | `confluence_construction` with independent empty-support `N_o/N_d` ContractSpecs plus literal `R_c/T_c/M_c/Y_c/L_c_final/K_c`; four universes with ABI0, two packages, four types, and four Delta admission specs | `test_k3x_09_confluence_contractspec_graph_errors_and_permutations`; absent/wrong-kind node, support mismatch, duplicate query | K2 §§1.1, 3.3, 7.5, 8.3; K3-S §§4.2, 9.5–9.6 check 9 | both orders yield identical complete maps/status; graph/schema defects fail; four full presentations compose identically |
 | 10 | `compose_records` conflict construction | `duplicate_universe` with ABI/package, the literal 24 type declarations, 24 Delta admissions, three-argument `d/d'/d_bad`, and forward/reverse sequences | `test_k3x_10_duplicate_equal_and_conflict_are_order_independent` | K2 §§1.1, 8.3; K3-S §9.5 and check 10 | equal duplicate coalesces; unequal duplicate produces the same two-record conflict in either order |
 | 11 | replay `LookupRequest`, `ResolutionCoordinate`, `_resolve_failed_coordinate` | the explicit `LITERAL_MISSING_ROWS` tuple: 42 canonical targets, complete named baseline/variant containers, literal manifests, and explicit removals/additions | `test_k3x_11_all_42_literal_missing_reconstructions`; asserts all 42 complete identities, manifest equality, 1→0 target count, exact symmetric differences, empty records/packages, extraneous lexical reconstruction, and an arbitrary unsupported coordinate | K2 §3.3 `recordAt`/`missingStatus`, §2.4; K3-S §9.4 and check 11 | status derives only from a validated consumer relation; arbitrary coordinates raise `FiniteProfileError`; no row tag/status enters replay |
-| 12 | public `replay(Universe)` | `_build_packet`: 1 core + 1 pair + 5 trust + 42 bases + 42 variants + 2 confluence + 1 cycle + 4 permutations + 2 equal + 2 conflict; assertion objects are constructed from separate literal manifests without calling replay/composition/validation | `test_k3x_12_all_102_replays_without_identifier_or_assertion_input`; independently replays every universe and compares only afterward | K1 §4.8; K2 §§1.1, 3.3, 5.2; K3-S §§9.1, 9.6 check 12 | domains equal and cardinality 102; 42/42 rows; evaluator receives no tag or assertion value |
+| 12 | public `replay(Universe)` followed only by an assertion-side representation projection | `_build_fixture_packet`: 1 core + 1 pair + 5 trust + 42 bases + 42 variants + 2 confluence + 1 cycle + 4 permutations + 2 equal + 2 conflict; `_EXPECTED_REPLAY_ASSERTIONS_LITERAL` independently enumerates all 102 authoritative identity tuples, conflict projections, and outcomes; `_build_expected_assertions` only copies that literal map | `test_k3x_12_all_102_replays_without_identifier_or_assertion_input`; independently replays every universe, recursively rejects nested `FixtureId`, then proves extra-record, changed-evidence, and changed-`ResultRecord` mutations diverge from the unchanged assertion | K1 §4.8; K2 §§1.1, 3.3, 5.2; K3-S §§9.1, 9.6 check 12 | domains equal and cardinality 102; 42/42 rows; all exact projections equal; evaluator receives no tag or assertion value; each independent mutation breaks equality |
 | 13 | `enforce_declared_access`, `invoke_with_declared_access` | finite requested/allowed facet sets | `test_k3x_13_declared_access_and_static_oracle_exclusions`; requests repository, evidence, and hidden-assertion facets independently | K1 §§1.2, 2.2, 3.1; K2 §§3.3, 4.2, 5.1; K3-S §§4.2, 9.6 check 13 | undeclared access raises before a truth result; declared final-only access succeeds |
 
 ## Conditional coverage map
@@ -47,6 +50,11 @@ value and fail by `ValueError` before evaluation.
   recursive package expansion, equal/unequal identity grouping, package
   owner/category/member/ABI/plugin validation, permutations, and required
   structural consumer-coordinate resolution and exact manifest differences.
+- Assertion independence: check 12 compares only after public replay against a
+  separately literal 102-entry table. Its AST guard excludes manifest,
+  construction, evidence, result, replay, composition, and validation reads
+  from the assertion builder; three independent mutations demonstrate that
+  the table does not move with fixture or result changes.
 - Invocation: checks 1, 3, 4, and 6 cover environment identity and closure,
   declaration, binding, model, summary/descriptor, exact version, service,
   fragments, target, dependency/validation/trust projections, all five trust
