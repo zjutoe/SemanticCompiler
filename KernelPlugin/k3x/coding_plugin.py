@@ -29,12 +29,34 @@ class ArtifactRole(Enum):
     PUBLIC_SCHEMA = "PUBLIC_SCHEMA"
 
 
+@dataclass(frozen=True, order=True)
+class OtherArtifactRole:
+    """The closed K3-S OTHER_ROLE(atom) constructor."""
+
+    atom: str
+
+    def __post_init__(self) -> None:
+        if not self.atom:
+            raise ValueError("OTHER_ROLE atom is nonempty")
+
+
 class Format(Enum):
     TOML = "TOML"
     YAML = "YAML"
     JSON = "JSON"
     TEXT = "TEXT"
     BINARY = "BINARY"
+
+
+@dataclass(frozen=True, order=True)
+class OtherFormat:
+    """The closed K3-S OTHER_FORMAT(atom) constructor."""
+
+    atom: str
+
+    def __post_init__(self) -> None:
+        if not self.atom:
+            raise ValueError("OTHER_FORMAT atom is nonempty")
 
 
 class ArtifactTag(Enum):
@@ -235,6 +257,29 @@ class FieldId:
             raise ValueError("FieldId atom is nonempty")
 
 
+class FieldValueTag(Enum):
+    BOOL = "BOOL_VALUE"
+    INT = "INT_VALUE"
+    ATOM = "ATOM_VALUE"
+
+
+@dataclass(frozen=True, order=True)
+class FieldValue:
+    """Closed BOOL_VALUE/INT_VALUE/ATOM_VALUE field algebra."""
+
+    tag: FieldValueTag
+    value: bool | int | str
+
+    def __post_init__(self) -> None:
+        valid = (
+            (self.tag is FieldValueTag.BOOL and type(self.value) is bool)
+            or (self.tag is FieldValueTag.INT and type(self.value) is int)
+            or (self.tag is FieldValueTag.ATOM and isinstance(self.value, str) and bool(self.value))
+        )
+        if not valid:
+            raise ValueError("FieldValue tag/value mismatch")
+
+
 @dataclass(frozen=True, order=True)
 class SubjectId:
     tag: SubjectTag
@@ -259,6 +304,8 @@ class BehaviorValue:
             raise ValueError("duplicate left correspondence field")
         if len({key for key, _ in self.right}) != len(self.right):
             raise ValueError("duplicate right correspondence field")
+        if any(not isinstance(key, FieldId) or not isinstance(value, FieldValue) for key, value in self.left + self.right):
+            raise ValueError("BehaviorValue correspondence map is FieldId -> FieldValue")
         if self.tag in {BehaviorTag.ACCEPTED, BehaviorTag.REJECTED}:
             valid = self.metric is None and self.integer is None and self.content is None and not self.left and not self.right
         elif self.tag is BehaviorTag.METRIC:
@@ -270,13 +317,15 @@ class BehaviorValue:
             valid = self.metric is None and self.integer is None and self.content is None
         if not valid:
             raise ValueError("BehaviorValue fields do not match its tag")
+        object.__setattr__(self, "left", tuple(sorted(self.left, key=lambda item: item[0])))
+        object.__setattr__(self, "right", tuple(sorted(self.right, key=lambda item: item[0])))
 
 
 @dataclass(frozen=True)
 class ArtifactContent:
     tag: ArtifactTag
-    role: ArtifactRole
-    format: Format
+    role: ArtifactRole | OtherArtifactRole
+    format: Format | OtherFormat
     size: ByteSize
     content: ContentIdentity | None = None
     fields: tuple[tuple[FieldId, Any], ...] = ()
@@ -287,6 +336,10 @@ class ArtifactContent:
             raise ValueError("duplicate structured field")
         if len({key for key, _ in self.observations}) != len(self.observations):
             raise ValueError("duplicate behavior subject")
+        if any(not isinstance(key, FieldId) or not isinstance(value, FieldValue) for key, value in self.fields):
+            raise ValueError("structured artifact fields are FieldId -> FieldValue")
+        if any(not isinstance(key, SubjectId) or not isinstance(value, BehaviorValue) for key, value in self.observations):
+            raise ValueError("behavior artifact observations are SubjectId -> BehaviorValue")
         if self.tag in {ArtifactTag.TEXT, ArtifactTag.OPAQUE}:
             valid = self.content is not None and not self.fields and not self.observations
         elif self.tag is ArtifactTag.STRUCTURED:
@@ -295,6 +348,8 @@ class ArtifactContent:
             valid = self.content is None and not self.fields
         if not valid:
             raise ValueError("ArtifactContent fields do not match its tag")
+        object.__setattr__(self, "fields", tuple(sorted(self.fields, key=lambda item: item[0])))
+        object.__setattr__(self, "observations", tuple(sorted(self.observations, key=lambda item: repr(item[0]))))
 
     @property
     def body_kind(self) -> ArtifactBodyKind:
@@ -313,6 +368,7 @@ class RepositorySnapshot:
     def __post_init__(self) -> None:
         if len({path for path, _ in self.entries}) != len(self.entries):
             raise ValueError("duplicate snapshot path")
+        object.__setattr__(self, "entries", tuple(sorted(self.entries, key=lambda item: item[0])))
 
     def as_map(self) -> dict[Path, ArtifactContent]:
         return dict(self.entries)
@@ -322,7 +378,7 @@ class RepositorySnapshot:
 class ArtifactSelector:
     tag: SelectorTag
     paths: frozenset[Path] = frozenset()
-    role: ArtifactRole | None = None
+    role: ArtifactRole | OtherArtifactRole | None = None
 
     def __post_init__(self) -> None:
         valid = (
@@ -411,10 +467,11 @@ class ObservationValue:
         if len(self.payload) != arity:
             raise ValueError("ObservationValue payload arity")
         checks = {
-            ObservationValueTag.ROLE_MISMATCH: lambda values: all(isinstance(value, ArtifactRole) for value in values),
+            ObservationValueTag.ROLE_MISMATCH: lambda values: all(isinstance(value, (ArtifactRole, OtherArtifactRole)) for value in values),
             ObservationValueTag.PROJECTION_MISMATCH: lambda values: isinstance(values[0], ArtifactBodyKind) and isinstance(values[1], ArtifactProjection),
             ObservationValueTag.PRESENT_CONTENT: lambda values: isinstance(values[0], ArtifactContent),
-            ObservationValueTag.PRESENT_FORMAT: lambda values: isinstance(values[0], Format),
+            ObservationValueTag.PRESENT_FORMAT: lambda values: isinstance(values[0], (Format, OtherFormat)),
+            ObservationValueTag.PRESENT_FIELD: lambda values: isinstance(values[0], FieldValue),
             ObservationValueTag.PRESENT_SIZE: lambda values: isinstance(values[0], ByteSize),
             ObservationValueTag.METRIC_VALUE: lambda values: isinstance(values[0], int),
             ObservationValueTag.RESOLUTION_VALUE: lambda values: isinstance(values[0], ContentIdentity),
@@ -482,6 +539,7 @@ class ObservationResult:
             missing = self.spec_identity.domain - keys
             if self.coverage.missing_subjects != missing:
                 raise ValueError("coverage is not the exact missing domain")
+        object.__setattr__(self, "values", tuple(sorted(self.values, key=lambda item: repr(item[0]))))
 
 
 @dataclass(frozen=True)
@@ -497,6 +555,7 @@ class ObservationRelation:
                 raise ValueError("FIELD_CORRESPONDENCE requires a finite bijection")
         elif self.field_bijection:
             raise ValueError("only FIELD_CORRESPONDENCE carries a bijection")
+        object.__setattr__(self, "field_bijection", tuple(sorted(self.field_bijection, key=lambda item: item[0])))
 
 
 @dataclass(frozen=True)
@@ -527,6 +586,7 @@ class ChangeSet:
     def __post_init__(self) -> None:
         if len({path for path, _ in self.entries}) != len(self.entries):
             raise ValueError("duplicate ChangeSet path")
+        object.__setattr__(self, "entries", tuple(sorted(self.entries, key=lambda item: item[0])))
 
 
 @dataclass(frozen=True)
@@ -1093,10 +1153,15 @@ def verification_passed(spec: VerificationSpec, snapshot: RepositorySnapshot, ev
             continue
         record = payload.value
         assert isinstance(record, VerificationRecord)
-        direct = observe(spec.subject, snapshot)
-        if not direct.is_value:
-            return Eval(None, errors=frozenset({direct.error or "OBSERVATION_ERROR"}))
-        if record.spec == spec and reference.schema_binding == spec.evidence_schema_key and record.snapshot_identity == snapshot and record.observation == direct.value:
+        # K3-S §2.2 uses exactly: spec identity, final snapshot identity,
+        # observation-subject/spec identity, and evidence-map membership.  It
+        # deliberately does not re-observe or compare a returned value.
+        if (
+            record.spec == spec
+            and record.snapshot_identity == snapshot
+            and record.observation.spec_identity == spec.subject
+            and reference.schema_binding == spec.evidence_schema_key
+        ):
             matching.append((reference, record))
     statuses = {record.status for _, record in matching}
     refs = frozenset(reference for reference, _ in matching)

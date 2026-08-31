@@ -81,6 +81,38 @@ class NodeOperation(Enum):
     CHANGES_BETWEEN = "changes_between"
 
 
+class ResolutionRelation(Enum):
+    """Closed K2 coordinates at which an authoritative record is required."""
+
+    FORMATION_RECORD = "FORMATION_RECORD"
+    BINDING_MEMBER = "BINDING_MEMBER"
+    AUTHORITY_MEMBER = "AUTHORITY_MEMBER"
+    CHOICE_MEMBER = "CHOICE_MEMBER"
+    LEXICAL_MEMBER = "LEXICAL_MEMBER"
+    EXTRANEOUS_LEXICAL = "EXTRANEOUS_LEXICAL"
+    SERVICE_DISCOVERY = "SERVICE_DISCOVERY"
+    TRUST_POLICY = "TRUST_POLICY"
+    TRUST_ROOT = "TRUST_ROOT"
+    CERTIFICATE_ADMISSION = "CERTIFICATE_ADMISSION"
+    MIGRATION = "MIGRATION"
+    COMPATIBILITY = "COMPATIBILITY"
+    OPTIONAL_EXTENSION = "OPTIONAL_EXTENSION"
+    REQUIRED_EXTENSION = "REQUIRED_EXTENSION"
+    MODEL_BINDING = "MODEL_BINDING"
+    OPTIONAL_ALIAS = "OPTIONAL_ALIAS"
+    REQUIRED_ALIAS = "REQUIRED_ALIAS"
+    SIGMA_CONTRACT = "SIGMA_CONTRACT"
+    SERVICE_CONTRACT = "SERVICE_CONTRACT"
+    REQUEST_RECORD = "REQUEST_RECORD"
+    RESULT_PROTOCOL = "RESULT_PROTOCOL"
+    REQUEST_ENVIRONMENT = "REQUEST_ENVIRONMENT"
+    OBSERVATION_RESULT = "OBSERVATION_RESULT"
+    LIFECYCLE_TRANSITION = "LIFECYCLE_TRANSITION"
+    EVIDENCE_TRUTH = "EVIDENCE_TRUTH"
+    REASON_CARRIER = "REASON_CARRIER"
+    CONFLICT_REPLACEMENT = "CONFLICT_REPLACEMENT"
+
+
 class RecordKind(str, Enum):
     ABI = "ABI_RECORD"
     PACKAGE = "PACKAGE_RECORD"
@@ -540,9 +572,18 @@ class PairReplayRequest:
 
 
 @dataclass(frozen=True)
+class ResolutionCoordinate:
+    """A structural consumer/slot, never a precomputed missing judgment."""
+
+    relation: ResolutionRelation
+    consumer: RecordIdentity | None = None
+    replacement: RecordIdentity | None = None
+
+
+@dataclass(frozen=True)
 class LookupRequest:
     target: RecordIdentity
-    referring_record: RecordIdentity | None = None
+    coordinate: ResolutionCoordinate
     context_roots: tuple[RecordIdentity, ...] = ()
 
     def __post_init__(self) -> None:
@@ -817,13 +858,22 @@ def validate_model_descriptor(model: ModelContract, descriptor: CapabilityDescri
 
 
 def _proper_graph(bindings: tuple[RecordIdentity, ...], composition: Composition) -> dict[RecordIdentity, set[RecordIdentity]]:
+    """Derive proper binding edges only from resolved ContractSpec queries.
+
+    A fixture cannot create a semantic edge by filling a binding field.  The
+    declaration/contract roots remain validation/closure data; only a query
+    whose dependency resolves to another binding contributes a graph edge.
+    """
     domain = set(bindings)
     graph: dict[RecordIdentity, set[RecordIdentity]] = {}
     for identity in bindings:
         record = _resolve(composition, identity, SemanticBinding)
         if record is None:
             raise ValueError("missing graph binding")
-        graph[identity] = {item for item in record.value.proper_dependencies if item in domain}
+        meaning = _resolve(composition, record.value.meaning_contract, ContractSpec)
+        if meaning is None or validate_contract_spec(meaning.value).tag != "WELL_FORMED":
+            raise ValueError("missing or malformed binding ContractSpec")
+        graph[identity] = {query.dependency for query in meaning.value.observation_queries if query.dependency in domain}
     return graph
 
 
@@ -940,10 +990,25 @@ def evaluate_invocation(request_identity: RecordIdentity, composition: Compositi
         return ContractReplay(Formation.WELL_FORMED, Closure.CLOSED, Evaluability.UNKNOWN, "TRUST_ROOT_UNDECIDED", None)
     if trust.tag in {"TRUST_ROOT_ABSENT", "TRUST_ROOT_INCOMPATIBLE"}:
         return ContractReplay(Formation.WELL_FORMED, Closure.CLOSED, Evaluability.MISSING, trust.tag, None)
-    if len(request.arguments) != 3:
+    meaning = _resolve(composition, binding_record.value.meaning_contract, ContractSpec)
+    if meaning is None:
+        return ContractReplay(Formation.MALFORMED, Closure.NOT_APPLICABLE, Evaluability.UNKNOWN, "MEANING_CONTRACT_ABSENT", None)
+    if len(request.arguments) != len(meaning.value.primary_input_domain):
         return ContractReplay(Formation.MALFORMED, Closure.NOT_APPLICABLE, Evaluability.UNKNOWN, "ARGUMENT_ARITY", None)
-    from .coding_plugin import task_accepts
-    result = task_accepts(request.arguments[0], request.arguments[1], request.arguments[2])
+    from . import coding_plugin
+    relations = {
+        "task_accepts": coding_plugin.task_accepts,
+        "verification_passed": coding_plugin.verification_passed,
+        "observations_equal": coding_plugin.observations_equal,
+        "dependency_metadata_changed": coding_plugin.dependency_metadata_changed,
+        "event_matches": coding_plugin.event_matches,
+        "event_occurred": coding_plugin.event_occurred,
+        "refresh_scope": coding_plugin.refresh_scope,
+    }
+    relation = relations.get(meaning.value.relation_name)
+    if relation is None:
+        raise FiniteProfileError(f"unsupported resolved ContractSpec relation: {meaning.value.relation_name}")
+    result = relation(*request.arguments)
     return ContractReplay(Formation.WELL_FORMED, Closure.CLOSED, Evaluability.AVAILABLE, f"INVOCABLE_FOR({request_identity.key.local})", result)
 
 
@@ -970,14 +1035,25 @@ def validate_pair(request_identity: RecordIdentity, composition: Composition) ->
         return Judgment("MALFORMED", ("VALIDATION_REFERENCE_MISMATCH",))
     if binding.validation_references & binding.proper_subjects:
         return Judgment("MALFORMED", ("VALIDATION_REFERENCE_IN_PROPER_DAG",))
-    if any(_resolve(composition, reference, CertificateRecord) is None for reference in binding.validation_references):
+    certificates = tuple(reference for reference in binding.validation_references if _resolve(composition, reference, CertificateRecord) is not None)
+    capabilities = tuple(reference for reference in binding.validation_references if _resolve(composition, reference, CapabilityDescriptor) is not None)
+    if len(certificates) != 1 or len(capabilities) != 1:
         return Judgment("MALFORMED", ("MISSING_VALIDATION_REFERENCE",))
     graph_status = validate_dependency_graph(tuple(binding.proper_subjects), composition)
     if graph_status.tag != "WELL_FORMED":
         return graph_status
     trust = trust_record.value
-    if _resolve(composition, trust.policy, TrustPolicyRecord) is None or any(_resolve(composition, root, TrustRootRecord) is None for root in trust.roots):
+    policy_record = _resolve(composition, trust.policy, TrustPolicyRecord)
+    if policy_record is None or any(_resolve(composition, root, TrustRootRecord) is None for root in trust.roots):
         return Judgment("MALFORMED", ("PAIR_TRUST_CHAIN",))
+    root_states = dict(trust.root_judgments)
+    for root_identity in trust.roots:
+        root_record = _resolve(composition, root_identity, TrustRootRecord)
+        assert root_record is not None
+        if root_states.get(root_identity) is not TrustState.ADMITTED:
+            return Judgment("INCOMPATIBLE", ("PAIR_TRUST_NOT_ADMITTED", root_identity))
+        if root_record.value.policy != trust.policy or binding.declaration not in root_record.value.permitted_targets:
+            return Judgment("INCOMPATIBLE", ("PAIR_TRUST_SCOPE", root_identity))
     subjects = (binding.declaration, binding.certificate, *tuple(sorted(binding.validation_references)))
     producer_sets = tuple(_producer_set(subject, composition) for subject in subjects)
     trust_producers = _producer_set(request_record.value.trust_environment, composition) | _producer_set(trust.policy, composition)
@@ -1049,58 +1125,150 @@ def project_interface_failure(failure: InterfaceFailure) -> Judgment:
     return Judgment(tags[failure.domain], (failure.kind, failure.reasons))
 
 
-def _missing_result(target: RecordIdentity, referring: LogicalRecord | None, composition: Composition) -> Judgment:
-    kind = target.kind
-    if kind in {RecordKind.ABI, RecordKind.PACKAGE, RecordKind.DECLARATION, RecordKind.SYMBOL, RecordKind.EVENT, RecordKind.PAIR_DECLARATION, RecordKind.OUTCOME, RecordKind.EVENT_VALUE, RecordKind.TRACE_EVENT, RecordKind.SOURCE, RecordKind.AUTHORITY_REF}:
+def _resolve_failed_coordinate(
+    target: RecordIdentity,
+    coordinate: ResolutionCoordinate,
+    composition: Composition,
+) -> Judgment:
+    """Project the failed K2 coordinate after checking its real consumer.
+
+    The coordinate is a typed resolution obligation.  It contains no status,
+    truth, lifecycle, trust state, or fixture tag.  Unsupported combinations
+    fail before a semantic judgment is returned.
+    """
+
+    consumer = None if coordinate.consumer is None else composition.at(coordinate.consumer)
+    replacement = None if coordinate.replacement is None else composition.at(coordinate.replacement)
+    consumer_value = None if consumer is None else consumer.value
+    replacement_value = None if replacement is None else replacement.value
+    relation = coordinate.relation
+
+    if coordinate.consumer is not None and consumer is None:
+        raise FiniteProfileError("unsupported missing coordinate: absent consumer")
+    if coordinate.replacement is not None and replacement is None:
+        raise FiniteProfileError("unsupported missing coordinate: absent replacement")
+
+    if relation is ResolutionRelation.FORMATION_RECORD:
+        formation_kinds = {
+            RecordKind.ABI, RecordKind.PACKAGE, RecordKind.DECLARATION,
+            RecordKind.EVENT, RecordKind.PAIR_DECLARATION, RecordKind.OUTCOME,
+            RecordKind.EVENT_VALUE, RecordKind.TRACE_EVENT, RecordKind.SOURCE,
+            RecordKind.AUTHORITY_REF,
+        }
+        if target.kind not in formation_kinds or consumer is None:
+            raise FiniteProfileError("unsupported formation-record coordinate")
+        if target.kind is RecordKind.ABI:
+            if not isinstance(consumer_value, PluginPackage) or consumer_value.abi_version != target.key.version:
+                raise FiniteProfileError("ABI coordinate is not induced by its package")
+        elif target.kind is RecordKind.PACKAGE:
+            if not isinstance(consumer_value, AbiRecord):
+                raise FiniteProfileError("package coordinate is not induced by its ABI")
+        elif target.kind in {RecordKind.DECLARATION, RecordKind.EVENT, RecordKind.PAIR_DECLARATION}:
+            if not isinstance(consumer_value, PluginPackage) or consumer_value.plugin_key.owner != target.key.owner:
+                raise FiniteProfileError("declaration coordinate is not induced by its package")
         return Judgment("MALFORMED")
-    if kind in {RecordKind.BINDING, RecordKind.PROFILE_BINDING, RecordKind.PAIR_BINDING}:
+
+    if relation is ResolutionRelation.BINDING_MEMBER:
+        if target.kind not in {RecordKind.BINDING, RecordKind.PROFILE_BINDING, RecordKind.PAIR_BINDING} or not isinstance(consumer_value, (PluginPackage, SemanticEnvironment)):
+            raise FiniteProfileError("unsupported binding-member coordinate")
         return Judgment("OPEN_BINDINGS")
-    if kind in {RecordKind.AUTHORITY_FACT, RecordKind.CHOICE_BINDING, RecordKind.LEXICAL_BINDING}:
+    if relation in {ResolutionRelation.AUTHORITY_MEMBER, ResolutionRelation.CHOICE_MEMBER, ResolutionRelation.LEXICAL_MEMBER}:
+        permitted = {
+            ResolutionRelation.AUTHORITY_MEMBER: {RecordKind.AUTHORITY_FACT},
+            ResolutionRelation.CHOICE_MEMBER: {RecordKind.CHOICE_BINDING},
+            ResolutionRelation.LEXICAL_MEMBER: {RecordKind.LEXICAL_BINDING},
+        }[relation]
+        if target.kind not in permitted or not isinstance(consumer_value, SemanticEnvironment):
+            raise FiniteProfileError("unsupported semantic-environment membership coordinate")
         return Judgment("OPEN_BINDINGS", (target,))
-    if kind is RecordKind.SERVICE or kind is RecordKind.CAPABILITY:
+    if relation is ResolutionRelation.EXTRANEOUS_LEXICAL:
+        if target.kind is not RecordKind.REQUEST or not isinstance(consumer_value, SemanticEnvironment) or not consumer_value.lexical_bindings:
+            raise FiniteProfileError("unsupported extraneous-lexical coordinate")
+        return Judgment("MALFORMED_REQUEST", ("EXTRANEOUS_LEXICAL_BINDING", consumer_value.lexical_bindings[-1]))
+    if relation is ResolutionRelation.SERVICE_DISCOVERY:
+        if target.kind not in {RecordKind.SERVICE, RecordKind.CAPABILITY} or not isinstance(consumer_value, InvocationRequest):
+            raise FiniteProfileError("unsupported service-discovery coordinate")
         return Judgment("EVALUABILITY_MISSING")
-    if kind is RecordKind.TRUST_POLICY:
+    if relation is ResolutionRelation.TRUST_POLICY:
+        if target.kind is not RecordKind.TRUST_POLICY or not isinstance(consumer_value, TrustEnvironment):
+            raise FiniteProfileError("unsupported trust-policy coordinate")
         return Judgment("TRUST_ROOT_ABSENT")
-    if kind is RecordKind.TRUST_ROOT:
+    if relation is ResolutionRelation.TRUST_ROOT:
+        if target.kind is not RecordKind.TRUST_ROOT or not isinstance(consumer_value, TrustEnvironment):
+            raise FiniteProfileError("unsupported trust-root coordinate")
         return Judgment("TRUST_ROOT_ABSENT", (target,))
-    if kind is RecordKind.CERTIFICATE:
+    if relation is ResolutionRelation.CERTIFICATE_ADMISSION:
+        if target.kind is not RecordKind.CERTIFICATE or not isinstance(consumer_value, PairRequestData):
+            raise FiniteProfileError("unsupported certificate-admission coordinate")
+        pair_binding = _resolve(composition, consumer_value.pair_binding, PairBinding)
+        if pair_binding is None or pair_binding.value.certificate != target:
+            raise FiniteProfileError("certificate coordinate is not induced by its pair binding")
         return Judgment("NO_CERTIFICATE_ADMISSION", ("CONSISTENCY_UNKNOWN",))
-    if kind is RecordKind.MIGRATION:
+    if relation is ResolutionRelation.MIGRATION:
+        if target.kind is not RecordKind.MIGRATION or not isinstance(consumer_value, EvolutionRecord):
+            raise FiniteProfileError("unsupported migration coordinate")
         return Judgment("NO_MIGRATION", (target.key.local,))
-    if kind is RecordKind.COMPATIBILITY_CLAIM:
+    if relation is ResolutionRelation.COMPATIBILITY:
+        if target.kind is not RecordKind.COMPATIBILITY_CLAIM or not isinstance(consumer_value, EvolutionRecord):
+            raise FiniteProfileError("unsupported compatibility coordinate")
         return Judgment("NO_COMPATIBILITY", (target.key.local,))
-    if kind is RecordKind.SEMANTIC_EXTENSION:
-        required = isinstance(referring.value, EvolutionRecord) and referring.value.required if referring is not None else False
+    if relation in {ResolutionRelation.OPTIONAL_EXTENSION, ResolutionRelation.REQUIRED_EXTENSION}:
+        required = relation is ResolutionRelation.REQUIRED_EXTENSION
+        if target.kind is not RecordKind.SEMANTIC_EXTENSION or not isinstance(consumer_value, EvolutionRecord) or consumer_value.required is not required:
+            raise FiniteProfileError("unsupported extension coordinate")
         return Judgment("INCOMPATIBLE" if required else "NO_EFFECT", (target.key.local,))
-    if kind is RecordKind.MODEL_CONTRACT:
+    if relation is ResolutionRelation.MODEL_BINDING:
+        if target.kind is not RecordKind.MODEL_CONTRACT or not isinstance(consumer_value, PluginPackage):
+            raise FiniteProfileError("unsupported model-binding coordinate")
         return Judgment("OPEN_BINDINGS", ("MODEL_CONTRACT",))
-    if kind is RecordKind.ALIAS:
-        required = isinstance(referring.value, EvolutionRecord) and referring.value.required if referring is not None else False
-        return Judgment("MALFORMED", ("MISSING_ALIAS", target.key.local)) if required else Judgment("NO_ALIAS", (target.key.local,))
-    if kind is RecordKind.CONTRACT_SPEC:
-        if referring is not None and isinstance(referring.value, CapabilityDescriptor):
-            return Judgment("CAPABILITY_INCOMPATIBLE", ("EVALUABILITY_MISSING",))
+    if relation in {ResolutionRelation.OPTIONAL_ALIAS, ResolutionRelation.REQUIRED_ALIAS}:
+        required = relation is ResolutionRelation.REQUIRED_ALIAS
+        if target.kind is not RecordKind.ALIAS or not isinstance(consumer_value, EvolutionRecord) or consumer_value.required is not required:
+            raise FiniteProfileError("unsupported alias coordinate")
+        if required:
+            return Judgment("MALFORMED", ("MISSING_ALIAS", target.key.local))
+        return Judgment("NO_ALIAS", (target.key.local,))
+    if relation is ResolutionRelation.SIGMA_CONTRACT:
+        if target.kind is not RecordKind.CONTRACT_SPEC or not isinstance(consumer_value, SemanticBinding):
+            raise FiniteProfileError("unsupported Sigma-contract coordinate")
         return Judgment("BINDING_INCOMPATIBLE", ("OPEN_BINDINGS",))
-    if kind is RecordKind.REQUEST:
-        if referring is not None and isinstance(referring.value, SemanticEnvironment) and referring.value.lexical_bindings:
-            return Judgment("MALFORMED_REQUEST", ("EXTRANEOUS_LEXICAL_BINDING", referring.value.lexical_bindings[-1]))
+    if relation is ResolutionRelation.SERVICE_CONTRACT:
+        if target.kind is not RecordKind.CONTRACT_SPEC or not isinstance(consumer_value, CapabilityDescriptor):
+            raise FiniteProfileError("unsupported Service-contract coordinate")
+        return Judgment("CAPABILITY_INCOMPATIBLE", ("EVALUABILITY_MISSING",))
+    if relation is ResolutionRelation.REQUEST_RECORD:
+        if target.kind is not RecordKind.REQUEST or not isinstance(consumer_value, ResultRecord):
+            raise FiniteProfileError("unsupported request-record coordinate")
         return Judgment("MALFORMED_REQUEST")
-    if kind is RecordKind.RESULT:
+    if relation is ResolutionRelation.RESULT_PROTOCOL:
+        if target.kind is not RecordKind.RESULT or not isinstance(consumer_value, InvocationRequest):
+            raise FiniteProfileError("unsupported result-protocol coordinate")
         return Judgment("INVOCATION_FAILED", ("PROTOCOL", "NO_RESULT", "NO_TRUTH"))
-    if kind in {RecordKind.SEMANTIC_ENVIRONMENT, RecordKind.TRUST_ENVIRONMENT, RecordKind.DEPENDENCY_ENVIRONMENT}:
-        return Judgment("MALFORMED_REQUEST", (referring.identity if referring is not None else target,))
-    if kind is RecordKind.OBSERVATION_ENVIRONMENT:
+    if relation is ResolutionRelation.REQUEST_ENVIRONMENT:
+        if target.kind not in {RecordKind.SEMANTIC_ENVIRONMENT, RecordKind.TRUST_ENVIRONMENT, RecordKind.DEPENDENCY_ENVIRONMENT} or not isinstance(consumer_value, InvocationRequest):
+            raise FiniteProfileError("unsupported request-environment coordinate")
+        return Judgment("MALFORMED_REQUEST", (consumer.identity,))
+    if relation is ResolutionRelation.OBSERVATION_RESULT:
+        if target.kind is not RecordKind.OBSERVATION_ENVIRONMENT or not isinstance(consumer_value, ResultRecord):
+            raise FiniteProfileError("unsupported observation-result coordinate")
         return Judgment("MALFORMED_RESULT", ("SEMANTIC_MISMATCH",))
-    if kind is RecordKind.LIFECYCLE:
-        return Judgment("LIFECYCLE_REPLACED", (referring.identity if referring is not None else target, "INVOCABLE_FOR"))
-    if kind is RecordKind.EVIDENCE:
+    if relation is ResolutionRelation.LIFECYCLE_TRANSITION:
+        if target.kind is not RecordKind.LIFECYCLE or not isinstance(replacement_value, LifecycleRecord):
+            raise FiniteProfileError("unsupported lifecycle-transition coordinate")
+        return Judgment("LIFECYCLE_REPLACED", (replacement.identity, "INVOCABLE_FOR"))
+    if relation is ResolutionRelation.EVIDENCE_TRUTH:
+        if target.kind is not RecordKind.EVIDENCE or not isinstance(consumer_value, NamedCarrier):
+            raise FiniteProfileError("unsupported evidence-truth coordinate")
         return Judgment("TRUTH_UNKNOWN")
-    if kind is RecordKind.REASON:
+    if relation is ResolutionRelation.REASON_CARRIER:
+        if target.kind is not RecordKind.REASON or not isinstance(consumer_value, NamedCarrier):
+            raise FiniteProfileError("unsupported reason-carrier coordinate")
         return Judgment("MALFORMED_RESULT", ("MALFORMED_CARRIER",))
-    if kind is RecordKind.CONFLICT:
-        replacement = next((record for record in composition.records if record.identity.kind is RecordKind.CONFLICT), None)
-        return Judgment("CONFLICT_REPLACED", ((replacement.identity if replacement else None), "MALFORMED"))
-    raise FiniteProfileError(f"no missing-status branch for {kind.value}")
+    if relation is ResolutionRelation.CONFLICT_REPLACEMENT:
+        if target.kind is not RecordKind.CONFLICT or replacement is None or replacement.identity.kind is not RecordKind.CONFLICT:
+            raise FiniteProfileError("unsupported conflict-replacement coordinate")
+        return Judgment("CONFLICT_REPLACED", (replacement.identity, "MALFORMED"))
+    raise FiniteProfileError(f"unsupported missing coordinate: {relation.value}")
 
 
 def replay(universe: Universe) -> Any:
@@ -1121,10 +1289,7 @@ def replay(universe: Universe) -> Any:
         if any(composition.at(root) is None for root in request.context_roots):
             return LookupReplay(composition, Judgment("MALFORMED_CONTEXT", tuple(root for root in request.context_roots if composition.at(root) is None)))
         record = composition.at(request.target)
-        referring = composition.at(request.referring_record) if request.referring_record is not None else None
-        if request.referring_record is not None and referring is None:
-            return LookupReplay(composition, Judgment("MALFORMED_CONTEXT", (request.referring_record,)))
-        result = Judgment("PRESENT", (record,)) if record is not None else _missing_result(request.target, referring, composition)
+        result = Judgment("PRESENT", (record,)) if record is not None else _resolve_failed_coordinate(request.target, request.coordinate, composition)
         return LookupReplay(composition, result)
     if isinstance(request, GraphEvaluationRequest):
         return evaluate_observation_graph(request, composition)

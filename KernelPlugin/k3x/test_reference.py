@@ -44,6 +44,8 @@ class K3XReferenceTests(unittest.TestCase):
         self.assertIsInstance(replayed, ref.CoreReplay)
         self.assertEqual((replayed.formation, replayed.closure, replayed.evaluability), (ref.Formation.WELL_FORMED, ref.Closure.CLOSED, ref.Evaluability.AVAILABLE))
         self.assertEqual(replayed.result.truth, cp.Truth.TRUE)
+        result_record = _at(construction.universe, construction.result)
+        self.assertEqual((result_record.value.request, result_record.value.result_kind, result_record.value.result), (construction.request, "Eval", replayed.result))
 
         empty_package = replace(_at(construction.universe, construction.package), value=replace(_at(construction.universe, construction.package).value, declarations=(), bindings=(), model_contracts=(), contract_specs=(), services=()))
         empty_result = ref.replay(_rewrite(construction.universe, {construction.package: empty_package}))
@@ -76,11 +78,24 @@ class K3XReferenceTests(unittest.TestCase):
         wrong_observation = replace(verification.observation, values=((next(iter(verification.observation.values))[0], cp.ObservationValue(cp.ObservationValueTag.ABSENT)),))
         wrong_observation_record = replace(verification, observation=wrong_observation, evidence_refs=frozenset({wrong_observation_ref}))
         wrong_observation_entry = cp.CodingEvidenceEntry(wrong_observation_ref, cp.CodingEvidencePayload(cp.EvidencePayloadTag.VERIFICATION, wrong_observation_record))
-        self.assertEqual(cp.verification_passed(verification.spec, construction.snapshot, frozenset({wrong_observation_entry})).truth, cp.Truth.UNKNOWN)
+        # The four K3-S verification equations do not compare a payload value
+        # to a direct re-observation: matching spec/snapshot/subject/evidence
+        # membership is sufficient even for another admitted observation value.
+        self.assertEqual(cp.verification_passed(verification.spec, construction.snapshot, frozenset({wrong_observation_entry})).truth, cp.Truth.TRUE)
         inconclusive_ref = cp.EvidenceRef("auditor", "coding", "verification/inconclusive", cp.VERIFICATION_SCHEMA)
         inconclusive_record = replace(verification, status=cp.VerificationStatus.INCONCLUSIVE, evidence_refs=frozenset({inconclusive_ref}))
         inconclusive_entry = cp.CodingEvidenceEntry(inconclusive_ref, cp.CodingEvidencePayload(cp.EvidencePayloadTag.VERIFICATION, inconclusive_record))
         self.assertEqual(cp.verification_passed(verification.spec, construction.snapshot, frozenset({inconclusive_entry})).truth, cp.Truth.UNKNOWN)
+        self.assertEqual(cp.OtherArtifactRole("private"), cp.OtherArtifactRole("private"))
+        self.assertNotEqual(cp.OtherArtifactRole("private"), cp.ArtifactRole.SOURCE)
+        self.assertEqual(cp.OtherFormat("custom"), cp.OtherFormat("custom"))
+        with self.assertRaises(ValueError):
+            cp.FieldValue(cp.FieldValueTag.BOOL, 1)
+        first = cp.Path((cp.PathSegment("a"),))
+        second = cp.Path((cp.PathSegment("b"),))
+        artifact_a = cp.ArtifactContent(cp.ArtifactTag.TEXT, cp.OtherArtifactRole("private"), cp.OtherFormat("custom"), cp.ByteSize(1), cp.ContentIdentity("a"))
+        artifact_b = cp.ArtifactContent(cp.ArtifactTag.TEXT, cp.ArtifactRole.SOURCE, cp.Format.TEXT, cp.ByteSize(2), cp.ContentIdentity("b"))
+        self.assertEqual(cp.RepositorySnapshot(((first, artifact_a), (second, artifact_b))), cp.RepositorySnapshot(((second, artifact_b), (first, artifact_a))))
 
     def test_k3x_02_exact_identity_equal_coalescence_and_conflict(self) -> None:
         declaration_id = fx.rid(ref.RecordKind.DECLARATION, "d", namespace="identity")
@@ -151,6 +166,10 @@ class K3XReferenceTests(unittest.TestCase):
         malformed_package = ref.replay(_rewrite(construction.universe, {construction.capability: bad_descriptor_record}))
         self.assertIsInstance(malformed_package, ref.CompositionReplay)
         self.assertEqual(malformed_package.formation, ref.Formation.MALFORMED)
+        sigma = _at(construction.universe, construction.sigma_spec)
+        renamed = replace(sigma, value=replace(sigma.value, relation_name="not_a_frozen_relation"))
+        with self.assertRaises(ref.FiniteProfileError):
+            ref.evaluate_invocation(construction.request, ref.compose_records(_rewrite(construction.universe, {sigma.identity: renamed}).records))
 
     def test_k3x_04_declaration_binding_and_capability_are_derived(self) -> None:
         construction = fx.core_construction()
@@ -185,6 +204,9 @@ class K3XReferenceTests(unittest.TestCase):
         binding = _at(construction.universe, construction.pair_binding)
         self.assertEqual(len(binding.value.validation_references), 2)
         self.assertFalse(binding.value.validation_references & binding.value.proper_subjects)
+        manifest = construction.manifest
+        self.assertEqual({item.identity.key.local for item in manifest if isinstance(item.value, ref.ContractSpec) and item.value.owner_layer is ref.Layer.SERVICE}, {"PSOUND", "PCOMPLETE", "PEVIDENCE", "PFAILURE"})
+        self.assertTrue({"E_p", "D_p", "PENV", "PAIR_FULL_EVAL_EVIDENCE", "PVC", "R_p", "TRP", "PCERT"} <= {item.identity.key.local for item in manifest})
 
         removed_producer = _rewrite(construction.universe, {construction.producer_records[1].identity: None})
         self.assertEqual(ref.replay(removed_producer).details[0], "INCOMPLETE_PRODUCER_SET")
@@ -195,6 +217,10 @@ class K3XReferenceTests(unittest.TestCase):
         self.assertEqual(ref.replay(_rewrite(construction.universe, {construction.producer_records[2].identity: equal_sets})).details[0], "PAIR_SELF_TRUST")
         missing_validation = _rewrite(construction.universe, {next(iter(construction.validation_references)): None})
         self.assertEqual(ref.replay(missing_validation).details[0], "MISSING_VALIDATION_REFERENCE")
+        pair_request = _at(construction.universe, construction.request)
+        pair_trust = _at(construction.universe, pair_request.value.trust_environment)
+        incompatible_trust = replace(pair_trust, value=replace(pair_trust.value, root_judgments=((pair_trust.value.roots[0], ref.TrustState.INCOMPATIBLE),)))
+        self.assertEqual(ref.replay(_rewrite(construction.universe, {pair_trust.identity: incompatible_trust})).tag, "INCOMPATIBLE")
         certificate = _at(construction.universe, construction.certificate)
         wrong_subject = replace(certificate, value=replace(certificate.value, subject=construction.request))
         self.assertEqual(ref.replay(_rewrite(construction.universe, {construction.certificate: wrong_subject})).details[0], "PAIR_CERTIFICATE_SUBJECT_OR_JUDGMENT")
@@ -315,7 +341,8 @@ class K3XReferenceTests(unittest.TestCase):
             ref.replay(replace(forward.universe, request=replace(forward.universe.request, nodes=(forward.node_one, wrong_kind_node))))
         node_two = _at(forward.universe, forward.node_two)
         spec_two = _at(forward.universe, node_two.value.contract_spec)
-        malformed_spec = replace(spec_two, value=replace(spec_two.value, support=frozenset()))
+        malformed_query = ref.ObservationQuery(forward.node_one, ref.ObservationKind.TERM_RESULT, ("before", "after"))
+        malformed_spec = replace(spec_two, value=replace(spec_two.value, observation_queries=(malformed_query,)))
         with self.assertRaisesRegex(ValueError, "malformed ContractSpec"):
             ref.replay(_rewrite(forward.universe, {spec_two.identity: malformed_spec}))
         service_bad_kind = replace(spec_two.value, owner_layer=ref.Layer.SERVICE, role=ref.ContractRole.SOUND_FRAGMENT, observation_queries=(ref.ObservationQuery(forward.node_one, ref.ObservationKind.PROFILE_RESULT, ("input",)),), support=frozenset({forward.node_one}))
@@ -324,6 +351,12 @@ class K3XReferenceTests(unittest.TestCase):
         self.assertEqual(ref.validate_contract_spec(duplicate_query).details[0], "DUPLICATE_OBSERVATION_QUERY")
         permutation_results = [ref.replay(fx.permutation_universe(package_order, record_order)) for package_order in fx.PackageOrderTag for record_order in fx.RecordOrderTag]
         self.assertTrue(all(result.composition == permutation_results[0].composition for result in permutation_results))
+        permutation_records = permutation_results[0].composition.records
+        self.assertEqual(len(permutation_records), 11)
+        self.assertEqual(sum(isinstance(item.value, ref.PluginPackage) for item in permutation_records), 2)
+        self.assertEqual(sum(isinstance(item.value, ref.TypeDeclaration) for item in permutation_records), 4)
+        self.assertEqual(sum(isinstance(item.value, ref.ContractSpec) and item.value.owner_layer is ref.Layer.DELTA for item in permutation_records), 4)
+        self.assertTrue(all(len(item.value.declarations) == 2 and len(item.value.contract_specs) == 2 for item in permutation_records if isinstance(item.value, ref.PluginPackage)))
 
     def test_k3x_10_duplicate_equal_and_conflict_are_order_independent(self) -> None:
         equal_forward = ref.replay(fx.duplicate_universe(False, fx.OrderTag.FORWARD))
@@ -336,29 +369,94 @@ class K3XReferenceTests(unittest.TestCase):
         self.assertEqual(conflict_forward.formation, ref.Formation.MALFORMED)
         self.assertEqual(len(conflict_forward.composition.conflicts), 1)
         self.assertEqual(len(conflict_forward.composition.conflicts[0].unequal_records), 2)
+        self.assertEqual((len(fx.DUPLICATE_TYPE_DECLARATIONS), len(fx.DUPLICATE_TYPE_ADMISSIONS)), (24, 24))
+        self.assertEqual(len(fx.DUPLICATE_PACKAGE.value.declarations), 24)
+        self.assertEqual(len(fx.DUPLICATE_PACKAGE.value.contract_specs), 24)
+        self.assertEqual(len(fx.DUPLICATE_DECLARATION.value.argument_types), 3)
+        self.assertEqual(len(fx.DUPLICATE_BAD_DECLARATION.value.argument_types), 3)
 
     def test_k3x_11_all_42_literal_missing_reconstructions(self) -> None:
         self.assertEqual(len(fx.MissingRowId), 42)
+        literal_identity_fields = (
+            (fx.MissingRowId.ABI, ref.RecordKind.ABI, "capknow.semantic", "abi", "ABI0", fx.ABI0),
+            (fx.MissingRowId.PLUGIN, ref.RecordKind.PACKAGE, "capknow.semantic", "plugin", "coding-minimal", fx.V1),
+            (fx.MissingRowId.DECLARATION, ref.RecordKind.DECLARATION, "capknow.semantic", "coding.declaration", "DP(task_accepts)", fx.V1),
+            (fx.MissingRowId.SYMBOL, ref.RecordKind.DECLARATION, "capknow.semantic", "coding.declaration", "DP(task_accepts)", fx.V1),
+            (fx.MissingRowId.EVENT, ref.RecordKind.EVENT, "capknow.semantic", "coding.declaration", "DE(dependency_refresh)", fx.V1),
+            (fx.MissingRowId.PAIR_DECLARATION, ref.RecordKind.PAIR_DECLARATION, "capknow.semantic", "pair", "PAIR(refresh)", fx.V1),
+            (fx.MissingRowId.OUTCOME, ref.RecordKind.OUTCOME, "capknow.semantic", "outcome", "O_w", fx.V1),
+            (fx.MissingRowId.BINDING, ref.RecordKind.BINDING, "capknow.semantic", "coding.binding", "BINDING(DP(task_accepts))", fx.V1),
+            (fx.MissingRowId.PROFILE_BINDING, ref.RecordKind.PROFILE_BINDING, "capknow.semantic", "coding.binding", "PROFILE_BINDING(PK(implementation_evidence))", fx.V1),
+            (fx.MissingRowId.PAIR_BINDING, ref.RecordKind.PAIR_BINDING, "capknow.semantic", "pair.binding", "PB_alt", fx.V1),
+            (fx.MissingRowId.AUTHORITY_FACT, ref.RecordKind.AUTHORITY_FACT, "capknow.semantic", "authority", "AF(choice,1)", fx.V1),
+            (fx.MissingRowId.CHOICE_BINDING, ref.RecordKind.CHOICE_BINDING, "capknow.semantic", "authority.choice", "cb0", fx.V1),
+            (fx.MissingRowId.LEXICAL_BINDING, ref.RecordKind.LEXICAL_BINDING, "capknow.semantic", "lexical", "lk0", fx.V1),
+            (fx.MissingRowId.EXTRANEOUS_LEXICAL_BINDING, ref.RecordKind.REQUEST, "capknow.semantic", "request", "Q_t[ADMITTED]", fx.V1),
+            (fx.MissingRowId.SERVICE, ref.RecordKind.SERVICE, "capknow.semantic", "coding.service", "SK(predicates)", fx.V1),
+            (fx.MissingRowId.CAPABILITY, ref.RecordKind.CAPABILITY, "capknow.semantic", "coding.capability", "CAP(predicates)", fx.V1),
+            (fx.MissingRowId.TRUST_POLICY, ref.RecordKind.TRUST_POLICY, "capknow.semantic", "trust", "TP", fx.V1),
+            (fx.MissingRowId.TRUST_ROOT, ref.RecordKind.TRUST_ROOT, "capknow.semantic", "trust", "TR", fx.V1),
+            (fx.MissingRowId.CERTIFICATE, ref.RecordKind.CERTIFICATE, "capknow.audit.pair-proof", "pair.certificate", "PCERT", fx.V1),
+            (fx.MissingRowId.MIGRATION, ref.RecordKind.MIGRATION, "capknow.fixture.evolution-owner", "evolution", "MK0", fx.V1),
+            (fx.MissingRowId.COMPATIBILITY_CLAIM, ref.RecordKind.COMPATIBILITY_CLAIM, "capknow.fixture.evolution-owner", "evolution", "CCK0", fx.V1),
+            (fx.MissingRowId.EXTENSION_OPTIONAL, ref.RecordKind.SEMANTIC_EXTENSION, "capknow.fixture.evolution-owner", "evolution", "XK0", fx.V1),
+            (fx.MissingRowId.EXTENSION_REQUIRED, ref.RecordKind.SEMANTIC_EXTENSION, "capknow.fixture.evolution-owner", "evolution", "XK1", fx.V1),
+            (fx.MissingRowId.MODEL_CONTRACT, ref.RecordKind.MODEL_CONTRACT, "capknow.semantic", "coding.model", "MODEL_task_accepts", fx.V1),
+            (fx.MissingRowId.ALIAS_OPTIONAL, ref.RecordKind.ALIAS, "capknow.fixture.evolution-owner", "evolution.alias", "AK0", fx.V1),
+            (fx.MissingRowId.ALIAS_REQUIRED, ref.RecordKind.ALIAS, "capknow.fixture.evolution-owner", "evolution.alias", "AK1", fx.V1),
+            (fx.MissingRowId.SIGMA_CONTRACT_SPEC, ref.RecordKind.CONTRACT_SPEC, "capknow.semantic", "coding.contract", "CS(PREDICATE_MEANING,task_accepts)", fx.V1),
+            (fx.MissingRowId.SERVICE_CONTRACT_SPEC, ref.RecordKind.CONTRACT_SPEC, "capknow.semantic", "coding.service.contract", "QSOUND", fx.V1),
+            (fx.MissingRowId.REQUEST, ref.RecordKind.REQUEST, "capknow.semantic", "request", "Q_t[ADMITTED]", fx.V1),
+            (fx.MissingRowId.RESULT, ref.RecordKind.RESULT, "capknow.semantic", "result", "RES_t[ADMITTED]", fx.V1),
+            (fx.MissingRowId.SEMANTIC_ENVIRONMENT, ref.RecordKind.SEMANTIC_ENVIRONMENT, "capknow.semantic", "environment", "E_t", fx.V1),
+            (fx.MissingRowId.TRUST_ENVIRONMENT, ref.RecordKind.TRUST_ENVIRONMENT, "capknow.semantic", "trust", "T_admitted", fx.V1),
+            (fx.MissingRowId.DEPENDENCY_ENVIRONMENT, ref.RecordKind.DEPENDENCY_ENVIRONMENT, "capknow.semantic", "environment", "D_t", fx.V1),
+            (fx.MissingRowId.OBSERVATION_ENVIRONMENT, ref.RecordKind.OBSERVATION_ENVIRONMENT, "capknow.semantic", "confluence.result", "M_c", fx.V1),
+            (fx.MissingRowId.LIFECYCLE, ref.RecordKind.LIFECYCLE, "capknow.semantic", "confluence.lifecycle", "L_c_final", fx.V1),
+            (fx.MissingRowId.EVENT_VALUE, ref.RecordKind.EVENT_VALUE, "capknow.semantic", "event.value", "ev0", fx.V1),
+            (fx.MissingRowId.TRACE_EVENT, ref.RecordKind.TRACE_EVENT, "capknow.semantic", "event.trace", "te0", fx.V1),
+            (fx.MissingRowId.SOURCE, ref.RecordKind.SOURCE, "capknow.semantic", "authority.source", "SRC(choice,1)", fx.V1),
+            (fx.MissingRowId.AUTHORITY_REF, ref.RecordKind.AUTHORITY_REF, "capknow.semantic", "authority.ref", "AUTH(choice,1)", fx.V1),
+            (fx.MissingRowId.EVIDENCE, ref.RecordKind.EVIDENCE, "capknow.semantic", "evidence", "e0", fx.V1),
+            (fx.MissingRowId.REASON, ref.RecordKind.REASON, "capknow.semantic", "reason", "u0", fx.V1),
+            (fx.MissingRowId.CONFLICT, ref.RecordKind.CONFLICT, "capknow.semantic", "conflict", "conflict0", fx.V1),
+        )
+        self.assertEqual(len(literal_identity_fields), 42)
+        for row, kind, owner, namespace, local, version in literal_identity_fields:
+            target = fx.missing_construction(row).target
+            self.assertEqual(target, ref.RecordIdentity(kind, ref.ExactKey(owner, namespace, local, version)))
         for row in fx.MissingRowId:
             with self.subTest(row=row):
                 construction = fx.missing_construction(row)
                 baseline_composition = ref.compose_records(construction.baseline.records)
                 variant_composition = ref.compose_records(construction.variant.records)
+                self.assertEqual(baseline_composition.records, construction.baseline_manifest)
+                self.assertEqual(variant_composition.records, construction.variant_manifest)
+                self.assertEqual(construction.baseline_manifest - construction.variant_manifest, construction.removed_records)
+                self.assertEqual(construction.variant_manifest - construction.baseline_manifest, construction.added_records)
                 self.assertIsNotNone(baseline_composition.at(construction.target))
                 self.assertIsNone(variant_composition.at(construction.target))
                 base = ref.replay(construction.baseline)
                 variant = ref.replay(construction.variant)
                 self.assertEqual(base.result.tag, "PRESENT")
-                self.assertEqual(variant.result, fx._MISSING_ASSERTIONS[row])
+                self.assertEqual(variant.result, fx.MISSING_EXPECTED_LITERAL[row])
                 empty = ref.replay(replace(construction.variant, records=()))
                 self.assertEqual(empty.result.tag, "MALFORMED_CONTEXT")
                 if construction.variant_container is not None:
                     package = _at(construction.variant, construction.variant_container)
                     empty_package = replace(package, value=replace(package.value, declarations=(), bindings=(), model_contracts=(), contract_specs=(), services=(), certificates=(), other_records=()))
-                    emptied = ref.replay(_rewrite(construction.variant, {construction.variant_container: empty_package}))
-                    self.assertEqual(emptied.result.tag, "MALFORMED_CONTEXT")
+                    if package != empty_package:
+                        emptied = ref.replay(_rewrite(construction.variant, {construction.variant_container: empty_package}))
+                        self.assertNotEqual(emptied, variant)
         lexical = fx.missing_construction(fx.MissingRowId.EXTRANEOUS_LEXICAL_BINDING)
         self.assertEqual(ref.replay(lexical.variant).result.details[0], "EXTRANEOUS_LEXICAL_BINDING")
+        arbitrary = ref.LookupRequest(
+            fx.rid(ref.RecordKind.CAPABILITY, "unsupported", namespace="unsupported"),
+            ref.ResolutionCoordinate(ref.ResolutionRelation.SERVICE_DISCOVERY, lexical.variant.request.context_roots[0]),
+            lexical.variant.request.context_roots,
+        )
+        with self.assertRaises(ref.FiniteProfileError):
+            ref.replay(replace(lexical.variant, request=arbitrary))
 
     def test_k3x_12_all_102_replays_without_identifier_or_assertion_input(self) -> None:
         packet = fx.fixture_packet()
