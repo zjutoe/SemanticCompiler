@@ -4,6 +4,14 @@
 
 - KISS and YAGNI: prefer minimal, explicit implementations; avoid over-engineering and defensive programming unless required by explicit protocol.
 
+## Agent Model Routing
+
+- Use `gpt-5.6-sol` with reasoning effort `medium` for task execution, including implementation, repair, experiment/operator work, and production of task deliverables.
+- Use `gpt-5.6-sol` with reasoning effort `high` for every independent review, including handoff review, implementation review, scientific acceptance review, and final result review.
+- Only for top-level design work—such as system architecture, Contract IR semantics, kernel/plugin semantic foundations, or comparable project-defining decisions—tell the user before substantive work that `gpt-5.6-sol` with reasoning effort `xhigh` is recommended and ask the user to switch manually. Do not select `xhigh` automatically, and do not prompt for it for implementation, repair, experiment execution, or independent review.
+- Bind the exact model and reasoning effort in every delegated execution or review packet. Do not silently substitute another model, model family, or reasoning effort.
+- If the required model or effort is temporarily unavailable, retry without changing the frozen task boundary. If it remains unavailable, return the task to `main` and report the routing blocker.
+
 ## Version Control and Provenance
 
 - Git is the source of truth for versioned source, documentation, tests, scripts, and configurations. Do not maintain parallel source-package hashes.
@@ -34,7 +42,7 @@
 ## Research Review and Acceptance
 
 - High-risk changes include simulators, observation semantics, task distributions, train/calibration/evaluation splits, metrics, statistical aggregation, acceptance logic, and result interpretation.
-- Any high-risk change must trigger an independent review agent using the same model family as the main thread, with no shared context between the review agent and main thread.
+- Any high-risk change must trigger an independent review agent using `gpt-5.6-sol` with reasoning effort `high`, with no shared context between the review agent and main thread.
 - Before accepting non-trivial changes, freeze them in a commit and spawn an independent strict read-only review agent by default with `fork_context=false`.
 - The review handoff should include only: intended diff, relevant artifacts, acceptance criteria, protocol constraints, and verification already run.
 - For each high-risk change handoff, include: exact commit or range, concise change summary, reproducible commands, key touched files, verification outputs, and relevant artifact checksums.
