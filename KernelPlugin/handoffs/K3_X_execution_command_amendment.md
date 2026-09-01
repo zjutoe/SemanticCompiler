@@ -12,13 +12,20 @@ or `.pth` files. Those ambient inputs are outside the finite evidence boundary.
 ## Normative repair
 
 For K3-X diagnostic and evidence execution, every accepted handoff occurrence
-of `python -B` is superseded by the exact bound interpreter followed by
-`-E -S -B`:
+of `python -B` is superseded by an exact empty-environment launcher, two fixed
+locale values, and the exact bound interpreter followed by `-E -S -B`:
 
 - `-E` ignores all `PYTHON*` environment variables;
 - `-S` disables automatic `site`, `sitecustomize`, user-site, and `.pth`
   processing;
 - `-B` disables bytecode/cache writes.
+
+The bound environment launcher is `/usr/bin/env`, SHA-256
+`190c360452d515eac29236055581587f162d5b53f56104df169fc51d5c4661c9`.
+It supplies exactly `LC_ALL=C.UTF-8` and `LANG=C.UTF-8`; no other environment
+variable reaches Python. Preflight additionally requires `LD_PRELOAD`,
+`LD_LIBRARY_PATH`, `PYTHONHOME`, and `PYTHONPATH` to be absent in the operator
+process before the launcher is invoked.
 
 The working directory remains the exact repository root, so the committed
 `KernelPlugin` package remains importable without `PYTHONPATH` or site startup.
@@ -28,19 +35,23 @@ changed.
 The exact amended commands are:
 
 ```text
-/opt/anaconda3/bin/python -E -S -B -m unittest KernelPlugin.k3x.test_reference -v
-/opt/anaconda3/bin/python -E -S -B -c "import ast, pathlib; paths = ('KernelPlugin/k3x/__init__.py', 'KernelPlugin/k3x/reference.py', 'KernelPlugin/k3x/coding_plugin.py', 'KernelPlugin/k3x/fixtures.py', 'KernelPlugin/k3x/test_reference.py'); [ast.parse(pathlib.Path(path).read_text(encoding='utf-8'), filename=path) for path in paths]"
+/usr/bin/env -i LC_ALL=C.UTF-8 LANG=C.UTF-8 /opt/anaconda3/bin/python -E -S -B -m unittest KernelPlugin.k3x.test_reference -v
+/usr/bin/env -i LC_ALL=C.UTF-8 LANG=C.UTF-8 /opt/anaconda3/bin/python -E -S -B -c "import ast, pathlib; paths = ('KernelPlugin/k3x/__init__.py', 'KernelPlugin/k3x/reference.py', 'KernelPlugin/k3x/coding_plugin.py', 'KernelPlugin/k3x/fixtures.py', 'KernelPlugin/k3x/test_reference.py'); [ast.parse(pathlib.Path(path).read_text(encoding='utf-8'), filename=path) for path in paths]"
 ```
 
 Before dispatch, main must bind an exact execution `HEAD`. Preflight requires
-that exact `HEAD`, the accepted implementation blobs, binding/amendment commits,
-runtime hash, clean tracked/untracked status, and no K3-X caches.
+that exact `HEAD`, the accepted implementation blobs, the independently
+accepted binding and amendment blobs at their exact paths, both runtime hashes,
+the fixed environment, clean tracked/untracked status, an absent sole report
+path, and no K3-X caches. Ancestry alone is insufficient.
 
-If preflight fails, no evidence command runs and the sole report records the
-preflight failure. If a command fails, execution stops; the sole report records
-that command once and every later command as `NOT_RUN`. “Exactly once” applies
-only to commands reached in the ordered execution. The report remains the only
-authorized write in success or failure.
+If preflight fails and the report path is absent, no evidence command runs and
+the sole failure report records the mismatch. If the report path already exists
+or is dirty, the operator writes nothing and escalates to main. If a command
+fails, execution stops; the sole failure report records that command once and
+every later command as `NOT_RUN`. “Exactly once” applies only to commands
+reached in the ordered execution. The report remains the only authorized write
+in success or reportable failure.
 
 This amendment does not permit dependencies, external inputs, network,
 held-out access, additional output, source repair, retry, or K4 work.

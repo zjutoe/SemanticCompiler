@@ -41,6 +41,10 @@ binding.
   `8f463543ee031f1c8804f869624bebcf3927c56d3e30b3217b4489a31d01ac32`
 - version: `3.13.9 | packaged by Anaconda, Inc. | (main, Oct 21 2025, 19:16:10) [GCC 11.2.0]`
 - working directory: `/home/mye/src/llm/SemanticCompiler`
+- empty-environment launcher: `/usr/bin/env`
+- launcher SHA-256:
+  `190c360452d515eac29236055581587f162d5b53f56104df169fc51d5c4661c9`
+- Python-visible environment: exactly `LC_ALL=C.UTF-8`, `LANG=C.UTF-8`
 
 Main's later dispatch must name one exact execution `HEAD` containing the
 accepted binding and amendment. Preflight must require that exact `HEAD`; an
@@ -64,7 +68,7 @@ The expected finite domains are exactly:
 - 42 missing-base and 42 missing-variant entries;
 - 3,740 reachable complete-value assertion nodes.
 
-No fixture, expected assertion, environment variable, ignored file, external
+No fixture, expected assertion, unlisted environment variable, ignored file, external
 artifact, or held-out content outside these committed records is an input.
 
 ## 4. Exact evidence commands
@@ -74,11 +78,11 @@ tracked/untracked status, and absence of K3-X cache files, execute each command
 exactly once and in this order:
 
 ```text
-/opt/anaconda3/bin/python -E -S -B -m unittest KernelPlugin.k3x.test_reference -v
-/opt/anaconda3/bin/python -E -S -B -c "import ast, pathlib; paths = ('KernelPlugin/k3x/__init__.py', 'KernelPlugin/k3x/reference.py', 'KernelPlugin/k3x/coding_plugin.py', 'KernelPlugin/k3x/fixtures.py', 'KernelPlugin/k3x/test_reference.py'); [ast.parse(pathlib.Path(path).read_text(encoding='utf-8'), filename=path) for path in paths]"
+/usr/bin/env -i LC_ALL=C.UTF-8 LANG=C.UTF-8 /opt/anaconda3/bin/python -E -S -B -m unittest KernelPlugin.k3x.test_reference -v
+/usr/bin/env -i LC_ALL=C.UTF-8 LANG=C.UTF-8 /opt/anaconda3/bin/python -E -S -B -c "import ast, pathlib; paths = ('KernelPlugin/k3x/__init__.py', 'KernelPlugin/k3x/reference.py', 'KernelPlugin/k3x/coding_plugin.py', 'KernelPlugin/k3x/fixtures.py', 'KernelPlugin/k3x/test_reference.py'); [ast.parse(pathlib.Path(path).read_text(encoding='utf-8'), filename=path) for path in paths]"
 ```
 
-`-E -S -B` is mandatory. The syntax command parses the five exact Python files
+The exact launcher, fixed environment, and `-E -S -B` are mandatory. The syntax command parses the five exact Python files
 in memory and writes nothing. Neither command may be retried, filtered, wrapped
 by another launcher, or replaced after failure. A nonzero exit is evidence and
 a stop condition, not repair authority.
@@ -90,7 +94,7 @@ fails, is:
 
 `docs/reports/kernel_plugin/K3_X_Executable_Spike_Report.md`
 
-The report must record:
+On success, the report must record:
 
 - this binding commit and the accepted implementation commit;
 - all six source blobs and the Python executable identity/hash/version;
@@ -107,6 +111,17 @@ The report must record:
 - only this conclusion: the accepted explicitly enumerated finite K2/K3-S
   vertical slice executed reproducibly under the bound runtime.
 
+On reportable preflight or command failure, the report instead records:
+
+- the exact mismatch or failing command and its exit status/output summary;
+- reached commands exactly once and later commands/checks as `NOT_RUN`;
+- unavailable counts as `NOT_VERIFIED`;
+- actual pre/post worktree status and any observed unauthorized output;
+- no positive reproducibility or scientific conclusion.
+
+If the report path exists or is dirty at preflight, write nothing and return the
+conflict to main; overwriting or appending is forbidden.
+
 The report must not claim complete K2 implementability, universal coding
 semantics, natural-language translation correctness, real-repository safety,
 planner performance, or superiority over another IR.
@@ -118,11 +133,12 @@ filesystem/process/network semantics, model call, benchmark, serialization,
 external artifact, held-out access, K4 work, additional report, or commit by the
 operator. It does not authorize changing this binding.
 
-If any bound commit, blob, executable, hash, command, path, constructor, domain,
-clean-state condition, or side-effect boundary does not match, run no evidence
-command and write only the failure report. Stop after the first command that
-fails or creates an unauthorized output, and write only the report with later
-commands marked `NOT_RUN`.
+If any bound commit, blob, executable/launcher, hash, accepted binding/amendment
+blob, command, environment, path, constructor, domain, clean-state condition,
+or side-effect boundary does not match, run no evidence command and use the
+failure schema when the report path is absent. Stop after the first command
+that fails or creates an unauthorized output, and write only the failure report
+with later commands marked `NOT_RUN`.
 
 ## 7. Result gate
 
