@@ -152,6 +152,36 @@ class K3XReferenceTests(unittest.TestCase):
         self.assertEqual(replayed.result.truth, cp.Truth.TRUE)
         result_record = _at(construction.universe, construction.result)
         self.assertEqual((result_record.value.request, result_record.value.result_kind, result_record.value.result), (construction.request, "Eval", replayed.result))
+        package = _at(construction.universe, construction.package).value
+        self.assertEqual(
+            (len(package.declarations), len(package.pair_declarations),
+             len(package.bindings), len(package.pair_bindings),
+             len(package.profile_bindings), len(package.model_contracts),
+             len(package.services), len(package.certificates)),
+            (119, 1, 57, 1, 1, 58, 6, 1),
+        )
+        self.assertEqual(
+            (sum(isinstance(item.value, ref.TypeDeclaration)
+                 for item in package.declarations),
+             sum(isinstance(item.value, ref.DeclarationShape)
+                 and item.value.declaration_kind == "LITERAL"
+                 for item in package.declarations)),
+            (55, 47),
+        )
+        self.assertEqual(
+            {item.identity.key.local for item in package.services},
+            {"CAP(functions)", "CAP(predicates)", "CAP(profile)",
+             "CAP(bounds)", "CAP(confluence)", "LEX_CAP"},
+        )
+        benv = package.certificates[0]
+        self.assertEqual(benv.identity.key.local, "BENV")
+        self.assertEqual(
+            (benv.value.certificate_key.owner,
+             benv.value.certificate_key.namespace,
+             benv.value.certificate_key.local),
+            ("PLUGIN_CERTIFICATE_ISSUER(CK)", "coding.certificate",
+             "bundle_bounds_unsat"),
+        )
 
         empty_package = replace(_at(construction.universe, construction.package), value=replace(_at(construction.universe, construction.package).value, declarations=(), pair_declarations=(), bindings=(), pair_bindings=(), profile_bindings=(), model_contracts=(), aliases=(), services=(), certificates=(), authority_facts=(), compatibility_claims=(), migrations=(), semantic_extensions=()))
         empty_result = ref.replay(_rewrite(construction.universe, {construction.package: empty_package}))
@@ -163,7 +193,7 @@ class K3XReferenceTests(unittest.TestCase):
         task_type = next(
             item for item in ref.compose_records(construction.universe.records).records
             if isinstance(item.value, ref.TypeDeclaration)
-            and item.identity.key.local == "TaskSpec"
+            and item.identity.key.local == "T(TaskSpec)"
         )
         reduced_type = replace(
             task_type,
@@ -259,6 +289,119 @@ class K3XReferenceTests(unittest.TestCase):
         artifact_a = cp.ArtifactContent(cp.ArtifactTag.TEXT, cp.OtherArtifactRole("private"), cp.OtherFormat("custom"), cp.ByteSize(1), cp.ContentIdentity("a"))
         artifact_b = cp.ArtifactContent(cp.ArtifactTag.TEXT, cp.ArtifactRole.SOURCE, cp.Format.TEXT, cp.ByteSize(2), cp.ContentIdentity("b"))
         self.assertEqual(cp.RepositorySnapshot(((first, artifact_a), (second, artifact_b))), cp.RepositorySnapshot(((second, artifact_b), (first, artifact_a))))
+
+        # The retained K3-S TYPE_X table is closed and every row has an
+        # independently admitted positive witness.
+        subject_id = cp.SubjectId(cp.SubjectTag.REQUEST, "request")
+        behavior = cp.BehaviorValue(cp.BehaviorTag.ACCEPTED)
+        body = cp.ArtifactBody(cp.ArtifactBodyTag.TEXT, cp.ContentIdentity("body"))
+        change = cp.ChangeEntry(cp.ChangeKind.CREATED, new=artifact_b)
+        change_set = cp.ChangeSet(((first, change),))
+        implementation = cp.ImplementationEvidence(
+            cp.ImplementationEvidenceTag.CONCRETE_IMPLEMENTATION,
+            "contract", cp.SnapshotIdentity(construction.snapshot),
+            implementation_identity="implementation")
+        implementation_ref = cp.EvidenceRef(
+            "builder", "coding", "implementation",
+            cp.IMPLEMENTATION_PROFILE_SCHEMA)
+        implementation_payload = cp.CodingEvidencePayload(
+            cp.EvidencePayloadTag.IMPLEMENTATION_PROFILE, implementation)
+        implementation_entry = cp.CodingEvidenceEntry(
+            implementation_ref, implementation_payload)
+        abstract = cp.AbstractCoverageResult(cp.AbstractCoverageTag.NONE)
+        profile_subject = cp.ImplementationCoverageSubject(
+            "contract", construction.task, construction.snapshot,
+            frozenset({implementation_entry}), cp.Eval(cp.Truth.TRUE), abstract)
+        clause_subject = cp.AuthorityAttestationSubjectIdentity(
+            cp.AuthoritySubjectTag.CLAUSE, construction.declaration,
+            clause_tag=cp.AuthorityClauseTag.BOUNDS)
+        attestation = cp.AuthorityAttestationValue(
+            construction.declaration, construction.binding, "principal",
+            "NORMATIVE", clause_subject)
+        service_subject = cp.ServiceAdmissionSubject(
+            cp.ServiceSubjectTag.PAIR_COHERENCE,
+            pair=construction.declaration,
+            scope_binding=construction.binding,
+            occurrence_binding=construction.binding,
+            trace_domain=cp.PairTraceDomain.ALL_ADMITTED_TRACES,
+            compared_fields=cp.PairComparedFields.COMPLETE_EVAL_RECORD)
+        evolution_subject = cp.EvolutionAdmissionSubject(
+            cp.EvolutionSubjectTag.COMPATIBILITY_CLAIM,
+            construction.declaration, source_abi=fx.V1, target_abi=fx.V1,
+            source_keys=frozenset({construction.declaration}),
+            target_keys=frozenset({construction.binding}))
+        test_payload = cp.TestEventPayload(
+            verification.spec, verification.snapshot_identity,
+            verification.status, verification.evidence_refs)
+        selector = verification.spec.subject.selector
+        assert selector is not None
+        samples = {
+            "PathSegment": first.segments[0], "Path": first,
+            "PathSet": frozenset({first}), "ArtifactRole": cp.ArtifactRole.SOURCE,
+            "Format": cp.Format.TEXT, "StorageBackend": cp.StorageBackend.LOCAL,
+            "ByteSize": cp.ByteSize(1), "ContentIdentity": cp.ContentIdentity("c"),
+            "FieldId": cp.FieldId("f"),
+            "FieldValue": cp.FieldValue(cp.FieldValueTag.INT, 1),
+            "SubjectId": subject_id, "BehaviorValue": behavior,
+            "ArtifactBody": body, "ArtifactBodyKind": cp.ArtifactBodyKind.TEXT,
+            "ArtifactContent": artifact_b,
+            "ObservationValue": cp.ObservationValue(cp.ObservationValueTag.PRESENT),
+            "RepositorySnapshot": construction.snapshot,
+            "SnapshotIdentity": cp.SnapshotIdentity(construction.snapshot),
+            "ChangeEntry": change, "ChangeSet": change_set,
+            "ArtifactSelector": selector, "ArtifactProjection": cp.ArtifactProjection(cp.ProjectionTag.CONTENT),
+            "Coverage": cp.Coverage(cp.CoverageTag.COMPLETE),
+            "ObservationSpec": verification.spec.subject,
+            "ObservationResult": verification.observation,
+            "ObservationRelation": cp.ObservationRelation(cp.ObservationRelationTag.EQUAL),
+            "VerificationStatus": cp.VerificationStatus.PASS,
+            "VerificationSpec": verification.spec, "VerificationRecord": verification,
+            "ImplementationEvidence": implementation,
+            "CodingEvidencePayload": implementation_payload,
+            "CodingEvidenceEntry": implementation_entry,
+            "AbstractCoverageResult": abstract,
+            "ImplementationCoverageSubject": profile_subject,
+            "PairTraceDomain": cp.PairTraceDomain.ALL_ADMITTED_TRACES,
+            "PairComparedFields": cp.PairComparedFields.COMPLETE_EVAL_RECORD,
+            "AuthorityClauseTag": cp.AuthorityClauseTag.BOUNDS,
+            "AuthorityAttestationSubjectIdentity": clause_subject,
+            "AuthorityAttestationValue": attestation,
+            "ServiceAdmissionSubject": service_subject,
+            "EvolutionAdmissionSubject": evolution_subject,
+            "Criterion": next(iter(construction.task.criteria)),
+            "TaskSpec": construction.task, "ChangeKind": cp.ChangeKind.CREATED,
+            "CommandId": cp.CommandId("command"),
+            "ContactClass": cp.ContactClass("contact"),
+            "ReleaseId": cp.ReleaseId("release"), "Purpose": cp.Purpose("purpose"),
+            "EventPattern": cp.EventPattern(cp.PatternKind.ANY_EVENT, event_key=cp.EventKind.TEST),
+            "CommandEventPayload": cp.CommandEventPayload(cp.CommandId("command"), cp.Purpose("purpose")),
+            "TestEventPayload": test_payload,
+            "PathChangeEventPayload": cp.PathChangeEventPayload(first, change),
+            "NetworkContactEventPayload": cp.NetworkContactEventPayload(cp.ContactClass("contact"), cp.Purpose("purpose")),
+            "ReleaseEventPayload": cp.ReleaseEventPayload(cp.ReleaseId("release"), cp.SnapshotIdentity(construction.snapshot)),
+            "DependencyRefreshEventPayload": cp.DependencyRefreshEventPayload(selector, cp.SnapshotIdentity(construction.snapshot)),
+        }
+        self.assertEqual(set(samples), set(cp._ADMISSION_TYPES))
+        for type_name, sample in samples.items():
+            with self.subTest(retained_type=type_name):
+                self.assertTrue(cp.admitted_closed_value(cp.admission_type(type_name), sample))
+        forged_change = object.__new__(cp.ChangeEntry)
+        object.__setattr__(forged_change, "kind", cp.ChangeKind.CREATED)
+        object.__setattr__(forged_change, "old", artifact_b)
+        object.__setattr__(forged_change, "new", artifact_b)
+        self.assertFalse(cp.admitted_closed_value(cp.ChangeEntry, forged_change))
+        forged_verification = object.__new__(cp.VerificationRecord)
+        for name, value in vars(verification).items():
+            object.__setattr__(forged_verification, name, value)
+        object.__setattr__(forged_verification, "evidence_refs", frozenset({implementation_ref}))
+        self.assertFalse(cp.admitted_closed_value(cp.VerificationRecord, forged_verification))
+        forged_entry = replace(
+            implementation_entry, reference=next(iter(verification.evidence_refs)))
+        self.assertFalse(cp.admitted_closed_value(cp.CodingEvidenceEntry, forged_entry))
+        forged_service = replace(service_subject, trace_domain="ALL_ADMITTED_TRACES")
+        self.assertFalse(cp.admitted_closed_value(cp.admission_type("ServiceAdmissionSubject"), forged_service))
+        forged_evolution = replace(evolution_subject, source_keys=frozenset({"raw-key"}))
+        self.assertFalse(cp.admitted_closed_value(cp.EvolutionAdmissionSubject, forged_evolution))
 
     def test_k3x_02_exact_identity_equal_coalescence_and_conflict(self) -> None:
         declaration_id = fx.rid(ref.RecordKind.DECLARATION, "d", namespace="identity")
@@ -375,13 +518,27 @@ class K3XReferenceTests(unittest.TestCase):
         self.assertEqual(ref.replay(removed_producer).details[0], "INCOMPLETE_PRODUCER_SET")
         cert_producer = construction.producer_records[1]
         self_trust = replace(cert_producer, value=replace(cert_producer.value, producer="capknow.semantic"))
-        self.assertEqual(ref.replay(_rewrite(construction.universe, {cert_producer.identity: self_trust})).details[0], "PAIR_SELF_TRUST")
+        self.assertEqual(ref.replay(_rewrite(construction.universe, {cert_producer.identity: self_trust})).details[0], "PAIR_PRODUCER_MISMATCH")
         capability_producer = next(
             item for item in construction.producer_records
             if item.value.subject == binding.value.validator
         )
         equal_sets = replace(capability_producer, value=replace(capability_producer.value, producer="capknow.audit.pair-proof"))
-        self.assertEqual(ref.replay(_rewrite(construction.universe, {capability_producer.identity: equal_sets})).details[0], "PAIR_SELF_TRUST")
+        self.assertEqual(ref.replay(_rewrite(construction.universe, {capability_producer.identity: equal_sets})).details[0], "PAIR_PRODUCER_MISMATCH")
+        for index, producer_record in enumerate(construction.producer_records):
+            rogue = fx.record(
+                ref.RecordKind.PRODUCER, f"rogue.{index}",
+                ref.ProducerRecord(
+                    producer_record.value.subject, "rogue.producer",
+                    producer_record.value.producer_role),
+                namespace="pair.rogue-producer")
+            changed = replace(
+                construction.universe,
+                records=(*construction.universe.records, rogue))
+            with self.subTest(rogue_pair_producer=producer_record.value.subject):
+                rejected = ref.replay(changed)
+                self.assertIsInstance(rejected, ref.Judgment)
+                self.assertEqual(rejected.details[0], "PAIR_PRODUCER_MISMATCH")
         missing_validation = _rewrite(construction.universe, {next(iter(construction.validation_references)): None})
         self.assertNotEqual(ref.replay(missing_validation), admitted)
         pair_request = _at(construction.universe, construction.request)
@@ -413,6 +570,39 @@ class K3XReferenceTests(unittest.TestCase):
                     ref.PairReplay,
                 )
 
+        pair_environment = _at(
+            construction.universe, pair_request.value.semantic_environment)
+        for mutation in (
+            replace(pair_environment.value, abi_version=fx.V2),
+            replace(pair_environment.value, chi_c=(("rogue", True),)),
+            replace(pair_environment.value,
+                    mechanically_extracted_dependencies=frozenset()),
+        ):
+            with self.subTest(pair_environment_field=mutation):
+                rejected = ref.replay(_rewrite(
+                    construction.universe,
+                    {pair_environment.identity:
+                     replace(pair_environment, value=mutation)}))
+                self.assertIsInstance(rejected, ref.Judgment)
+                self.assertEqual(rejected.details[0], "PAIR_SEMANTIC_ENVIRONMENT")
+        pair_dependency = _at(
+            construction.universe, pair_request.value.complete_dependencies)
+        dependency_mutations = (
+            replace(pair_dependency.value, syntax_root_keys=frozenset()),
+            replace(pair_dependency.value, subject_root_keys=frozenset()),
+            replace(pair_dependency.value, binding_association_edges=frozenset()),
+            replace(pair_dependency.value, expanded_root_keys=frozenset()),
+            replace(pair_dependency.value, proper_dependencies=frozenset()),
+            replace(pair_dependency.value, transitive_dependency_closure=frozenset()),
+        )
+        for mutation in dependency_mutations:
+            with self.subTest(pair_dependency_field=mutation):
+                rejected = ref.replay(_rewrite(
+                    construction.universe,
+                    {pair_dependency.identity:
+                     replace(pair_dependency, value=mutation)}))
+                self.assertNotIsInstance(rejected, ref.PairReplay)
+
         bundle = _at(construction.universe, binding.value.occurrence_bundle)
         binding_mutations = (
             replace(binding.value, pair_key=foreign_pair.key),
@@ -426,6 +616,7 @@ class K3XReferenceTests(unittest.TestCase):
             replace(binding.value, dependency_closure=frozenset()),
             replace(binding.value, validation_references=frozenset()),
             replace(binding.value, admission=ref.IndependentCoherenceProof(
+                binding.value.occurrence_bundle,
                 binding.value.validator, binding.value.certificate)),
         )
         for mutation in binding_mutations:
@@ -587,18 +778,36 @@ class K3XReferenceTests(unittest.TestCase):
         self.assertEqual(cycle[2], ref.Judgment("MALFORMED", ("dependency cycle",)))
         baseline_records = {item.identity: item for item in ref.compose_records(baseline_cycle.records).records}
         cycle_records = {item.identity: item for item in ref.compose_records(cycle_universe.records).records}
-        self.assertEqual(frozenset(baseline_records), frozenset(cycle_records))
-        changed = {identity for identity in baseline_records if baseline_records[identity] != cycle_records[identity]}
+        removed = frozenset(baseline_records) - frozenset(cycle_records)
+        added = frozenset(cycle_records) - frozenset(baseline_records)
         self.assertEqual(
-            {identity.key.local for identity in changed},
-            {"coding-minimal", "CS(PREDICATE_MEANING,event_matches_cycle)",
-             "BINDING(DP(event_matches))", "BINDING(DP(event_occurred))"},
+            {identity.key.local for identity in removed},
+            {"CAP(functions)", "CAP(predicates)", "CAP(profile)",
+             "CAP(bounds)", "CAP(confluence)", "LEX_CAP", "BENV",
+             "CS(PREDICATE_MEANING,event_matches)"},
         )
         self.assertEqual(
-            {item.identity.key.local for item in cycle_records.values() if isinstance(item.value, ref.ModelContract)},
-            {"MODEL_task_accepts", "MODEL_event_matches_cycle", "MODEL_event_occurred",
-             "MODEL_snapshot_of_cycle", "MODEL_changes_between_cycle",
-             "MODEL_observe_cycle"},
+            {identity.key.local for identity in added},
+            {"CS(PREDICATE_MEANING,event_matches_cycle)"},
+        )
+        changed = {identity for identity in frozenset(baseline_records) & frozenset(cycle_records)
+                   if baseline_records[identity] != cycle_records[identity]}
+        self.assertEqual(
+            {identity.key.local for identity in changed},
+            {"coding-minimal", "BINDING(DP(event_matches))",
+             "BINDING(DP(event_occurred))", "MODEL_task_accepts",
+             "MODEL_event_matches",
+            },
+        )
+        self.assertEqual(
+            {item.identity.key.local for item in cycle_records.values()
+             if isinstance(item.value, ref.ModelContract)
+             and not item.identity.key.local.startswith("MODEL_LITERAL(")},
+            {"MODEL_snapshot_of", "MODEL_changes_between", "MODEL_observe",
+             "MODEL_observations_equal", "MODEL_task_accepts",
+             "MODEL_dependency_metadata_changed", "MODEL_verification_passed",
+             "MODEL_event_matches", "MODEL_event_occurred", "MODEL_refresh_scope",
+             "MODEL_refresh_occurred"},
         )
         retained_core = fx.core_construction()
         retained_package = _at(retained_core.universe, retained_core.package).value
@@ -606,8 +815,7 @@ class K3XReferenceTests(unittest.TestCase):
             item.value for item in baseline_records.values()
             if isinstance(item.value, ref.PluginPackage)
         )
-        self.assertFalse(baseline_package.services)
-        self.assertFalse(baseline_package.certificates)
+        self.assertEqual(baseline_package, retained_package)
         for member in (
             *retained_package.declarations, *retained_package.pair_declarations,
             *retained_package.bindings, *retained_package.pair_bindings,
@@ -681,7 +889,7 @@ class K3XReferenceTests(unittest.TestCase):
 
     def test_k3x_08_trace_truth_event_admission_and_change_metadata(self) -> None:
         construction = fx.core_construction()
-        command = cp.EventValue(cp.EventKind.COMMAND, cp.CommandEventPayload(cp.CommandId("build"), "verification"))
+        command = cp.EventValue(cp.EventKind.COMMAND, cp.CommandEventPayload(cp.CommandId("build"), cp.Purpose("verification")))
         command_pattern = cp.EventPattern(cp.PatternKind.COMMAND_IS, command_id=cp.CommandId("build"))
         self.assertEqual(cp.event_matches(command_pattern, command).truth, cp.Truth.TRUE)
         self.assertEqual(cp.event_matches(replace(command_pattern, command_id=cp.CommandId("deploy")), command).truth, cp.Truth.FALSE)
@@ -693,7 +901,7 @@ class K3XReferenceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             cp.EventValue(cp.EventKind.COMMAND, ("command_id", "a", "command_id", "b"))  # type: ignore[arg-type]
         with self.assertRaises(ValueError):
-            cp.EventValue(cp.EventKind.RELEASE, cp.CommandEventPayload(cp.CommandId("x"), "y"))
+            cp.EventValue(cp.EventKind.RELEASE, cp.CommandEventPayload(cp.CommandId("x"), cp.Purpose("y")))
 
         path_created = cp.Path((cp.PathSegment("created"),))
         path_deleted = cp.Path((cp.PathSegment("deleted"),))
@@ -718,6 +926,18 @@ class K3XReferenceTests(unittest.TestCase):
         forward_result = ref.replay(forward.universe)
         reverse_result = ref.replay(reverse.universe)
         self.assertEqual(forward_result, reverse_result)
+        retained = fx.core_construction()
+        retained_package = _at(retained.universe, retained.package)
+        forward_package = next(
+            item for item in forward.universe.records
+            if isinstance(item.value, ref.PluginPackage)
+        )
+        reverse_package = next(
+            item for item in reverse.universe.records
+            if isinstance(item.value, ref.PluginPackage)
+        )
+        self.assertEqual(forward_package, retained_package)
+        self.assertEqual(reverse_package, retained_package)
         self.assertEqual(len(forward_result.observations), 2)
         absent_node = fx.rid(ref.RecordKind.BINDING, "absent", namespace="confluence.binding")
         with self.assertRaisesRegex(ValueError, "confluence capability/fragment"):
@@ -803,6 +1023,53 @@ class K3XReferenceTests(unittest.TestCase):
                 ref.replay(_rewrite(forward.universe, {exact_producer.identity: None}))
         contract = next(item for item in composition.records if isinstance(item.value, ref.OutcomeRecord) and item.identity.key.local == "C_c")
         assert_confluence_rejected(replace(contract, value=replace(contract.value, value="foreign")))
+        contract_value = contract.value.value
+        self.assertIsInstance(contract_value, ref.ConfluenceContract)
+        assert isinstance(contract_value, ref.ConfluenceContract)
+        contract_mutations = (
+            replace(contract_value, attributed_clauses=contract_value.attributed_clauses[:1]),
+            replace(contract_value, attributed_clauses=(
+                replace(contract_value.attributed_clauses[0], requirement="foreign"),
+                contract_value.attributed_clauses[1],
+            )),
+            replace(contract_value, adoptions=contract_value.adoptions[:1]),
+            replace(contract_value, adoptions=(
+                replace(contract_value.adoptions[0], principal="foreign"),
+                contract_value.adoptions[1],
+            )),
+            replace(contract_value, choices=("foreign",)),
+            replace(contract_value, profile_requirements=("foreign",)),
+            replace(contract_value, pair_requirements=("foreign",)),
+        )
+        for mutation in contract_mutations:
+            assert_confluence_rejected(replace(
+                contract, value=replace(contract.value, value=mutation)))
+        confluence_authority_records = tuple(
+            item for item in composition.records
+            if item.identity.key.namespace in {
+                "confluence.source", "confluence.authority",
+                "confluence.authority.binding",
+            }
+        )
+        self.assertEqual(len(confluence_authority_records), 6)
+        for authority_record in confluence_authority_records:
+            with self.subTest(confluence_authority_record=authority_record.identity):
+                with self.assertRaises(ValueError):
+                    ref.replay(_rewrite(
+                        forward.universe, {authority_record.identity: None}))
+        semantic = _at(forward.universe, forward.universe.request.semantic_environment)
+        semantic_mutations = (
+            replace(semantic.value, abi_version=fx.V2),
+            replace(semantic.value, declarations=semantic.value.declarations * 2),
+            replace(semantic.value, bindings=semantic.value.bindings * 2),
+            replace(semantic.value, authority_facts=()),
+            replace(semantic.value, mechanically_extracted_dependencies=frozenset()),
+            replace(semantic.value, chi_c=(("foreign", "foreign"),)),
+        )
+        for mutation in semantic_mutations:
+            with self.assertRaises(ValueError):
+                ref.replay(_rewrite(
+                    forward.universe, {semantic.identity: replace(semantic, value=mutation)}))
         bad_inputs = replace(
             forward.universe.request,
             observation_inputs=((forward.node_one, forward.universe.request.observation_inputs[1][1]),
@@ -1011,11 +1278,108 @@ class K3XReferenceTests(unittest.TestCase):
         evolution_result = next(item for item in evolution_composition.records if isinstance(item.value, ref.EvolutionAdmissionResult) and item.identity.key.local == "ERESULT_m")
         assert_evolution_rejected(replace(evolution_result, value=replace(evolution_result.value, conclusion=ref.MigrationRelationAdmitted(fx.key("foreign", namespace="evolution"), evolution_admission.value.certificate))))
         assert_evolution_rejected(replace(evolution_result, value=ref.CompatibilityAdmissionResult(evolution_result.value.conclusion)))
-        evolution_producers = tuple(item for item in evolution_composition.records if isinstance(item.value, ref.ProducerRecord) and item.identity.key.namespace == "evolution.producer")
+        migration_envelope = next(
+            item for item in evolution_composition.records
+            if isinstance(item.value, ref.CertificateEnvelope)
+            and item.identity.key.local == "EC_m")
+        migration_validator = next(
+            item for item in evolution_composition.records
+            if isinstance(item.value, ref.CapabilityDescriptor)
+            and item.identity.key.local == "EVC_m")
+        evolution_trust = _at(
+            evolution, evolution_request.value.trust_environment)
+        relevant_producer_subjects = frozenset({
+            migration_record.identity if 'migration_record' in locals()
+            else evolution_request.value.candidate,
+            migration_envelope.identity,
+            migration_validator.identity,
+            migration_validator.value.service,
+            migration_envelope.value.payload,
+            *migration_envelope.value.evidence_refs,
+            evolution_request.value.trust_environment,
+            evolution_trust.value.policy,
+            *evolution_trust.value.roots,
+        })
+        evolution_producers = tuple(
+            item for item in evolution_composition.records
+            if isinstance(item.value, ref.ProducerRecord)
+            and item.identity.key.namespace == "evolution.producer"
+            and item.value.subject in relevant_producer_subjects)
         for producer_record in evolution_producers:
             with self.subTest(removed_evolution_producer=producer_record.identity):
                 replayed = ref.replay(_rewrite(evolution, {producer_record.identity: None}))
                 self.assertFalse(isinstance(replayed, ref.LookupReplay) and replayed.result.tag == "PRESENT")
+        evolution_environment = next(
+            item for item in evolution_composition.records
+            if isinstance(item.value, ref.SemanticEnvironment)
+            and item.identity == evolution_request.value.semantic_environment)
+        self.assertFalse(isinstance(
+            ref.replay(_rewrite(
+                evolution, {evolution_environment.identity: None})),
+            ref.LookupReplay))
+        rogue_environment_id = fx.rid(
+            ref.RecordKind.SEMANTIC_ENVIRONMENT, "E_rogue",
+            namespace="evolution.environment")
+        rogue_environment = ref.LogicalRecord(
+            rogue_environment_id, evolution_environment.value)
+        wrong_environment_request = replace(
+            evolution_request,
+            value=replace(evolution_request.value,
+                          semantic_environment=rogue_environment_id,
+                          capability_target=replace(
+                              evolution_request.value.capability_target,
+                              semantic_environment=rogue_environment_id)))
+        rewritten_wrong_environment = _rewrite(
+            evolution,
+            {evolution_request.identity: wrong_environment_request})
+        wrong_environment_universe = replace(
+            rewritten_wrong_environment,
+            records=(*rewritten_wrong_environment.records, rogue_environment))
+        self.assertFalse(isinstance(
+            ref.replay(wrong_environment_universe), ref.LookupReplay))
+        migration_record = next(
+            item for item in evolution_composition.records
+            if isinstance(item.value, ref.MigrationDeclaration))
+        dangling_environment = fx.rid(
+            ref.RecordKind.SEMANTIC_ENVIRONMENT, "E_dangling",
+            namespace="evolution.environment")
+        for mutation in (
+            replace(migration_record.value,
+                    source_environment=dangling_environment),
+            replace(migration_record.value,
+                    target_environment=dangling_environment),
+        ):
+            assert_evolution_rejected(
+                replace(migration_record, value=mutation))
+        dangling_dependency = fx.rid(
+            ref.RecordKind.BINDING, "dangling", namespace="evolution")
+        evolution_dependency = next(
+            item for item in evolution_composition.records
+            if isinstance(item.value, ref.DependencyEnvironment)
+            and item.identity == evolution_request.value.complete_dependencies)
+        assert_evolution_rejected(replace(
+            evolution_dependency,
+            value=replace(
+                evolution_dependency.value,
+                proper_dependencies=(
+                    evolution_dependency.value.proper_dependencies
+                    | frozenset({dangling_dependency})),
+                transitive_dependency_closure=(
+                    evolution_dependency.value.transitive_dependency_closure
+                    | frozenset({dangling_dependency})))))
+        for index, producer_record in enumerate(evolution_producers):
+            rogue = fx.record(
+                ref.RecordKind.PRODUCER, f"rogue.evolution.{index}",
+                ref.ProducerRecord(
+                    producer_record.value.subject, "rogue.producer",
+                    producer_record.value.producer_role),
+                namespace="evolution.rogue-producer")
+            replayed = ref.replay(replace(
+                evolution, records=(*evolution.records, rogue)))
+            with self.subTest(rogue_evolution_producer=producer_record.value.subject):
+                self.assertFalse(
+                    isinstance(replayed, ref.LookupReplay)
+                    and replayed.result.tag == "PRESENT")
 
     def test_k3x_12_all_102_replays_without_identifier_or_assertion_input(self) -> None:
         packet = fx.fixture_packet()

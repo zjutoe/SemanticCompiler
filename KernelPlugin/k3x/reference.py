@@ -503,6 +503,7 @@ class OccurrenceSemanticContractBundle:
 
 @dataclass(frozen=True)
 class IndependentCoherenceProof:
+    bundle: RecordIdentity
     certificate: RecordIdentity
     validator: RecordIdentity
 
@@ -584,6 +585,29 @@ class ConfluenceSubject:
     observation_spec: Any
     prior_snapshot: Any
     final_snapshot: Any
+
+
+@dataclass(frozen=True)
+class AttributedClause:
+    clause_key: str
+    source: RecordIdentity
+    requirement: str
+
+
+@dataclass(frozen=True)
+class ClauseAdoption:
+    clause_key: str
+    authority: RecordIdentity
+    principal: str
+
+
+@dataclass(frozen=True)
+class ConfluenceContract:
+    attributed_clauses: tuple[AttributedClause, ...]
+    adoptions: tuple[ClauseAdoption, ...]
+    choices: tuple[Any, ...] = ()
+    profile_requirements: tuple[Any, ...] = ()
+    pair_requirements: tuple[Any, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1278,7 +1302,10 @@ def _resolve(composition: Composition, identity: RecordIdentity, value_type: typ
     return record
 
 
-def validate_packages(composition: Composition) -> Judgment:
+def validate_packages(
+    composition: Composition,
+    evolution_focus: RecordIdentity | None = None,
+) -> Judgment:
     if composition.conflicts:
         return Judgment("MALFORMED", ("CONFLICT", composition.conflicts))
     keyed_values = (
@@ -1289,7 +1316,6 @@ def validate_packages(composition: Composition) -> Judgment:
         (ServiceIdentity, "service_key"),
         (CapabilityDescriptor, "capability_key"),
         (CertificateRecord, "certificate_key"),
-        (CertificateEnvelope, "certificate_key"),
         (TrustPolicyRecord, "policy_key"),
         (TrustRootRecord, "root_key"),
         (ChoiceBinding, "choice_key"),
@@ -1345,7 +1371,8 @@ def validate_packages(composition: Composition) -> Judgment:
                     or value.target_exact_version != value.exact_target_key.version
                     or value.target_exact_version.components != (1,)):
                 return Judgment("MALFORMED", ("ALIAS_RECORD_FIELDS", record.identity))
-        if isinstance(record.value, (MigrationDeclaration, CompatibilityClaim, SemanticExtension)):
+        if (isinstance(record.value, (MigrationDeclaration, CompatibilityClaim, SemanticExtension))
+                and (evolution_focus is None or record.identity == evolution_focus)):
             value = record.value
             if isinstance(value, MigrationDeclaration):
                 relation_identity = value.relation_contract
@@ -1401,6 +1428,16 @@ def validate_packages(composition: Composition) -> Judgment:
                 return Judgment("MALFORMED", ("EVOLUTION_VALIDATION_SUPPORT", record.identity))
             request_record = requests[0]
             request = request_record.value
+            semantic_environment = _resolve(
+                composition, request.semantic_environment, SemanticEnvironment)
+            if isinstance(value, MigrationDeclaration):
+                source_environment = _resolve(
+                    composition, value.source_environment, SemanticEnvironment)
+                target_environment = _resolve(
+                    composition, value.target_environment, SemanticEnvironment)
+            else:
+                source_environment = semantic_environment
+                target_environment = semantic_environment
             expected_target = EvolutionTarget(judgment, subject, request.semantic_environment)
             expected_trust_target = EvolutionTrustTarget(judgment, subject)
             dependencies = _resolve(composition, request.complete_dependencies, DependencyEnvironment)
@@ -1464,6 +1501,30 @@ def validate_packages(composition: Composition) -> Judgment:
                 validator.value.required_evidence,
             )
             if (request.abi_version.components != (0,)
+                    or semantic_environment is None
+                    or source_environment is None or target_environment is None
+                    or request.semantic_environment != envelope.value.environment
+                    or (isinstance(value, MigrationDeclaration)
+                        and request.semantic_environment not in {
+                            value.source_environment, value.target_environment})
+                    or any(environment.abi_version != request.abi_version
+                           or len(environment.all_references()) != sum(map(len, (
+                               environment.declarations,
+                               environment.pair_declarations,
+                               environment.bindings,
+                               environment.profile_bindings,
+                               environment.pair_bindings,
+                               environment.authority_facts,
+                               environment.semantic_extensions,
+                               environment.lexical_bindings,
+                               environment.choice_bindings,
+                           )))
+                           or any(_resolve(composition, identity) is None
+                                  for identity in environment.all_references())
+                           or any(_resolve(composition, identity) is None
+                                  for identity in environment.mechanically_extracted_dependencies)
+                           for environment_record_item in (source_environment, target_environment)
+                           for environment in (environment_record_item.value,))
                     or request.capability_target != expected_target
                     or request.capability_key != validator_identity
                     or dependencies is None
@@ -1471,13 +1532,24 @@ def validate_packages(composition: Composition) -> Judgment:
                     or dependencies.value.subject_root_keys != frozenset({record.identity})
                     or dependencies.value.expanded_root_keys != frozenset({record.identity})
                     or dependencies.value.proper_dependencies != expected_proper
-                    or dependencies.value.transitive_dependency_closure != expected_proper
+                    or any(_resolve(composition, identity) is None
+                           for identity in dependencies.value.syntax_root_keys
+                           | dependencies.value.subject_root_keys
+                           | dependencies.value.expanded_root_keys
+                           | dependencies.value.proper_dependencies
+                           | dependencies.value.transitive_dependency_closure)
+                    or any(_resolve(composition, left) is None
+                           or _resolve(composition, right) is None
+                           for left, right in dependencies.value.binding_association_edges)
+                    or dependencies.value.transitive_dependency_closure
+                    != _reachable_closure(expected_proper, composition)
                     or dependencies.value.validation_references != frozenset({certificate_identity, validator_identity, root_identity})
                     or validator.value.service_role != service_role
                     or validator.value.supported_judgments != frozenset({judgment})
                     or validator.value.supported_targets != frozenset({expected_target})
                     or validator.value.capability_class != "COMPLETE_FOR_DECLARED_FRAGMENT"
-                    or validator.value.dependency_scope != expected_proper
+                    or validator.value.dependency_scope
+                    != _reachable_closure(expected_proper, composition)
                     or validator.value.proper_semantic_dependencies != descriptor_proper
                     or validator.value.dependency_closure != _reachable_closure(descriptor_proper, composition)
                     or validator.value.required_trust_roots != frozenset({root_identity})
@@ -2025,6 +2097,24 @@ def validate_pair(request_identity: RecordIdentity, composition: Composition) ->
             or declaration_identity not in environment_record.value.pair_declarations):
         return Judgment("MALFORMED", ("PAIR_ENVIRONMENT_MEMBERSHIP",))
     pair_environment = environment_record.value
+    if (pair_environment.abi_version != request.abi_version
+            or pair_environment.chi_c
+            or pair_environment.mechanically_extracted_dependencies
+            != frozenset({declaration_identity})
+            or len(pair_environment.all_references()) != sum(map(len, (
+                pair_environment.declarations,
+                pair_environment.pair_declarations,
+                pair_environment.bindings,
+                pair_environment.profile_bindings,
+                pair_environment.pair_bindings,
+                pair_environment.authority_facts,
+                pair_environment.semantic_extensions,
+                pair_environment.lexical_bindings,
+                pair_environment.choice_bindings,
+            )))
+            or any(_resolve(composition, identity) is None
+                   for identity in pair_environment.all_references())):
+        return Judgment("MALFORMED", ("PAIR_SEMANTIC_ENVIRONMENT",))
     pair_subject = PairCoherenceSubject(
         declaration_identity, binding.scope_binding_key,
         binding.occurrence_binding_key,
@@ -2110,7 +2200,8 @@ def validate_pair(request_identity: RecordIdentity, composition: Composition) ->
             or dependency.proper_dependencies != expected_proper
             or dependency.transitive_dependency_closure != expected_closure):
         return Judgment("MALFORMED", ("PAIR_DEPENDENCY_ENVIRONMENT",))
-    if (binding.admission != IndependentCoherenceProof(binding.certificate, binding.validator)
+    if (binding.admission != IndependentCoherenceProof(
+            binding.occurrence_bundle, binding.certificate, binding.validator)
             or binding.validation_references != frozenset({binding.certificate, binding.validator})):
         return Judgment("MALFORMED", ("VALIDATION_REFERENCE_MISMATCH",))
     if dependencies_record.value.validation_references != binding.validation_references:
@@ -2282,16 +2373,30 @@ def validate_pair(request_identity: RecordIdentity, composition: Composition) ->
                     PairTrustTarget(declaration_identity),
                 })):
             return Judgment("INCOMPATIBLE", ("PAIR_TRUST_SCOPE", root_identity))
-    producer_subjects = (
-        declaration_identity, binding.certificate, binding.validator,
-        capability.service, envelope.payload, *envelope.evidence_refs,
-        request.trust_environment, trust.policy, *trust.roots,
-    )
-    producer_sets = tuple(_producer_set(subject, composition) for subject in producer_subjects)
-    if any(not producers for producers in producer_sets):
-        return Judgment("MALFORMED", ("INCOMPLETE_PRODUCER_SET",))
-    if _producer_set(declaration_identity, composition) != frozenset({declaration_record.value.pair_key.owner}):
-        return Judgment("MALFORMED", ("PAIR_SUBJECT_PRODUCER",))
+    expected_producers = {
+        declaration_identity: frozenset({declaration_record.value.pair_key.owner}),
+        binding.certificate: frozenset({binding.certificate.key.owner}),
+        binding.validator: frozenset({binding.validator.key.owner}),
+        capability.service: frozenset({capability.service.key.owner}),
+        envelope.payload: frozenset({binding.certificate.key.owner}),
+        request.trust_environment: frozenset({policy_record.value.policy_owner}),
+        trust.policy: frozenset({policy_record.value.policy_owner}),
+    }
+    expected_producers.update({
+        identity: frozenset({binding.certificate.key.owner})
+        for identity in envelope.evidence_refs
+    })
+    expected_producers.update({
+        identity: frozenset({policy_record.value.policy_owner})
+        for identity in trust.roots
+    })
+    for subject, expected in expected_producers.items():
+        actual = _producer_set(subject, composition)
+        if actual != expected:
+            return Judgment("MALFORMED", (
+                "INCOMPLETE_PRODUCER_SET" if not actual else "PAIR_PRODUCER_MISMATCH",
+                subject, expected, actual,
+            ))
     independent_sets = (
         _producer_set(declaration_identity, composition),
         _producer_set(binding.certificate, composition),
@@ -2343,8 +2448,84 @@ def evaluate_observation_graph(request: GraphEvaluationRequest, composition: Com
         raise ValueError("malformed confluence reasoning subject")
     subject = rr.subjects[0]
     contract = _resolve(composition, subject.contract_identity, OutcomeRecord)
-    if (contract is None or contract.value != OutcomeRecord("CONTRACT_IDENTITY", "C_c")):
+    source_one_id = RecordIdentity(
+        RecordKind.SOURCE,
+        ExactKey("capknow.semantic", "confluence.source", "SRC(c,1)", Version((1,))),
+    )
+    source_two_id = RecordIdentity(
+        RecordKind.SOURCE,
+        ExactKey("capknow.semantic", "confluence.source", "SRC(c,2)", Version((1,))),
+    )
+    authority_one_id = RecordIdentity(
+        RecordKind.AUTHORITY_REF,
+        ExactKey("capknow.semantic", "confluence.authority", "AUTH(c,1)", Version((1,))),
+    )
+    authority_two_id = RecordIdentity(
+        RecordKind.AUTHORITY_REF,
+        ExactKey("capknow.semantic", "confluence.authority", "AUTH(c,2)", Version((1,))),
+    )
+    authority_fact_one_id = RecordIdentity(
+        RecordKind.AUTHORITY_FACT,
+        ExactKey("capknow.semantic", "confluence.authority.binding", "AFB(c,1)", Version((1,))),
+    )
+    authority_fact_two_id = RecordIdentity(
+        RecordKind.AUTHORITY_FACT,
+        ExactKey("capknow.semantic", "confluence.authority.binding", "AFB(c,2)", Version((1,))),
+    )
+    expected_contract_value = ConfluenceContract(
+        (
+            AttributedClause(
+                "coding.confluence.observation", source_one_id,
+                "REQUIRE(observations_equal(observe(s_c,F_c),O_c))"),
+            AttributedClause(
+                "coding.confluence.change", source_two_id,
+                "REQUIRE(dependency_metadata_changed(changes_between(P_c,F_c)))"),
+        ),
+        (
+            ClauseAdoption(
+                "coding.confluence.observation", authority_one_id,
+                "fixture_principal"),
+            ClauseAdoption(
+                "coding.confluence.change", authority_two_id,
+                "fixture_principal"),
+        ),
+    )
+    expected_contract = OutcomeRecord(
+        "CONTRACT_IDENTITY", expected_contract_value,
+        frozenset({
+            source_one_id, source_two_id, authority_one_id, authority_two_id,
+            authority_fact_one_id, authority_fact_two_id,
+        }),
+    )
+    if contract is None or contract.value != expected_contract:
         raise ValueError("malformed confluence contract identity")
+    source_one = _resolve(composition, source_one_id, SourceRecord)
+    source_two = _resolve(composition, source_two_id, SourceRecord)
+    authority_one = _resolve(composition, authority_one_id, AuthorityRefRecord)
+    authority_two = _resolve(composition, authority_two_id, AuthorityRefRecord)
+    authority_fact_one = _resolve(
+        composition, authority_fact_one_id, AuthorityFactRecord)
+    authority_fact_two = _resolve(
+        composition, authority_fact_two_id, AuthorityFactRecord)
+    if (source_one is None or source_one.value != SourceRecord(
+            "capknow.semantic", "coding.confluence.observation", "c1")
+            or source_two is None or source_two.value != SourceRecord(
+                "capknow.semantic", "coding.confluence.change", "c2")
+            or authority_one is None or authority_one.value != AuthorityRefRecord(
+                "capknow.authority", "fixture_principal", "CLAUSE_ATTESTATION")
+            or authority_two is None or authority_two.value != AuthorityRefRecord(
+                "capknow.authority", "fixture_principal", "CLAUSE_ATTESTATION")
+            or authority_fact_one is None
+            or authority_fact_one.value != AuthorityFactRecord(
+                ExactKey("capknow.semantic", "confluence.authority.fact", "AF(c,1)", Version((1,))),
+                authority_one_id, source_one_id, "fixture_principal",
+                "CONFLUENCE_OBSERVATION_CLAUSE", frozenset())
+            or authority_fact_two is None
+            or authority_fact_two.value != AuthorityFactRecord(
+                ExactKey("capknow.semantic", "confluence.authority.fact", "AF(c,2)", Version((1,))),
+                authority_two_id, source_two_id, "fixture_principal",
+                "CONFLUENCE_CHANGE_CLAUSE", frozenset())):
+        raise ValueError("malformed confluence authority/adoption closure")
     expected_target = ReasoningTarget("CONSISTENCY", rr.subjects, request.semantic_environment)
     if (rr.abi_version.components != (0,) or rr.judgment != "CONSISTENCY"
             or rr.semantic_environment != request.semantic_environment
@@ -2377,14 +2558,33 @@ def evaluate_observation_graph(request: GraphEvaluationRequest, composition: Com
                                  ("initial_snapshot", "final_snapshot")),
             ))):
         raise ValueError("malformed confluence capability/fragment")
-    if (semantic.value.bindings != tuple(
-            record.identity for record in composition.records
-            if isinstance(record.value, SemanticBinding)
-            and record.identity.key.namespace == "confluence.binding")
-            and frozenset(semantic.value.bindings) != frozenset(
-                record.identity for record in composition.records
-                if isinstance(record.value, SemanticBinding)
-                and record.identity.key.namespace == "confluence.binding")):
+    expected_semantic_bindings = frozenset(
+        record.identity for record in composition.records
+        if isinstance(record.value, SemanticBinding)
+        and record.identity.key.namespace == "confluence.binding"
+    )
+    expected_semantic_declarations = frozenset(
+        record.identity for record in composition.records
+        if isinstance(record.value, DeclarationShape)
+        and record.identity.key.namespace == "confluence.declaration"
+    )
+    if (semantic.value.abi_version != rr.abi_version
+            or len(semantic.value.declarations) != len(expected_semantic_declarations)
+            or frozenset(semantic.value.declarations) != expected_semantic_declarations
+            or len(semantic.value.bindings) != len(expected_semantic_bindings)
+            or frozenset(semantic.value.bindings) != expected_semantic_bindings
+            or semantic.value.pair_declarations
+            or semantic.value.pair_bindings
+            or semantic.value.profile_bindings
+            or semantic.value.semantic_extensions
+            or semantic.value.lexical_bindings
+            or semantic.value.choice_bindings
+            or semantic.value.chi_c
+            or semantic.value.mechanically_extracted_dependencies
+                != expected_semantic_bindings
+            or semantic.value.authority_facts != (
+            authority_fact_one_id, authority_fact_two_id)
+            ):
         raise ValueError("malformed confluence semantic environment")
     expected_syntax = frozenset(semantic.value.declarations + semantic.value.pair_declarations)
     expected_subjects = frozenset(semantic.value.bindings + semantic.value.profile_bindings + semantic.value.pair_bindings)
@@ -2555,11 +2755,11 @@ def evaluate_observation_graph(request: GraphEvaluationRequest, composition: Com
     if (lifecycle.value.request != request.reasoning_request
             or lifecycle.value.judgment != "COMPLETED(Y_c)"):
         raise ValueError("confluence lifecycle mismatch")
-    expected_status_refs = frozenset({request.observation_environment,
-                                      request.result_record,
-                                      request.lifecycle_record})
+    required_status_references = frozenset({request.observation_environment,
+                                            request.result_record,
+                                            request.lifecycle_record})
     if (status.value.outcome_kind != "CONFLUENCE_STATUS"
-            or status.value.references != expected_status_refs
+            or status.value.references != required_status_references
             or status.value.value != ("WELL_FORMED", "CLOSED",
                                       "EVALUABILITY_AVAILABLE",
                                       "CONSISTENCY_UNKNOWN")):
@@ -2974,10 +3174,19 @@ def _resolve_failed_coordinate(
 
 def replay(universe: Universe) -> Any:
     composition = compose_records(universe.records)
-    package_status = validate_packages(composition)
+    request = universe.request
+    evolution_focus = (
+        request.target
+        if isinstance(request, LookupRequest)
+        and request.target.kind in {
+            RecordKind.MIGRATION, RecordKind.COMPATIBILITY_CLAIM,
+            RecordKind.SEMANTIC_EXTENSION, RecordKind.ALIAS,
+        }
+        else None
+    )
+    package_status = validate_packages(composition, evolution_focus)
     if package_status.tag != "WELL_FORMED":
         return CompositionReplay(composition, Formation.MALFORMED, Closure.NOT_APPLICABLE)
-    request = universe.request
     if isinstance(request, InvocationReplayRequest):
         outcome = evaluate_invocation(request.request, composition)
         return CoreReplay(composition, outcome.formation, outcome.closure, outcome.evaluability, outcome.lifecycle, outcome.result)

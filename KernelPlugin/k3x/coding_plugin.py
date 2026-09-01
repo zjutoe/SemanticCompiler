@@ -48,6 +48,11 @@ class Format(Enum):
     BINARY = "BINARY"
 
 
+class StorageBackend(Enum):
+    LOCAL = "LOCAL_STORAGE"
+    HOSTED = "HOSTED_STORAGE"
+
+
 @dataclass(frozen=True, order=True)
 class OtherFormat:
     """The closed K3-S OTHER_FORMAT(atom) constructor."""
@@ -71,6 +76,13 @@ class ArtifactBodyKind(Enum):
     STRUCTURED = "STRUCTURED_BODY_KIND"
     OPAQUE = "OPAQUE_BODY_KIND"
     BEHAVIOR = "BEHAVIOR_BODY_KIND"
+
+
+class ArtifactBodyTag(Enum):
+    TEXT = "TEXT_BODY"
+    STRUCTURED = "STRUCTURED_BODY"
+    OPAQUE = "OPAQUE_BODY"
+    BEHAVIOR = "BEHAVIOR_BODY"
 
 
 class SelectorTag(Enum):
@@ -216,6 +228,49 @@ class PairComparedFields(Enum):
     COMPLETE_EVAL_RECORD = "COMPLETE_EVAL_RECORD"
 
 
+class AuthorityClauseTag(Enum):
+    BOUNDS = "BOUNDS_CLAUSE"
+    CONFLUENCE_OBSERVATION = "CONFLUENCE_OBSERVATION_CLAUSE"
+    CONFLUENCE_CHANGE = "CONFLUENCE_CHANGE_CLAUSE"
+    ADAPTER_PRESERVATION = "ADAPTER_PRESERVATION_CLAUSE"
+    ADAPTER_ACCEPTANCE = "ADAPTER_ACCEPTANCE_CLAUSE"
+
+
+class AuthoritySubjectTag(Enum):
+    CLAUSE = "CLAUSE_ATTESTATION_SUBJECT"
+    CHOICE = "CHOICE_ATTESTATION_SUBJECT"
+
+
+class ServiceSubjectTag(Enum):
+    FUNCTION_CALL = "FUNCTION_CALL_SUBJECT"
+    PREDICATE_CALL = "PREDICATE_CALL_SUBJECT"
+    PROFILE_CALL = "PROFILE_CALL_SUBJECT"
+    BOUNDS = "BOUNDS_SUBJECT"
+    CONFLUENCE = "CONFLUENCE_SUBJECT"
+    ADAPTER_WITNESS = "ADAPTER_WITNESS_SUBJECT"
+    PAIR_COHERENCE = "PAIR_COHERENCE_SUBJECT"
+    AUTHORITY_ATTESTATION = "AUTHORITY_ATTESTATION_SUBJECT"
+
+
+class EvolutionSubjectTag(Enum):
+    MIGRATION_RELATION = "MIGRATION_RELATION_SUBJECT"
+    COMPATIBILITY_CLAIM = "COMPATIBILITY_CLAIM_SUBJECT"
+    SEMANTIC_EXTENSION = "SEMANTIC_EXTENSION_SUBJECT_VALUE"
+
+
+class EvolutionRelation(Enum):
+    FULL_CONTRACT_EQUIVALENCE = "FULL_CONTRACT_EQUIVALENCE"
+    ACCEPTANCE_EQUIVALENCE = "ACCEPTANCE_EQUIVALENCE"
+    FORMULA_EQUIVALENCE = "FORMULA_EQUIVALENCE"
+    EXPLICIT_SEMANTIC_CHANGE = "EXPLICIT_SEMANTIC_CHANGE"
+
+
+class EvolutionOwnerLayer(Enum):
+    DELTA = "Delta"
+    SIGMA = "Sigma"
+    SERVICE = "Service"
+
+
 VERIFICATION_SCHEMA = "CS(EVIDENCE_SCHEMA,verification)"
 IMPLEMENTATION_PROFILE_SCHEMA = "CS(EVIDENCE_SCHEMA,implementation_profile)"
 
@@ -292,6 +347,15 @@ class FieldId:
             raise ValueError("FieldId atom is nonempty")
 
 
+@dataclass(frozen=True, order=True)
+class Purpose:
+    atom: str
+
+    def __post_init__(self) -> None:
+        if type(self.atom) is not str or not self.atom:
+            raise ValueError("Purpose atom is nonempty")
+
+
 class FieldValueTag(Enum):
     BOOL = "BOOL_VALUE"
     INT = "INT_VALUE"
@@ -360,6 +424,36 @@ class BehaviorValue:
             raise ValueError("BehaviorValue fields do not match its tag")
         object.__setattr__(self, "left", tuple(sorted(self.left, key=lambda item: item[0])))
         object.__setattr__(self, "right", tuple(sorted(self.right, key=lambda item: item[0])))
+
+
+@dataclass(frozen=True)
+class ArtifactBody:
+    tag: ArtifactBodyTag
+    content: ContentIdentity | None = None
+    fields: tuple[tuple[FieldId, FieldValue], ...] = ()
+    observations: tuple[tuple[SubjectId, BehaviorValue], ...] = ()
+
+    def __post_init__(self) -> None:
+        if type(self.tag) is not ArtifactBodyTag:
+            raise ValueError("ArtifactBody tag")
+        if len({key for key, _ in self.fields}) != len(self.fields):
+            raise ValueError("duplicate ArtifactBody field")
+        if len({key for key, _ in self.observations}) != len(self.observations):
+            raise ValueError("duplicate ArtifactBody subject")
+        if any(type(key) is not FieldId or type(value) is not FieldValue for key, value in self.fields):
+            raise ValueError("ArtifactBody structured map")
+        if any(type(key) is not SubjectId or type(value) is not BehaviorValue for key, value in self.observations):
+            raise ValueError("ArtifactBody behavior map")
+        if self.tag in {ArtifactBodyTag.TEXT, ArtifactBodyTag.OPAQUE}:
+            valid = type(self.content) is ContentIdentity and not self.fields and not self.observations
+        elif self.tag is ArtifactBodyTag.STRUCTURED:
+            valid = self.content is None and not self.observations
+        else:
+            valid = self.content is None and not self.fields
+        if not valid:
+            raise ValueError("ArtifactBody fields do not match its tag")
+        object.__setattr__(self, "fields", tuple(sorted(self.fields, key=lambda item: item[0])))
+        object.__setattr__(self, "observations", tuple(sorted(self.observations, key=lambda item: item[0])))
 
 
 @dataclass(frozen=True)
@@ -911,6 +1005,78 @@ class ImplementationCoverageSubject:
 
 
 @dataclass(frozen=True)
+class AuthorityAttestationSubjectIdentity:
+    tag: AuthoritySubjectTag
+    contract_identity: Any
+    clause_tag: AuthorityClauseTag | None = None
+    choice_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.tag is AuthoritySubjectTag.CLAUSE:
+            valid = self.clause_tag is not None and self.choice_id is None
+        else:
+            valid = self.clause_tag is None and type(self.choice_id) is str and bool(self.choice_id)
+        if not valid:
+            raise ValueError("authority attestation subject fields do not match its tag")
+
+
+@dataclass(frozen=True)
+class AuthorityAttestationValue:
+    authority_ref: Any
+    source_ref: Any
+    principal: str
+    normative_role: str
+    subject_identity: AuthorityAttestationSubjectIdentity
+
+    def __post_init__(self) -> None:
+        if (type(self.principal) is not str or not self.principal
+                or type(self.normative_role) is not str or not self.normative_role
+                or type(self.subject_identity) is not AuthorityAttestationSubjectIdentity):
+            raise ValueError("authority attestation nested sorts")
+
+
+@dataclass(frozen=True)
+class ServiceAdmissionSubject:
+    tag: ServiceSubjectTag
+    binding: Any = None
+    arguments: tuple[Any, ...] = ()
+    profile: Any = None
+    profile_subject: ImplementationCoverageSubject | None = None
+    selector: ArtifactSelector | None = None
+    nonempty_task: TaskSpec | None = None
+    upper_task: TaskSpec | None = None
+    lower_task: TaskSpec | None = None
+    spec: ObservationSpec | None = None
+    contract_identity: Any = None
+    task: TaskSpec | None = None
+    pre: RepositorySnapshot | None = None
+    final: RepositorySnapshot | None = None
+    pair: Any = None
+    scope_binding: Any = None
+    occurrence_binding: Any = None
+    trace_domain: PairTraceDomain | None = None
+    compared_fields: PairComparedFields | None = None
+    authority_fact_key: Any = None
+    attestation: AuthorityAttestationValue | None = None
+    offered_evidence_refs: frozenset[EvidenceRef] = frozenset()
+
+
+@dataclass(frozen=True)
+class EvolutionAdmissionSubject:
+    tag: EvolutionSubjectTag
+    candidate_key: Any
+    source_identity: Any = None
+    target_identity: Any = None
+    relation: EvolutionRelation | None = None
+    source_abi: Any = None
+    target_abi: Any = None
+    source_keys: frozenset[Any] = frozenset()
+    target_keys: frozenset[Any] = frozenset()
+    target_record_identity: Any = None
+    owner_layer: EvolutionOwnerLayer | None = None
+
+
+@dataclass(frozen=True)
 class ProfileResult:
     tag: ProfileTag
     profile_key: str
@@ -937,11 +1103,11 @@ class ProfileResult:
 @dataclass(frozen=True)
 class CommandEventPayload:
     command_id: CommandId
-    purpose: str
+    purpose: Purpose
 
     def __post_init__(self) -> None:
-        if type(self.command_id) is not CommandId or type(self.purpose) is not str or not self.purpose:
-            raise ValueError("command-event atoms are nonempty")
+        if type(self.command_id) is not CommandId or type(self.purpose) is not Purpose:
+            raise ValueError("command-event fields are admitted sorts")
 
 
 @dataclass(frozen=True)
@@ -965,11 +1131,11 @@ class PathChangeEventPayload:
 @dataclass(frozen=True)
 class NetworkContactEventPayload:
     contact_class: ContactClass
-    purpose: str
+    purpose: Purpose
 
     def __post_init__(self) -> None:
-        if type(self.contact_class) is not ContactClass or type(self.purpose) is not str or not self.purpose:
-            raise ValueError("network-event atoms are nonempty")
+        if type(self.contact_class) is not ContactClass or type(self.purpose) is not Purpose:
+            raise ValueError("network-event fields are admitted sorts")
 
 
 @dataclass(frozen=True)
@@ -1091,22 +1257,41 @@ _CRITERION_TYPES = (
 _ADMISSION_TYPES: dict[str, type[Any] | tuple[type[Any], ...]] = {
     "PathSegment": PathSegment, "Path": Path, "PathSet": frozenset,
     "ArtifactRole": (ArtifactRole, OtherArtifactRole),
-    "Format": (Format, OtherFormat), "ByteSize": ByteSize,
+    "Format": (Format, OtherFormat), "StorageBackend": StorageBackend,
+    "ByteSize": ByteSize,
     "ContentIdentity": ContentIdentity, "FieldId": FieldId,
     "FieldValue": FieldValue, "SubjectId": SubjectId,
-    "BehaviorValue": BehaviorValue, "ArtifactBodyKind": ArtifactBodyKind,
+    "BehaviorValue": BehaviorValue, "ArtifactBody": ArtifactBody,
+    "ArtifactBodyKind": ArtifactBodyKind,
     "ArtifactContent": ArtifactContent, "RepositorySnapshot": RepositorySnapshot,
     "SnapshotIdentity": SnapshotIdentity, "ArtifactSelector": ArtifactSelector,
     "ArtifactProjection": ArtifactProjection, "Coverage": Coverage,
     "ObservationSpec": ObservationSpec, "ObservationValue": ObservationValue,
     "ObservationResult": ObservationResult, "ObservationRelation": ObservationRelation,
     "VerificationSpec": VerificationSpec, "VerificationStatus": VerificationStatus,
+    "VerificationRecord": VerificationRecord,
+    "ImplementationEvidence": ImplementationEvidence,
+    "CodingEvidencePayload": CodingEvidencePayload,
+    "CodingEvidenceEntry": CodingEvidenceEntry,
+    "AbstractCoverageResult": AbstractCoverageResult,
+    "ImplementationCoverageSubject": ImplementationCoverageSubject,
     "Criterion": _CRITERION_TYPES, "TaskSpec": TaskSpec,
+    "ChangeEntry": ChangeEntry, "ChangeSet": ChangeSet,
     "ChangeKind": ChangeKind, "CommandId": CommandId, "ContactClass": ContactClass,
-    "ReleaseId": ReleaseId, "EventPattern": EventPattern,
+    "ReleaseId": ReleaseId, "Purpose": Purpose, "EventPattern": EventPattern,
+    "CommandEventPayload": CommandEventPayload,
+    "TestEventPayload": TestEventPayload,
+    "PathChangeEventPayload": PathChangeEventPayload,
+    "NetworkContactEventPayload": NetworkContactEventPayload,
+    "ReleaseEventPayload": ReleaseEventPayload,
     "DependencyRefreshEventPayload": DependencyRefreshEventPayload,
     "PairTraceDomain": PairTraceDomain,
     "PairComparedFields": PairComparedFields,
+    "AuthorityClauseTag": AuthorityClauseTag,
+    "AuthorityAttestationSubjectIdentity": AuthorityAttestationSubjectIdentity,
+    "AuthorityAttestationValue": AuthorityAttestationValue,
+    "ServiceAdmissionSubject": (ServiceAdmissionSubject,),
+    "EvolutionAdmissionSubject": EvolutionAdmissionSubject,
 }
 
 
@@ -1127,10 +1312,173 @@ def admitted_closed_value(expected_type: type[Any] | tuple[type[Any], ...], valu
     return type(value) in expected_types and _admitted_payload(value)
 
 
+def _reference_sort(value: Any, *names: str) -> bool:
+    return (type(value).__module__ == "KernelPlugin.k3x.reference"
+            and type(value).__name__ in names)
+
+
+def _admitted_service_subject(value: ServiceAdmissionSubject) -> bool:
+    if type(value.tag) is not ServiceSubjectTag or type(value.arguments) is not tuple:
+        return False
+    empty = (
+        value.binding is None and not value.arguments and value.profile is None
+        and value.profile_subject is None and value.selector is None
+        and value.nonempty_task is None and value.upper_task is None
+        and value.lower_task is None and value.spec is None
+        and value.contract_identity is None and value.task is None
+        and value.pre is None and value.final is None and value.pair is None
+        and value.scope_binding is None and value.occurrence_binding is None
+        and value.trace_domain is None and value.compared_fields is None
+        and value.authority_fact_key is None and value.attestation is None
+        and not value.offered_evidence_refs
+    )
+    if value.tag in {ServiceSubjectTag.FUNCTION_CALL, ServiceSubjectTag.PREDICATE_CALL}:
+        return (_reference_sort(value.binding, "RecordIdentity")
+                and all(_admitted_payload(item) for item in value.arguments)
+                and all(item is None for item in (
+                    value.profile, value.profile_subject, value.selector,
+                    value.nonempty_task, value.upper_task, value.lower_task,
+                    value.spec, value.contract_identity, value.task, value.pre,
+                    value.final, value.pair, value.scope_binding,
+                    value.occurrence_binding, value.trace_domain,
+                    value.compared_fields, value.authority_fact_key,
+                    value.attestation)) and not value.offered_evidence_refs)
+    if value.tag is ServiceSubjectTag.PROFILE_CALL:
+        return (_reference_sort(value.profile, "RecordIdentity")
+                and type(value.profile_subject) is ImplementationCoverageSubject
+                and _admitted_payload(value.profile_subject)
+                and value.binding is None and not value.arguments
+                and all(item is None for item in (
+                    value.selector, value.nonempty_task, value.upper_task,
+                    value.lower_task, value.spec, value.contract_identity,
+                    value.task, value.pre, value.final, value.pair,
+                    value.scope_binding, value.occurrence_binding,
+                    value.trace_domain, value.compared_fields,
+                    value.authority_fact_key, value.attestation))
+                and not value.offered_evidence_refs)
+    if value.tag is ServiceSubjectTag.BOUNDS:
+        return (type(value.selector) is ArtifactSelector and _admitted_payload(value.selector)
+                and all(type(item) is TaskSpec and _admitted_payload(item)
+                        for item in (value.nonempty_task, value.upper_task, value.lower_task))
+                and value.nonempty_task != TaskSpec()
+                and value.binding is None and not value.arguments
+                and all(item is None for item in (
+                    value.profile, value.profile_subject, value.spec,
+                    value.contract_identity, value.task, value.pre, value.final,
+                    value.pair, value.scope_binding, value.occurrence_binding,
+                    value.trace_domain, value.compared_fields,
+                    value.authority_fact_key, value.attestation))
+                and not value.offered_evidence_refs)
+    if value.tag is ServiceSubjectTag.CONFLUENCE:
+        return (type(value.spec) is ObservationSpec and _admitted_payload(value.spec)
+                and type(value.pre) is RepositorySnapshot and _admitted_payload(value.pre)
+                and type(value.final) is RepositorySnapshot and _admitted_payload(value.final)
+                and value.binding is None and not value.arguments
+                and all(item is None for item in (
+                    value.profile, value.profile_subject, value.selector,
+                    value.nonempty_task, value.upper_task, value.lower_task,
+                    value.contract_identity, value.task, value.pair,
+                    value.scope_binding, value.occurrence_binding,
+                    value.trace_domain, value.compared_fields,
+                    value.authority_fact_key, value.attestation))
+                and not value.offered_evidence_refs)
+    if value.tag is ServiceSubjectTag.ADAPTER_WITNESS:
+        return (_reference_sort(value.contract_identity, "RecordIdentity")
+                and type(value.spec) is ObservationSpec and _admitted_payload(value.spec)
+                and type(value.task) is TaskSpec and _admitted_payload(value.task)
+                and type(value.pre) is RepositorySnapshot and _admitted_payload(value.pre)
+                and type(value.final) is RepositorySnapshot and _admitted_payload(value.final)
+                and value.binding is None and not value.arguments
+                and all(item is None for item in (
+                    value.profile, value.profile_subject, value.selector,
+                    value.nonempty_task, value.upper_task, value.lower_task,
+                    value.pair, value.scope_binding, value.occurrence_binding,
+                    value.trace_domain, value.compared_fields,
+                    value.authority_fact_key, value.attestation))
+                and not value.offered_evidence_refs)
+    if value.tag is ServiceSubjectTag.PAIR_COHERENCE:
+        return (all(_reference_sort(item, "RecordIdentity") for item in (
+                    value.pair, value.scope_binding, value.occurrence_binding))
+                and value.trace_domain is PairTraceDomain.ALL_ADMITTED_TRACES
+                and value.compared_fields is PairComparedFields.COMPLETE_EVAL_RECORD
+                and value.binding is None and not value.arguments
+                and all(item is None for item in (
+                    value.profile, value.profile_subject, value.selector,
+                    value.nonempty_task, value.upper_task, value.lower_task,
+                    value.spec, value.contract_identity, value.task, value.pre,
+                    value.final, value.authority_fact_key, value.attestation))
+                and not value.offered_evidence_refs)
+    if value.tag is ServiceSubjectTag.AUTHORITY_ATTESTATION:
+        return (_reference_sort(value.authority_fact_key, "RecordIdentity")
+                and type(value.attestation) is AuthorityAttestationValue
+                and _admitted_payload(value.attestation)
+                and type(value.offered_evidence_refs) is frozenset
+                and all(type(item) is EvidenceRef and _admitted_payload(item)
+                        for item in value.offered_evidence_refs)
+                and value.binding is None and not value.arguments
+                and all(item is None for item in (
+                    value.profile, value.profile_subject, value.selector,
+                    value.nonempty_task, value.upper_task, value.lower_task,
+                    value.spec, value.contract_identity, value.task, value.pre,
+                    value.final, value.pair, value.scope_binding,
+                    value.occurrence_binding, value.trace_domain,
+                    value.compared_fields)))
+    return empty and False
+
+
+def _admitted_evolution_subject(value: EvolutionAdmissionSubject) -> bool:
+    if type(value.tag) is not EvolutionSubjectTag or not _reference_sort(value.candidate_key, "RecordIdentity"):
+        return False
+    if value.tag is EvolutionSubjectTag.MIGRATION_RELATION:
+        return (all(_reference_sort(item, "RecordIdentity") for item in (
+                    value.source_identity, value.target_identity))
+                and type(value.relation) is EvolutionRelation
+                and all(item is None for item in (
+                    value.source_abi, value.target_abi, value.target_record_identity,
+                    value.owner_layer)) and not value.source_keys and not value.target_keys)
+    if value.tag is EvolutionSubjectTag.COMPATIBILITY_CLAIM:
+        return (_reference_sort(value.source_abi, "Version")
+                and _reference_sort(value.target_abi, "Version")
+                and type(value.source_keys) is frozenset
+                and type(value.target_keys) is frozenset
+                and all(_reference_sort(item, "RecordIdentity")
+                        for item in value.source_keys | value.target_keys)
+                and all(item is None for item in (
+                    value.source_identity, value.target_identity, value.relation,
+                    value.target_record_identity, value.owner_layer)))
+    return (_reference_sort(value.target_record_identity, "RecordIdentity")
+            and type(value.owner_layer) is EvolutionOwnerLayer
+            and all(item is None for item in (
+                value.source_identity, value.target_identity, value.relation,
+                value.source_abi, value.target_abi))
+            and not value.source_keys and not value.target_keys)
+
+
+def _admitted_event_payload(value: Any) -> bool:
+    if type(value) is CommandEventPayload:
+        return _admitted_payload(value.command_id) and _admitted_payload(value.purpose)
+    if type(value) is TestEventPayload:
+        return (_admitted_payload(value.spec) and _admitted_payload(value.snapshot)
+                and type(value.status) is VerificationStatus
+                and type(value.evidence_refs) is frozenset and bool(value.evidence_refs)
+                and all(type(item) is EvidenceRef and _admitted_payload(item)
+                        for item in value.evidence_refs))
+    if type(value) is PathChangeEventPayload:
+        return _admitted_payload(value.path) and _admitted_payload(value.change)
+    if type(value) is NetworkContactEventPayload:
+        return _admitted_payload(value.contact_class) and _admitted_payload(value.purpose)
+    if type(value) is ReleaseEventPayload:
+        return _admitted_payload(value.release_id) and _admitted_payload(value.snapshot)
+    if type(value) is DependencyRefreshEventPayload:
+        return _admitted_payload(value.selector) and _admitted_payload(value.snapshot)
+    return False
+
+
 def _admitted_payload(value: Any) -> bool:
     """Exact membership predicate for every retained closed constructor."""
     kind = type(value)
-    if kind in {ArtifactRole, Format, ArtifactBodyKind, VerificationStatus, ChangeKind}:
+    if kind in {ArtifactRole, Format, StorageBackend, ArtifactBodyKind,
+                VerificationStatus, ChangeKind, AuthorityClauseTag}:
         return kind(value.value) is value
     if kind in {PairTraceDomain, PairComparedFields}:
         return kind(value.value) is value
@@ -1142,7 +1490,7 @@ def _admitted_payload(value: Any) -> bool:
     if kind is frozenset:
         return all(_admitted_payload(item) for item in value)
     if kind in {OtherArtifactRole, OtherFormat, ContentIdentity, FieldId,
-                CommandId, ContactClass, ReleaseId}:
+                CommandId, ContactClass, ReleaseId, Purpose}:
         return type(value.atom) is str and bool(value.atom)
     if kind is ByteSize:
         return type(value.kib) is int and value.kib >= 0
@@ -1160,6 +1508,16 @@ def _admitted_payload(value: Any) -> bool:
                     and (value.content is None or _admitted_payload(value.content))
                     and (value.left is None or _admitted_payload(value.left))
                     and (value.right is None or _admitted_payload(value.right)))
+        except (TypeError, ValueError):
+            return False
+    if kind is ArtifactBody:
+        try:
+            return (ArtifactBody(value.tag, value.content, value.fields, value.observations) == value
+                    and (value.content is None or _admitted_payload(value.content))
+                    and all(_admitted_payload(key) and _admitted_payload(item)
+                            for key, item in value.fields)
+                    and all(_admitted_payload(key) and _admitted_payload(item)
+                            for key, item in value.observations))
         except (TypeError, ValueError):
             return False
     if kind is ArtifactContent:
@@ -1239,6 +1597,94 @@ def _admitted_payload(value: Any) -> bool:
         return (type(value.protocol_identity) is str and bool(value.protocol_identity)
                 and _admitted_payload(value.subject)
                 and type(value.evidence_schema_key) is str and bool(value.evidence_schema_key))
+    if kind is ChangeEntry:
+        try:
+            return (ChangeEntry(value.kind, value.old, value.new) == value
+                    and (value.old is None or _admitted_payload(value.old))
+                    and (value.new is None or _admitted_payload(value.new)))
+        except (TypeError, ValueError):
+            return False
+    if kind is ChangeSet:
+        try:
+            return (ChangeSet(value.entries) == value
+                    and all(type(path) is Path and type(entry) is ChangeEntry
+                            and _admitted_payload(path) and _admitted_payload(entry)
+                            for path, entry in value.entries))
+        except (TypeError, ValueError):
+            return False
+    if kind is VerificationRecord:
+        return (type(value.spec) is VerificationSpec and _admitted_payload(value.spec)
+                and type(value.snapshot_identity) is SnapshotIdentity
+                and _admitted_payload(value.snapshot_identity)
+                and type(value.status) is VerificationStatus
+                and type(value.observation) is ObservationResult
+                and _admitted_payload(value.observation)
+                and value.observation.spec_identity == value.spec.subject
+                and type(value.evidence_refs) is frozenset and bool(value.evidence_refs)
+                and all(type(item) is EvidenceRef and _admitted_payload(item)
+                        and item.schema_binding == value.spec.evidence_schema_key
+                        for item in value.evidence_refs))
+    if kind is ReasoningResult:
+        try:
+            return (ReasoningResult(value.tag, value.certificate_key, value.judgment,
+                                    value.reasons) == value
+                    and all(type(item) is str and bool(item) for item in value.reasons))
+        except (TypeError, ValueError):
+            return False
+    if kind is ImplementationEvidence:
+        try:
+            return (ImplementationEvidence(
+                value.tag, value.contract_identity, value.snapshot_identity,
+                value.certificate_key, value.implementation_identity,
+                value.dimension, value.reason) == value
+                    and type(value.contract_identity) is str and bool(value.contract_identity)
+                    and _admitted_payload(value.snapshot_identity)
+                    and all(item is None or type(item) is str and bool(item) for item in (
+                        value.certificate_key, value.implementation_identity,
+                        value.dimension, value.reason)))
+        except (TypeError, ValueError):
+            return False
+    if kind is CodingEvidencePayload:
+        try:
+            return (CodingEvidencePayload(value.tag, value.value) == value
+                    and _admitted_payload(value.value))
+        except (TypeError, ValueError):
+            return False
+    if kind is EvidenceRef:
+        return all(type(item) is str and bool(item) for item in (
+            value.issuer_scope, value.namespace, value.stable_identity,
+            value.schema_binding))
+    if kind is CodingEvidenceEntry:
+        return (type(value.reference) is EvidenceRef and _admitted_payload(value.reference)
+                and type(value.payload) is CodingEvidencePayload
+                and _admitted_payload(value.payload)
+                and ((value.payload.tag is EvidencePayloadTag.VERIFICATION
+                      and value.reference.schema_binding == VERIFICATION_SCHEMA
+                      and value.reference in value.payload.value.evidence_refs)
+                     or (value.payload.tag is EvidencePayloadTag.IMPLEMENTATION_PROFILE
+                         and value.reference.schema_binding == IMPLEMENTATION_PROFILE_SCHEMA)))
+    if kind is AbstractCoverageResult:
+        try:
+            return (AbstractCoverageResult(value.tag, value.result) == value
+                    and (value.result is None or _admitted_payload(value.result)))
+        except (TypeError, ValueError):
+            return False
+    if kind is Eval:
+        return (value.truth is None or type(value.truth) is Truth) and all(
+            type(items) is frozenset and all(type(item) is str and bool(item) for item in items)
+            for items in (value.reasons, value.errors)) and all(
+                type(item) is EvidenceRef and _admitted_payload(item)
+                for item in value.evidence_refs)
+    if kind is ImplementationCoverageSubject:
+        return (type(value.contract_identity) is str and bool(value.contract_identity)
+                and type(value.task) is TaskSpec and _admitted_payload(value.task)
+                and type(value.snapshot) is RepositorySnapshot and _admitted_payload(value.snapshot)
+                and type(value.evidence_store) is frozenset
+                and all(type(item) is CodingEvidenceEntry and _admitted_payload(item)
+                        for item in value.evidence_store)
+                and type(value.task_result) is Eval and _admitted_payload(value.task_result)
+                and type(value.abstract_result) is AbstractCoverageResult
+                and _admitted_payload(value.abstract_result))
     if kind is ObservationEquals:
         return _admitted_payload(value.spec) and _admitted_payload(value.expected)
     if kind is OneFormatOf:
@@ -1266,6 +1712,26 @@ def _admitted_payload(value: Any) -> bool:
                 and type(value.required_verifications) is frozenset
                 and all(type(item) is VerificationSpec and _admitted_payload(item)
                         for item in value.required_verifications))
+    if kind is AuthorityAttestationSubjectIdentity:
+        return (type(value.tag) is AuthoritySubjectTag
+                and _reference_sort(value.contract_identity, "RecordIdentity")
+                and ((value.tag is AuthoritySubjectTag.CLAUSE
+                      and type(value.clause_tag) is AuthorityClauseTag
+                      and value.choice_id is None)
+                     or (value.tag is AuthoritySubjectTag.CHOICE
+                         and value.clause_tag is None
+                         and type(value.choice_id) is str and bool(value.choice_id))))
+    if kind is AuthorityAttestationValue:
+        return (_reference_sort(value.authority_ref, "RecordIdentity")
+                and _reference_sort(value.source_ref, "RecordIdentity")
+                and type(value.principal) is str and bool(value.principal)
+                and type(value.normative_role) is str and bool(value.normative_role)
+                and type(value.subject_identity) is AuthorityAttestationSubjectIdentity
+                and _admitted_payload(value.subject_identity))
+    if kind is ServiceAdmissionSubject:
+        return _admitted_service_subject(value)
+    if kind is EvolutionAdmissionSubject:
+        return _admitted_evolution_subject(value)
     if kind is EventPattern:
         try:
             return (EventPattern(
@@ -1282,9 +1748,10 @@ def _admitted_payload(value: Any) -> bool:
                     )))
         except (TypeError, ValueError):
             return False
-    if kind is DependencyRefreshEventPayload:
-        return (_admitted_payload(value.selector)
-                and _admitted_payload(value.snapshot))
+    if kind in {CommandEventPayload, TestEventPayload, PathChangeEventPayload,
+                NetworkContactEventPayload, ReleaseEventPayload,
+                DependencyRefreshEventPayload}:
+        return _admitted_event_payload(value)
     if kind.__module__ == "KernelPlugin.k3x.reference" and kind.__name__ == "PairCoherenceSubject":
         from .reference import RecordIdentity
         return (type(value.pair) is RecordIdentity
