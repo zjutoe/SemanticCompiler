@@ -103,7 +103,10 @@ from .reference import (
     EnvironmentUse,
     ContractSubject,
     FormulaSubject,
-    LexicalFormula,
+    frozen_bounds_contract,
+    frozen_confluence_contract,
+    frozen_lexical_formulas,
+    frozen_lexical_scope,
     ReasoningTarget,
     ReasoningUnknown,
     ReasoningResultValue,
@@ -173,7 +176,9 @@ from .reference import (
     Version,
     compose_records,
     derive_dependency_environment,
-    dependency_identity,
+    dependency_key,
+    dependency_keys,
+    dependency_reachability,
     frozen_confluence_syntax_roots,
     frozen_lexical_syntax_roots,
     frozen_task_syntax_roots,
@@ -653,9 +658,9 @@ def _core_construction_local(
             frozenset({declaration_id}),
             sound_id,
             None,
-            frozenset({binding_id}),
-            frozenset({service_id, declaration_id, sound_id, qreq_id, qfail_id}),
-            frozenset({service_id, declaration_id, sound_id, qreq_id, qfail_id, task_type_id, snapshot_type_id, task_admission_id, snapshot_admission_id}),
+            dependency_keys(frozenset({binding_id})),
+            dependency_keys(frozenset({service_id, declaration_id, sound_id, qreq_id, qfail_id})),
+            dependency_keys(frozenset({service_id, declaration_id, sound_id, qreq_id, qfail_id, task_type_id, snapshot_type_id, task_admission_id, snapshot_admission_id})),
             qreq_id,
             frozenset({root_id}),
             qfail_id,
@@ -1219,9 +1224,9 @@ def pair_construction() -> PairConstruction:
             frozenset({PairTarget(pair_id)}),
             psound_id,
             pcomplete_id,
-            pair_dependency_scope,
-            capability_proper,
-            capability_closure,
+            dependency_keys(pair_dependency_scope),
+            dependency_keys(capability_proper),
+            dependency_keys(capability_closure),
             pevidence_id,
             frozenset({rid(RecordKind.TRUST_ROOT, "TRP", namespace="pair.trust")}),
             pfailure_id,
@@ -1593,7 +1598,7 @@ def pair_construction() -> PairConstruction:
             namespace="pair.producer",
         ),
     )
-    top_level = (
+    preliminary_top_level = (
         abi,
         pair_package,
         proof_package,
@@ -1624,6 +1629,21 @@ def pair_construction() -> PairConstruction:
         validation_result,
         *producers,
     )
+    preliminary_composition = compose_records(preliminary_top_level)
+    validation_capability = replace(
+        validation_capability,
+        value=replace(
+            validation_capability.value,
+            dependency_closure=dependency_reachability(
+                validation_capability.value.proper_semantic_dependencies,
+                preliminary_composition)))
+    validator_package = replace(
+        validator_package,
+        value=replace(validator_package.value,
+                      services=(validation_capability,)))
+    top_level = tuple(
+        validator_package if item.identity == validator_package.identity
+        else item for item in preliminary_top_level)
     manifest = frozenset(
         (
             abi,
@@ -2329,8 +2349,9 @@ def _literal_missing_rows() -> tuple[LiteralMissingRow, ...]:
             service_role,
             "COMPLETE_FOR_DECLARED_FRAGMENT", frozenset({judgment_name}),
             frozenset({target}), spec_ids[ContractRole.SOUND_FRAGMENT],
-            spec_ids[ContractRole.COMPLETE_FRAGMENT], proper_closure, descriptor_proper,
-            descriptor_proper, spec_ids[ContractRole.REQUIRED_EVIDENCE],
+            spec_ids[ContractRole.COMPLETE_FRAGMENT], dependency_keys(proper_closure),
+            dependency_keys(descriptor_proper), dependency_keys(descriptor_proper),
+            spec_ids[ContractRole.REQUIRED_EVIDENCE],
             frozenset({evolution_root_id}), spec_ids[ContractRole.SERVICE_FAILURE_BEHAVIOR],
         ))
         request_id = rid(RecordKind.REQUEST, f"R_{row_name}", namespace="evolution.request")
@@ -4075,24 +4096,7 @@ def _confluence_construction_local(order: OrderTag) -> ConfluenceConstruction:
             attestation_two, frozenset({evidence_two})),
         namespace="confluence.authority.binding",
     )
-    contract_value = ConfluenceContract(
-        (
-            AttributedClause(
-                "coding.confluence.observation", source_one.identity,
-                "REQUIRE(observations_equal(observe(s_c,F_c),O_c))"),
-            AttributedClause(
-                "coding.confluence.change", source_two.identity,
-                "REQUIRE(dependency_metadata_changed(changes_between(P_c,F_c)))"),
-        ),
-        (
-            ClauseAdoption(
-                "coding.confluence.observation", authority_one.identity,
-                "fixture_principal"),
-            ClauseAdoption(
-                "coding.confluence.change", authority_two.identity,
-                "fixture_principal"),
-        ),
-    )
+    contract_value = frozen_confluence_contract()
     contract = LogicalRecord(
         contract_id,
         OutcomeRecord(
@@ -4258,23 +4262,20 @@ def _confluence_construction_local(order: OrderTag) -> ConfluenceConstruction:
     confluence_root_id = rid(
         RecordKind.TRUST_ROOT, "ROOT_TR_c", namespace="confluence.trust")
     exact_target = ReasoningTarget(
-        "CONSISTENCY", (ContractSubject(contract_id),), semantic_id)
-    descriptor_proper = frozenset({
+        "CONSISTENCY", (ContractSubject(frozen_confluence_contract()),), semantic_id)
+    descriptor_proper = dependency_keys(frozenset({
         confluence_service_id, csound_id, creq_id, cfail_id,
         confluence_root_id,
-        *(dependency_identity(root)
-          for root in reasoning_target_roots(exact_target))})
-    descriptor_closure = descriptor_proper | confluence_closure | frozenset({
-        node_one_id, node_two_id,
-    })
+    })) | reasoning_target_roots(exact_target)
     confluence_capability = LogicalRecord(confluence_capability_id, CapabilityDescriptor(
         confluence_capability_id.key, confluence_service_id, ABI0,
         key("coding-minimal", namespace="plugin"), "REASONING",
         "PARTIAL_SYMBOLIC_REASONING", frozenset({"CONSISTENCY"}),
         frozenset({exact_target}), csound_id, None,
-        confluence_closure,
+        dependency_keys(confluence_closure),
         descriptor_proper,
-        descriptor_closure,
+        descriptor_proper | dependency_keys(confluence_closure | frozenset({
+            node_one_id, node_two_id})),
         creq_id, frozenset({rid(RecordKind.TRUST_ROOT, "ROOT_TR_c", namespace="confluence.trust")}), cfail_id))
     package = replace(retained_package, value=replace(
         retained_package.value,
@@ -4303,7 +4304,8 @@ def _confluence_construction_local(order: OrderTag) -> ConfluenceConstruction:
             frozenset({"CONTRADICTION_PROOF"}),
             frozenset({ServiceUseTrustTarget(
                 confluence_capability_id, "CONSISTENCY",
-                EnvironmentUse("CONSISTENCY", (ContractSubject(contract_id),)),
+                EnvironmentUse("CONSISTENCY", (
+                    ContractSubject(frozen_confluence_contract()),)),
                 semantic_id,
             )}),
             "V0_EXTERNAL_TRUST_PREMISE",
@@ -4362,7 +4364,8 @@ def _confluence_construction_local(order: OrderTag) -> ConfluenceConstruction:
             ABI0, "CONSISTENCY", (confluence_subject,), semantic_id, trust_id,
             csound_id, dependency_id,
             ReasoningTarget(
-                "CONSISTENCY", (ContractSubject(contract_id),), semantic_id),
+                "CONSISTENCY", (
+                    ContractSubject(frozen_confluence_contract()),), semantic_id),
             confluence_capability_id,
         ),
     )
@@ -5585,24 +5588,22 @@ def _retained_ck() -> tuple[LogicalRecord, tuple[LogicalRecord, ...]]:
     confluence_scope = (retained_observe.value.dependency_closure
                         | retained_changes.value.dependency_closure)
     confluence_target = next(iter(confluence_capability.value.supported_targets))
-    confluence_descriptor_proper = frozenset({
+    confluence_descriptor_proper = dependency_keys(frozenset({
         confluence_capability.value.service,
         confluence_capability.value.sound_fragment,
         confluence_capability.value.required_evidence,
         confluence_capability.value.failure_contract,
         *confluence_capability.value.required_trust_roots,
-        *(dependency_identity(root)
-          for root in reasoning_target_roots(confluence_target)),
-    })
+    })) | reasoning_target_roots(confluence_target)
     confluence_capability = replace(
         confluence_capability,
         value=replace(
             confluence_capability.value,
-            dependency_scope=confluence_scope,
+            dependency_scope=dependency_keys(confluence_scope),
             proper_semantic_dependencies=confluence_descriptor_proper,
             dependency_closure=(confluence_descriptor_proper
-                                | confluence_scope
-                                | frozenset(confluence_nodes))))
+                                | dependency_keys(
+                                    confluence_scope | frozenset(confluence_nodes)))))
     canonical_task_binding = next(
         item for item in ordinary_bindings
         if item.identity.key.local == "BINDING(DP(task_accepts))")
@@ -5631,9 +5632,9 @@ def _retained_ck() -> tuple[LogicalRecord, tuple[LogicalRecord, ...]]:
         value=replace(
             predicate_capability.value,
             supported_targets=predicate_targets,
-            dependency_scope=predicate_scope,
-            proper_semantic_dependencies=predicate_proper,
-            dependency_closure=predicate_descriptor_closure))
+            dependency_scope=dependency_keys(predicate_scope),
+            proper_semantic_dependencies=dependency_keys(predicate_proper),
+            dependency_closure=dependency_keys(predicate_descriptor_closure)))
     service_rows = (
         ("functions", "FSOUND", None, "FREQ", "FFAIL"),
         ("profile", "PROFSOUND", None, "PROFREQ", "PROFFAIL"),
@@ -5689,8 +5690,7 @@ def _retained_ck() -> tuple[LogicalRecord, tuple[LogicalRecord, ...]]:
             judgments = frozenset({"CONSISTENCY"})
             targets = frozenset({ReasoningTarget(
                 "CONSISTENCY",
-                (ContractSubject(rid(
-                    RecordKind.OUTCOME, "C_b", namespace="bounds.contract")),),
+                (ContractSubject(frozen_bounds_contract()),),
                 rid(RecordKind.SEMANTIC_ENVIRONMENT, "E_b",
                     namespace="bounds.environment"))})
             bounds_subjects = tuple(
@@ -5707,20 +5707,19 @@ def _retained_ck() -> tuple[LogicalRecord, tuple[LogicalRecord, ...]]:
                 item.value.dependency_closure for item in bounds_subjects))
             roots = frozenset({rid(RecordKind.TRUST_ROOT, "TRB",
                                    namespace="bounds.trust")})
-        target_roots = (frozenset(target.binding for target in targets)
+        target_roots = (dependency_keys(frozenset(
+                            target.binding for target in targets))
                         if name == "functions"
-                        else frozenset({profile.identity})
+                        else dependency_keys(frozenset({profile.identity}))
                         if name == "profile"
-                        else frozenset(
-                            dependency_identity(root) for root in
-                            reasoning_target_roots(next(iter(targets)))))
-        descriptor_proper = proper | roots | target_roots
-        descriptor_closure = (descriptor_proper | dependency_scope
+                        else reasoning_target_roots(next(iter(targets))))
+        descriptor_proper = dependency_keys(proper | roots) | target_roots
+        descriptor_closure = (descriptor_proper | dependency_keys(dependency_scope)
                               if name != "bounds" else descriptor_proper)
         service_capabilities.append(LogicalRecord(capability_id, CapabilityDescriptor(
             capability_id.key, service_id, ABI0, package.value.plugin_key,
             service_role, capability_class, judgments,
-            targets, sound_id, complete_id, dependency_scope,
+            targets, sound_id, complete_id, dependency_keys(dependency_scope),
             descriptor_proper, descriptor_closure,
             required_id, roots, failure_id)))
         service_support.extend((service, sound, required, failure))
@@ -5737,21 +5736,19 @@ def _retained_ck() -> tuple[LogicalRecord, tuple[LogicalRecord, ...]]:
         for local in ("LEX_SOUND", "LEX_REQ", "LEX_FAIL"))
     lexical_root = rid(RecordKind.TRUST_ROOT, "TR", namespace="trust")
     lexical_target = ReasoningTarget(
-        "FORMULA_ENTAILMENT", (
-            FormulaSubject(LexicalFormula.TASK_ACCEPTS_FINAL, "scope_lex"),
-            FormulaSubject(LexicalFormula.EMPTY_ALL, "scope_lex")),
+        "FORMULA_ENTAILMENT", (FormulaSubject(
+            frozenset(frozen_lexical_formulas()), frozen_lexical_scope()),),
         rid(RecordKind.SEMANTIC_ENVIRONMENT, "E_lex",
             namespace="lexical.environment"))
     lexical_scope = canonical_task_binding.value.dependency_closure
-    lexical_proper = frozenset({
+    lexical_proper = dependency_keys(frozenset({
         lexical_service_id, *lexical_spec_ids, lexical_root,
-        *(dependency_identity(root)
-          for root in reasoning_target_roots(lexical_target))})
+    })) | reasoning_target_roots(lexical_target)
     lexical = LogicalRecord(lexical_capability_id, CapabilityDescriptor(
         lexical_capability_id.key, lexical_service_id, ABI0, package.value.plugin_key,
         "REASONING", "PARTIAL_SYMBOLIC_REASONING",
         frozenset({"FORMULA_ENTAILMENT"}), frozenset({lexical_target}), lexical_spec_ids[0],
-        None, lexical_scope,
+        None, dependency_keys(lexical_scope),
         lexical_proper, lexical_proper,
         lexical_spec_ids[1], frozenset({lexical_root}),
         lexical_spec_ids[2]))
@@ -5876,6 +5873,18 @@ def _retained_ck() -> tuple[LogicalRecord, tuple[LogicalRecord, ...]]:
             len(package_value.bindings), len(package_value.model_contracts),
             len(package_value.services)) != (119, 47, 17, 57, 58, 6):
         raise ValueError("literal PKG_CK cardinality disagreement")
+    retained_composition = compose_records(_identity_union(
+        (retained_package,), support))
+    normalized_services = tuple(
+        replace(item, value=replace(
+            item.value,
+            dependency_closure=dependency_reachability(
+                item.value.proper_semantic_dependencies,
+                retained_composition)))
+        for item in retained_package.value.services)
+    retained_package = replace(
+        retained_package,
+        value=replace(retained_package.value, services=normalized_services))
     _RETAINED_CK_CACHE = retained_package, support
     return _RETAINED_CK_CACHE
 
@@ -6120,7 +6129,7 @@ def confluence_construction(order: OrderTag) -> ConfluenceConstruction:
         confluence_descriptor,
         value=replace(
             confluence_descriptor.value,
-            dependency_closure=_reachable_closure(
+            dependency_closure=dependency_reachability(
                 confluence_descriptor.value.proper_semantic_dependencies,
                 preliminary_composition)))
     exact_package = replace(

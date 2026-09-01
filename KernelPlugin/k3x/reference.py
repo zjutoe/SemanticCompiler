@@ -506,15 +506,15 @@ class CapabilityDescriptor:
     supported_targets: frozenset[Any]
     sound_fragment: RecordIdentity
     complete_fragment: RecordIdentity | None
-    dependency_scope: frozenset[RecordIdentity]
-    proper_semantic_dependencies: frozenset[RecordIdentity]
-    dependency_closure: frozenset[RecordIdentity]
+    dependency_scope: frozenset[DependencyKey]
+    proper_semantic_dependencies: frozenset[DependencyKey]
+    dependency_closure: frozenset[DependencyKey]
     required_evidence: RecordIdentity
     required_trust_roots: frozenset[RecordIdentity]
     failure_contract: RecordIdentity
 
     @property
-    def proper_dependencies(self) -> frozenset[RecordIdentity]:
+    def proper_dependencies(self) -> frozenset[DependencyKey]:
         return self.proper_semantic_dependencies
 
 
@@ -769,27 +769,54 @@ class EnvironmentUse:
 
 @dataclass(frozen=True)
 class ContractSubject:
-    contract_identity: RecordIdentity
+    contract: "ConfluenceContract"
+
+
+@dataclass(frozen=True)
+class FormulaTerm:
+    tag: str
+    value: Any = None
+    arguments: tuple["FormulaTerm", ...] = ()
+
+
+@dataclass(frozen=True)
+class Formula:
+    tag: str
+    symbol: ExactKey | None = None
+    arguments: tuple[FormulaTerm, ...] = ()
+    members: frozenset["Formula"] = frozenset()
 
     def __post_init__(self) -> None:
-        if self.contract_identity.kind is not RecordKind.OUTCOME:
-            raise TypeError("CONTRACT_SUBJECT requires a Contract outcome identity")
+        if self.tag == "ATOM":
+            if self.symbol is None or self.members:
+                raise ValueError("ATOM requires an exact symbol and no members")
+        elif self.tag == "ALL":
+            if self.symbol is not None or self.arguments:
+                raise ValueError("ALL carries only its exact finite formula set")
+        else:
+            raise ValueError("unsupported exact finite Formula constructor")
 
 
-class LexicalFormula(str, Enum):
-    TASK_ACCEPTS_FINAL = "f_lex"
-    EMPTY_ALL = "g_lex"
+@dataclass(frozen=True)
+class LexicalScopeIdentity:
+    judgment_or_binder_kind: str
+    subjects: tuple[Formula, ...]
+
+    def __post_init__(self) -> None:
+        if not self.judgment_or_binder_kind or not self.subjects:
+            raise ValueError("lexical scope has an exact nonempty subject tuple")
 
 
 @dataclass(frozen=True)
 class FormulaSubject:
-    formula: LexicalFormula
-    lexical_scope: str
+    formulas: frozenset[Formula]
+    lexical_scope: LexicalScopeIdentity
 
     def __post_init__(self) -> None:
-        if (not isinstance(self.formula, LexicalFormula)
-                or self.lexical_scope != "scope_lex"):
-            raise ValueError("unsupported exact finite FORMULA_SUBJECT")
+        if (not self.formulas
+                or any(not isinstance(item, Formula) for item in self.formulas)
+                or frozenset(self.lexical_scope.subjects) != self.formulas):
+            raise ValueError("FORMULA_SUBJECT carries exact formulas and scope")
 
 
 @dataclass(frozen=True)
@@ -819,7 +846,7 @@ class ConfluenceSubject:
 class AttributedClause:
     clause_key: str
     source: RecordIdentity
-    requirement: str
+    requirement: Formula
 
 
 @dataclass(frozen=True)
@@ -1689,8 +1716,10 @@ def validate_packages(
             )
             fragments = tuple((_resolve(composition, identity, ContractSpec), role)
                               for identity, role in fragment_rows if identity is not None)
-            descriptor_proper = frozenset({validator.value.service, record.identity,
-                                           *(identity for identity, _ in fragment_rows if identity is not None)})
+            descriptor_proper = dependency_keys(frozenset({
+                validator.value.service, record.identity,
+                *(identity for identity, _ in fragment_rows
+                  if identity is not None)}))
             root_judgment = None if trust is None else dict(trust.value.root_judgments).get(root_identity)
             expected_fragment_shapes = {
                 ContractRole.SOUND_FRAGMENT: (("EvolutionAdmissionSubject",), frozenset({"IN_FRAGMENT", "OUTSIDE_FRAGMENT"}), "evolution_sound_fragment"),
@@ -1773,9 +1802,11 @@ def validate_packages(
                     or validator.value.supported_targets != frozenset({expected_target})
                     or validator.value.capability_class != "COMPLETE_FOR_DECLARED_FRAGMENT"
                     or validator.value.dependency_scope
-                    != _reachable_closure(expected_proper, composition)
+                    != dependency_keys(
+                        _reachable_closure(expected_proper, composition))
                     or validator.value.proper_semantic_dependencies != descriptor_proper
-                    or validator.value.dependency_closure != _reachable_closure(descriptor_proper, composition)
+                    or validator.value.dependency_closure
+                    != dependency_reachability(descriptor_proper, composition)
                     or validator.value.required_trust_roots != frozenset({root_identity})
                     or service is None or service.value.abi_version != request.abi_version
                     or service.value.plugin_key != validator.value.plugin_key
@@ -2067,21 +2098,38 @@ def dependency_keys(
     return frozenset(dependency_key(identity) for identity in identities)
 
 
-def dependency_identity(key: DependencyKey) -> RecordIdentity:
-    if not isinstance(key, DependencyKey):
-        raise TypeError("raw or mixed dependency root")
-    return RecordIdentity(key.record_kind, key.exact_key)
-
-
 def _record_for_dependency(
     key: DependencyKey, composition: Composition,
 ) -> LogicalRecord | None:
-    direct = composition.at(dependency_identity(key))
+    direct = composition.at(RecordIdentity(key.record_kind, key.exact_key))
     if direct is not None:
         return direct
     if key.tag is DependencyTag.DECLARATION:
         return composition.at(RecordIdentity(
             RecordKind.TYPE_DECLARATION, key.exact_key))
+    if key.tag is DependencyTag.SYMBOL:
+        matches = tuple(
+            item for item in composition.records
+            if isinstance(item.value, DeclarationShape)
+            and item.value.symbol_key == key.exact_key)
+        return matches[0] if len(matches) == 1 else None
+    if (key.tag is DependencyTag.CARRIER
+            and key.carrier_kind is RecordKind.SEMANTIC_ENVIRONMENT):
+        roots_by_key = {
+            _frozen_key("E_b", "bounds.environment"):
+                frozen_bounds_syntax_roots(),
+            _frozen_key("E_c", "confluence.environment"):
+                frozen_confluence_syntax_roots(),
+            _frozen_key("E_lex", "lexical.environment"):
+                frozen_lexical_syntax_roots(),
+        }
+        roots = roots_by_key.get(key.exact_key)
+        if roots is not None:
+            identity = RecordIdentity(
+                RecordKind.SEMANTIC_ENVIRONMENT, key.exact_key)
+            return LogicalRecord(identity, SemanticEnvironment(
+                Version((0,)), (), (), (),
+                mechanically_extracted_dependencies=roots))
     return None
 
 
@@ -2128,20 +2176,19 @@ def syntax_keys_from_identities(
 
 def _capability_target_roots(
     target: Any, composition: Composition,
-) -> frozenset[RecordIdentity]:
+) -> frozenset[DependencyKey]:
     if isinstance(target, BindingTarget):
-        return frozenset({target.binding})
+        return frozenset({dependency_key(target.binding)})
     if isinstance(target, ProfileTarget):
         matches = tuple(
             item.identity for item in composition.records
             if isinstance(item.value, ProfileBinding)
             and item.value.profile_key == target.profile_key)
-        return frozenset(matches)
+        return dependency_keys(matches)
     if isinstance(target, PairTarget):
-        return frozenset({target.pair})
+        return frozenset({dependency_key(target.pair)})
     if isinstance(target, ReasoningTarget):
-        return frozenset(
-            dependency_identity(key) for key in reasoning_target_roots(target))
+        return reasoning_target_roots(target)
     if isinstance(target, EvolutionTarget):
         subject = target.subject
         if isinstance(subject, MigrationAdmissionSubject):
@@ -2156,8 +2203,82 @@ def _capability_target_roots(
                                subject.semantic_effect, subject.payload})
         else:
             raise FiniteProfileError("unsupported finite evolution subject")
-        return roots | frozenset({target.semantic_environment})
+        return dependency_keys(roots | frozenset({target.semantic_environment}))
     raise FiniteProfileError("unsupported finite capability target")
+
+
+def _dependency_associations(
+    key: DependencyKey, record: LogicalRecord,
+    composition: Composition,
+) -> frozenset[DependencyKey]:
+    if key.tag is DependencyTag.SYMBOL:
+        assert isinstance(record.value, DeclarationShape)
+        bindings = tuple(
+            item for item in composition.records
+            if (isinstance(item.value, SemanticBinding)
+                and item.value.declaration == record.identity)
+            or (isinstance(item.value, OccurrenceSemanticContractBundle)
+                and any(
+                    isinstance(pair.value, PairBinding)
+                    and pair.value.occurrence_bundle == item.identity
+                    and (declaration := composition.at(RecordIdentity(
+                        RecordKind.PAIR_DECLARATION,
+                        pair.value.pair_key))) is not None
+                    and isinstance(declaration.value, PairDeclaration)
+                    and declaration.value.occurrence_symbol
+                        == record.value.symbol_key
+                    for pair in composition.records)))
+        if len(bindings) != 1:
+            raise ValueError("missing or ambiguous exact symbol binding")
+        return frozenset({dependency_key(record.identity),
+                          dependency_key(bindings[0].identity)})
+    if (key.tag is DependencyTag.DECLARATION
+            and isinstance(record.value, DeclarationShape)
+            and record.value.declaration_kind in {
+                "LITERAL", "FUNCTION", "PREDICATE"}):
+        bindings = tuple(
+            item for item in composition.records
+            if (isinstance(item.value, SemanticBinding)
+                and item.value.declaration == record.identity)
+            or (isinstance(item.value, OccurrenceSemanticContractBundle)
+                and any(
+                    isinstance(pair.value, PairBinding)
+                    and pair.value.occurrence_bundle == item.identity
+                    and (declaration := composition.at(RecordIdentity(
+                        RecordKind.PAIR_DECLARATION,
+                        pair.value.pair_key))) is not None
+                    and isinstance(declaration.value, PairDeclaration)
+                    and declaration.value.occurrence_symbol
+                        == record.value.symbol_key
+                    for pair in composition.records)))
+        if len(bindings) != 1:
+            raise ValueError("missing or ambiguous declaration binding")
+        return frozenset({dependency_key(bindings[0].identity)})
+    return frozenset()
+
+
+def dependency_reachability(
+    roots: frozenset[DependencyKey], composition: Composition,
+) -> frozenset[DependencyKey]:
+    """Resolve and traverse exact K2 tags without a RecordIdentity downcast."""
+    reached = set(roots)
+    pending = list(roots)
+    while pending:
+        current = pending.pop()
+        if not isinstance(current, DependencyKey):
+            raise TypeError("descriptor dependencies are exact DependencyKey values")
+        record = _record_for_dependency(current, composition)
+        if record is None:
+            if current.tag is DependencyTag.TRUST_ROOT:
+                continue
+            raise ValueError(("unresolved descriptor dependency", current))
+        direct = dependency_keys(_direct_dependencies(record.identity, composition))
+        for target in direct | _dependency_associations(
+                current, record, composition):
+            if target not in reached:
+                reached.add(target)
+                pending.append(target)
+    return frozenset(reached)
 
 
 def _reachable_closure(roots: frozenset[RecordIdentity], composition: Composition) -> frozenset[RecordIdentity]:
@@ -2318,19 +2439,187 @@ def frozen_confluence_syntax_roots() -> frozenset[K1SyntaxKey]:
         "ChangeSet")
 
 
+def _value_term(value: Any) -> FormulaTerm:
+    return FormulaTerm("VALUE", value)
+
+
+def _anchor_term(name: str) -> FormulaTerm:
+    return FormulaTerm("ANCHOR", name)
+
+
+def _apply_term(symbol_local: str, *arguments: FormulaTerm) -> FormulaTerm:
+    return FormulaTerm(
+        "APPLY", _frozen_key(symbol_local, "coding.symbol"), arguments)
+
+
+def _atom(symbol_local: str, *arguments: FormulaTerm) -> Formula:
+    return Formula(
+        "ATOM", _frozen_key(symbol_local, "coding.symbol"), arguments)
+
+
+_FORMULA_SYMBOL_TYPES = {
+    "SF(snapshot_of)": ("RepositorySnapshot",),
+    "SF(observe)": ("ObservationSpec", "RepositorySnapshot",
+                    "ObservationResult"),
+    "SF(changes_between)": ("RepositorySnapshot", "ChangeSet"),
+    "SP(task_accepts)": ("TaskSpec", "RepositorySnapshot"),
+    "SP(observations_equal)": ("ObservationResult",),
+    "SP(dependency_metadata_changed)": ("ChangeSet",),
+}
+
+
+def _symbol_dependencies(symbol: ExactKey) -> frozenset[K1SyntaxKey]:
+    result = frozenset({K1SyntaxKey(K1SyntaxTag.SYMBOL, symbol)})
+    if symbol.owner == "capknow.semantic" and symbol.namespace == "coding.symbol":
+        type_names = _FORMULA_SYMBOL_TYPES.get(symbol.local, ())
+        return result | frozenset().union(*(
+            _type_syntax_roots(type_name) for type_name in type_names))
+    return result
+
+
+def frozen_lexical_formulas() -> tuple[Formula, Formula]:
+    variable = FormulaTerm(
+        "VARIABLE", ("task_argument", _frozen_key(
+            "T(TaskSpec)", "coding.type")))
+    final_task = _atom(
+        "SP(task_accepts)", variable,
+        _apply_term("SF(snapshot_of)", _anchor_term("final")),
+        _anchor_term("evidence"))
+    return final_task, Formula("ALL")
+
+
+def frozen_lexical_scope() -> LexicalScopeIdentity:
+    formulas = frozen_lexical_formulas()
+    return LexicalScopeIdentity("FORMULA_ENTAILMENT", formulas)
+
+
+def frozen_bounds_contract() -> ConfluenceContract:
+    from . import coding_plugin as cp
+    path = cp.Path((cp.PathSegment("dependency"), cp.PathSegment("lock")))
+    selector = cp.ArtifactSelector(cp.SelectorTag.PATHS, frozenset({path}))
+    tasks = (
+        cp.TaskSpec(frozenset({cp.ArtifactsNonempty(selector)})),
+        cp.TaskSpec(frozenset({cp.ArtifactSizeLt(
+            selector, cp.ByteSize(100))})),
+        cp.TaskSpec(frozenset({cp.ArtifactSizeAtLeast(
+            selector, cp.ByteSize(200))})),
+    )
+    formula = Formula("ALL", members=frozenset(
+        _atom(
+            "SP(task_accepts)", _value_term(task),
+            _apply_term("SF(snapshot_of)", _anchor_term("final")),
+            _anchor_term("evidence"))
+        for task in tasks))
+    return ConfluenceContract(
+        (AttributedClause(
+            "coding.bounds.clause",
+            RecordIdentity(RecordKind.SOURCE, _frozen_key(
+                "SRC(b,1)", "authenticated.fixture.source",
+                owner="PLUGIN_ISSUER(APK)")),
+            formula),),
+        (ClauseAdoption(
+            "coding.bounds.clause",
+            RecordIdentity(RecordKind.AUTHORITY_REF, _frozen_key(
+                "AUTH(b,1)", "coding.fixture",
+                owner="PLUGIN_ISSUER(APK)")),
+            "fixture_principal"),))
+
+
+def frozen_confluence_contract() -> ConfluenceContract:
+    from . import coding_plugin as cp
+    path = cp.Path((cp.PathSegment("dependency"), cp.PathSegment("lock")))
+    artifact = cp.ArtifactContent(
+        cp.ArtifactTag.TEXT, cp.ArtifactRole.DEPENDENCY_LOCK, cp.Format.TEXT,
+        cp.ByteSize(150), cp.ContentIdentity("lock_v1"))
+    prior = cp.RepositorySnapshot(())
+    final = cp.RepositorySnapshot(((path, artifact),))
+    selector = cp.ArtifactSelector(cp.SelectorTag.PATHS, frozenset({path}))
+    spec = cp.ObservationSpec(
+        cp.ObservationSpecTag.ARTIFACT_VIEW, selector,
+        cp.ArtifactProjection(cp.ProjectionTag.CONTENT))
+    result = cp.ObservationResult(
+        cp.ObservationResultTag.ARTIFACT, spec,
+        cp.Coverage(cp.CoverageTag.COMPLETE),
+        ((path, cp.ObservationValue(
+            cp.ObservationValueTag.PRESENT_CONTENT, (artifact,))),))
+    clauses = (
+        AttributedClause(
+            "coding.confluence.observation",
+            RecordIdentity(RecordKind.SOURCE, _frozen_key(
+                "SRC(c,1)", "authenticated.fixture.source",
+                owner="PLUGIN_ISSUER(APK)")),
+            _atom(
+                "SP(observations_equal)",
+                _apply_term("SF(observe)", _value_term(spec),
+                            _value_term(final)),
+                _value_term(result))),
+        AttributedClause(
+            "coding.confluence.change",
+            RecordIdentity(RecordKind.SOURCE, _frozen_key(
+                "SRC(c,2)", "authenticated.fixture.source",
+                owner="PLUGIN_ISSUER(APK)")),
+            _atom(
+                "SP(dependency_metadata_changed)",
+                _apply_term("SF(changes_between)", _value_term(prior),
+                            _value_term(final)))),
+    )
+    adoptions = tuple(
+        ClauseAdoption(
+            clause.clause_key,
+            RecordIdentity(RecordKind.AUTHORITY_REF, _frozen_key(
+                f"AUTH(c,{index})", "coding.fixture",
+                owner="PLUGIN_ISSUER(APK)")),
+            "fixture_principal")
+        for index, clause in enumerate(clauses, 1))
+    return ConfluenceContract(clauses, adoptions)
+
+
+def _term_dependencies(term: FormulaTerm) -> frozenset[K1SyntaxKey]:
+    if term.tag == "APPLY":
+        if not isinstance(term.value, ExactKey):
+            raise TypeError("APPLY carries an exact function symbol")
+        return _symbol_dependencies(term.value) | frozenset().union(*(
+            _term_dependencies(argument) for argument in term.arguments))
+    if term.tag == "VARIABLE":
+        if (not isinstance(term.value, tuple) or len(term.value) != 2
+                or not isinstance(term.value[1], ExactKey)):
+            raise TypeError("VARIABLE carries its exact declared type")
+        return _type_syntax_roots(term.value[1].local.removeprefix("T(").removesuffix(")"))
+    if term.tag == "VALUE":
+        type_name = type(term.value).__name__
+        if type_name not in _FROZEN_TYPE_DEPENDENCIES:
+            raise FiniteProfileError(f"unsupported exact Formula value {type_name}")
+        return _type_syntax_roots(type_name)
+    if term.tag == "ANCHOR":
+        return frozenset()
+    raise FiniteProfileError("unsupported exact Formula term")
+
+
+def formula_dependencies(formula: Formula) -> frozenset[K1SyntaxKey]:
+    if formula.tag == "ALL":
+        return frozenset().union(*(
+            formula_dependencies(member) for member in formula.members))
+    assert formula.symbol is not None
+    return frozenset({
+        _plugin_syntax_key(),
+    }) | _symbol_dependencies(formula.symbol) | frozenset().union(*(
+        _term_dependencies(argument) for argument in formula.arguments))
+
+
+def contract_dependencies(contract: ConfluenceContract) -> frozenset[K1SyntaxKey]:
+    return frozenset().union(*(
+        formula_dependencies(clause.requirement)
+        for clause in contract.attributed_clauses))
+
+
 def required_subject(
     subject: ContractSubject | FormulaSubject,
 ) -> frozenset[K1SyntaxKey]:
     if isinstance(subject, FormulaSubject):
-        return (frozen_lexical_syntax_roots()
-                if subject.formula is LexicalFormula.TASK_ACCEPTS_FINAL
-                else frozenset())
+        return frozenset().union(*(
+            formula_dependencies(formula) for formula in subject.formulas))
     if isinstance(subject, ContractSubject):
-        local = subject.contract_identity.key.local
-        if local == "C_b":
-            return frozen_bounds_syntax_roots()
-        if local == "C_c":
-            return frozen_confluence_syntax_roots()
+        return contract_dependencies(subject.contract)
     raise FiniteProfileError("unsupported exact finite typed subject")
 
 
@@ -2917,9 +3206,7 @@ def _validate_retained_ck_exact(
             return Judgment("MALFORMED", ("RETAINED_PROFILE_VALUE",))
         bounds_target = ReasoningTarget(
             "CONSISTENCY",
-            (ContractSubject(RecordIdentity(
-                RecordKind.OUTCOME,
-                _frozen_key("C_b", "bounds.contract"))),),
+            (ContractSubject(frozen_bounds_contract()),),
             RecordIdentity(RecordKind.SEMANTIC_ENVIRONMENT,
                            _frozen_key("E_b", "bounds.environment")))
         confluence_path = cp.Path((cp.PathSegment("dependency"),
@@ -2929,15 +3216,13 @@ def _validate_retained_ck_exact(
             cp.Format.TEXT, cp.ByteSize(150), cp.ContentIdentity("lock_v1"))
         confluence_target = ReasoningTarget(
             "CONSISTENCY",
-            (ContractSubject(RecordIdentity(
-                RecordKind.OUTCOME,
-                _frozen_key("C_c", "confluence.contract"))),),
+            (ContractSubject(frozen_confluence_contract()),),
             RecordIdentity(RecordKind.SEMANTIC_ENVIRONMENT,
                            _frozen_key("E_c", "confluence.environment")))
         lexical_target = ReasoningTarget(
-            "FORMULA_ENTAILMENT", (
-                FormulaSubject(LexicalFormula.TASK_ACCEPTS_FINAL, "scope_lex"),
-                FormulaSubject(LexicalFormula.EMPTY_ALL, "scope_lex")),
+            "FORMULA_ENTAILMENT", (FormulaSubject(
+                frozenset(frozen_lexical_formulas()),
+                frozen_lexical_scope()),),
             RecordIdentity(RecordKind.SEMANTIC_ENVIRONMENT,
                            _frozen_key("E_lex", "lexical.environment")))
         expected_targets = {
@@ -3025,17 +3310,17 @@ def _validate_retained_ck_exact(
                         expected_sound,
                         expected_complete, expected_required,
                         frozenset({expected_root}), expected_failure,
-                        expected_scopes[local])):
+                        dependency_keys(expected_scopes[local]))):
                 return Judgment("MALFORMED", ("RETAINED_DESCRIPTOR_VALUE", local))
             expected_target_roots = frozenset().union(*(
                 _capability_target_roots(target, composition)
                 for target in expected_targets[local]))
-            expected_proper = frozenset({
+            expected_proper = dependency_keys(frozenset({
                 expected_service, expected_sound, expected_required,
                 expected_failure, expected_root,
                 *(tuple() if expected_complete is None else (expected_complete,)),
-            }) | expected_target_roots
-            expected_descriptor_closure = _reachable_closure(
+            })) | expected_target_roots
+            expected_descriptor_closure = dependency_reachability(
                 expected_proper, composition)
             if (descriptor.proper_semantic_dependencies != expected_proper
                     or descriptor.dependency_closure
@@ -3115,22 +3400,28 @@ def validate_model_descriptor(model: ModelContract, descriptor: CapabilityDescri
     target_roots = frozenset().union(*(
         _capability_target_roots(target, composition)
         for target in descriptor.supported_targets))
-    expected_dependencies = frozenset({
+    expected_dependencies = dependency_keys(frozenset({
         descriptor.service, descriptor.sound_fragment,
         descriptor.required_evidence, descriptor.failure_contract,
         *descriptor.required_trust_roots,
-    }) | target_roots
+    })) | target_roots
     if descriptor.complete_fragment is not None:
-        expected_dependencies |= frozenset({descriptor.complete_fragment})
+        expected_dependencies |= frozenset({
+            dependency_key(descriptor.complete_fragment)})
     if descriptor.proper_semantic_dependencies != expected_dependencies:
         return Judgment("MALFORMED", ("DESCRIPTOR_DEPENDENCY_PROJECTION",))
-    if descriptor.dependency_closure != _reachable_closure(expected_dependencies, composition):
+    try:
+        exact_closure = dependency_reachability(expected_dependencies, composition)
+    except (TypeError, ValueError):
+        return Judgment("MALFORMED", ("DESCRIPTOR_DANGLING_REFERENCE",))
+    if descriptor.dependency_closure != exact_closure:
         return Judgment("MALFORMED", ("DESCRIPTOR_DEPENDENCY_CLOSURE",))
     if any(item.kind is not RecordKind.TRUST_ROOT for item in descriptor.required_trust_roots):
         return Judgment("MALFORMED", ("DESCRIPTOR_TRUST_ROOT_KIND",))
-    if any(_resolve(composition, item) is None
+    trust_dependency_keys = dependency_keys(descriptor.required_trust_roots)
+    if any(_record_for_dependency(item, composition) is None
            for item in descriptor.dependency_closure
-           if item not in descriptor.required_trust_roots):
+           if item not in trust_dependency_keys):
         return Judgment("MALFORMED", ("DESCRIPTOR_DANGLING_REFERENCE",))
     if BindingTarget(model.target_binding) not in descriptor.supported_targets:
         return Judgment("MALFORMED", ("DESCRIPTOR_TARGET",))
@@ -3721,12 +4012,13 @@ def validate_pair(request_identity: RecordIdentity, composition: Composition) ->
         ContractRole.REQUIRED_EVIDENCE: (("ServiceAdmissionSubject", "PairFullEvalProof", "EvidenceSet"), frozenset({"ADMISSIBLE", "INADMISSIBLE"}), "pair_required_evidence"),
         ContractRole.SERVICE_FAILURE_BEHAVIOR: (("InterfaceFailure",), frozenset({"PairValidationResult.REASONING_ERROR"}), "pair_failure_projection"),
     }
-    expected_capability_proper = frozenset({
+    expected_capability_proper = dependency_keys(frozenset({
         capability.service, declaration_identity, capability.sound_fragment,
         capability.complete_fragment, capability.required_evidence,
         capability.failure_contract,
-    })
-    expected_capability_closure = _reachable_closure(expected_capability_proper, composition)
+    }))
+    expected_capability_closure = dependency_reachability(
+        expected_capability_proper, composition)
     if (service is None or service.value.abi_version != request.abi_version
             or service.value.plugin_key != capability.plugin_key
             or capability.service_role != "PAIR_VALIDATION"
@@ -3918,24 +4210,7 @@ def evaluate_observation_graph(request: GraphEvaluationRequest, composition: Com
         RecordKind.AUTHORITY_FACT,
         ExactKey("capknow.semantic", "confluence.authority.binding", "AFB(c,2)", Version((1,))),
     )
-    expected_contract_value = ConfluenceContract(
-        (
-            AttributedClause(
-                "coding.confluence.observation", source_one_id,
-                "REQUIRE(observations_equal(observe(s_c,F_c),O_c))"),
-            AttributedClause(
-                "coding.confluence.change", source_two_id,
-                "REQUIRE(dependency_metadata_changed(changes_between(P_c,F_c)))"),
-        ),
-        (
-            ClauseAdoption(
-                "coding.confluence.observation", authority_one_id,
-                "fixture_principal"),
-            ClauseAdoption(
-                "coding.confluence.change", authority_two_id,
-                "fixture_principal"),
-        ),
-    )
+    expected_contract_value = frozen_confluence_contract()
     expected_contract = OutcomeRecord(
         "CONTRACT_IDENTITY", expected_contract_value,
         frozenset({
@@ -3997,7 +4272,7 @@ def evaluate_observation_graph(request: GraphEvaluationRequest, composition: Com
                 expected_attestation_two, frozenset({evidence_two}))):
         raise ValueError("malformed confluence authority/adoption closure")
     expected_target = ReasoningTarget(
-        "CONSISTENCY", (ContractSubject(subject.contract_identity),),
+        "CONSISTENCY", (ContractSubject(frozen_confluence_contract()),),
         request.semantic_environment)
     if (rr.abi_version.components != (0,) or rr.judgment != "CONSISTENCY"
             or rr.semantic_environment != request.semantic_environment
@@ -4144,16 +4419,17 @@ def evaluate_observation_graph(request: GraphEvaluationRequest, composition: Com
         record.value.dependency_closure
         for identity in request.nodes
         if (record := _resolve(composition, identity, SemanticBinding)) is not None))
-    descriptor_expected = frozenset({
+    descriptor_expected = dependency_keys(frozenset({
         capability.value.service,
         capability.value.sound_fragment,
         capability.value.required_evidence,
         capability.value.failure_contract,
         *capability.value.required_trust_roots,
-    }) | _capability_target_roots(expected_target, composition)
-    if (capability.value.dependency_scope != exact_lower_scope
+    })) | _capability_target_roots(expected_target, composition)
+    if (capability.value.dependency_scope != dependency_keys(exact_lower_scope)
             or capability.value.proper_semantic_dependencies != descriptor_expected
-            or capability.value.dependency_closure != _reachable_closure(descriptor_expected, composition)
+            or capability.value.dependency_closure != dependency_reachability(
+                descriptor_expected, composition)
             or required_evidence is None
             or required_evidence.value != ContractSpec(
                 required_evidence.identity.key, Layer.SERVICE, ContractRole.REQUIRED_EVIDENCE,
@@ -4187,7 +4463,7 @@ def evaluate_observation_graph(request: GraphEvaluationRequest, composition: Com
             or root.value.permitted_certificate_kinds != frozenset({"CONTRADICTION_PROOF"})
             or root.value.permitted_targets != frozenset({ServiceUseTrustTarget(
                 rr.capability_key, "CONSISTENCY", EnvironmentUse(
-                    "CONSISTENCY", (ContractSubject(subject.contract_identity),)),
+                    "CONSISTENCY", (ContractSubject(frozen_confluence_contract()),)),
                 request.semantic_environment)})
             or root.value.adoption != "V0_EXTERNAL_TRUST_PREMISE"):
         raise ValueError("confluence trust not admitted")

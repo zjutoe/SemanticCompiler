@@ -52,33 +52,12 @@ def _asserted_syntax_keys(kind: str) -> frozenset[ref.K1SyntaxKey]:
 
 
 def _asserted_reasoning_roots(
-    target: ref.ReasoningTarget,
-) -> frozenset[ref.RecordIdentity]:
-    if all(isinstance(item, ref.ContractSubject)
-           and item.contract_identity.key.local == "C_b"
-           for item in target.subjects):
-        syntax = _asserted_syntax_keys("bounds")
-    elif all(isinstance(item, ref.ContractSubject)
-             and item.contract_identity.key.local == "C_c"
-             for item in target.subjects):
-        syntax = _asserted_syntax_keys("confluence")
-    elif target.subjects in {(
-            ref.FormulaSubject(ref.LexicalFormula.TASK_ACCEPTS_FINAL,
-                               "scope_lex"),), (
-            ref.FormulaSubject(ref.LexicalFormula.TASK_ACCEPTS_FINAL,
-                               "scope_lex"),
-            ref.FormulaSubject(ref.LexicalFormula.EMPTY_ALL, "scope_lex"))}:
-        syntax = _asserted_syntax_keys("lexical")
-    else:
-        raise AssertionError(f"unexpected exact reasoning subjects: {target.subjects!r}")
-    record_kinds = {
-        ref.K1SyntaxTag.PLUGIN: ref.RecordKind.PACKAGE,
-        ref.K1SyntaxTag.DECLARATION: ref.RecordKind.DECLARATION,
-        ref.K1SyntaxTag.SYMBOL: ref.RecordKind.SYMBOL,
-    }
-    return frozenset({target.semantic_environment}) | frozenset(
-        ref.RecordIdentity(record_kinds[item.tag], item.exact_key)
-        for item in syntax)
+    target: ref.ReasoningTarget, kind: str,
+) -> frozenset[ref.DependencyKey]:
+    syntax = _asserted_syntax_keys(kind)
+    return frozenset({_asserted_dependency_key(
+        target.semantic_environment)}) | frozenset(
+            _asserted_lift(item) for item in syntax)
 
 
 def _asserted_dependency_key(identity: ref.RecordIdentity) -> ref.DependencyKey:
@@ -87,7 +66,12 @@ def _asserted_dependency_key(identity: ref.RecordIdentity) -> ref.DependencyKey:
         ref.RecordKind.TYPE_DECLARATION: ref.DependencyTag.DECLARATION,
         ref.RecordKind.DECLARATION: ref.DependencyTag.DECLARATION,
         ref.RecordKind.BINDING: ref.DependencyTag.BINDING,
+        ref.RecordKind.PROFILE_BINDING: ref.DependencyTag.PROFILE_BINDING,
+        ref.RecordKind.PAIR_DECLARATION: ref.DependencyTag.PAIR_DECLARATION,
         ref.RecordKind.CONTRACT_SPEC: ref.DependencyTag.CONTRACT_SPEC,
+        ref.RecordKind.SERVICE: ref.DependencyTag.SERVICE,
+        ref.RecordKind.TRUST_ROOT: ref.DependencyTag.TRUST_ROOT,
+        ref.RecordKind.SEMANTIC_ENVIRONMENT: ref.DependencyTag.CARRIER,
         ref.RecordKind.SEMANTIC_ENVIRONMENT: ref.DependencyTag.CARRIER,
     }
     tag = tags.get(identity.kind, ref.DependencyTag.CARRIER)
@@ -550,27 +534,32 @@ class K3XReferenceTests(unittest.TestCase):
             "CAP(confluence)": ("REASONING", "PARTIAL_SYMBOLIC_REASONING", frozenset({"CONSISTENCY"}), "CSOUND", None, "CREQ", "CFAIL"),
             "LEX_CAP": ("REASONING", "PARTIAL_SYMBOLIC_REASONING", frozenset({"FORMULA_ENTAILMENT"}), "LEX_SOUND", None, "LEX_REQ", "LEX_FAIL"),
         })
-        def asserted_target_roots(target: object) -> frozenset[ref.RecordIdentity]:
+        def asserted_target_roots(
+            target: object, reasoning_kind: str = "",
+        ) -> frozenset[ref.DependencyKey]:
             if isinstance(target, ref.BindingTarget):
-                return frozenset({target.binding})
+                return frozenset({_asserted_dependency_key(target.binding)})
             if isinstance(target, ref.ProfileTarget):
                 return frozenset(
-                    item.identity for item in package.profile_bindings
+                    _asserted_dependency_key(item.identity)
+                    for item in package.profile_bindings
                     if item.value.profile_key == target.profile_key)
             if isinstance(target, ref.ReasoningTarget):
-                return _asserted_reasoning_roots(target)
+                return _asserted_reasoning_roots(target, reasoning_kind)
             self.fail(f"unexpected typed capability target: {target!r}")
         for descriptor_record in package.services:
+            descriptor_local = descriptor_record.identity.key.local
             with self.subTest(exact_descriptor=descriptor_record.identity.key.local):
                 self.assertTrue(descriptor_record.value.supported_targets)
                 self.assertTrue(descriptor_record.value.dependency_scope)
                 self.assertTrue(descriptor_record.value.required_trust_roots)
                 self.assertTrue(
-                    descriptor_record.value.required_trust_roots
+                    frozenset(_asserted_dependency_key(item) for item in
+                              descriptor_record.value.required_trust_roots)
                     <= descriptor_record.value.proper_semantic_dependencies)
                 self.assertEqual(
                     descriptor_record.value.proper_semantic_dependencies,
-                    frozenset({
+                    frozenset(_asserted_dependency_key(item) for item in {
                         descriptor_record.value.service,
                         descriptor_record.value.sound_fragment,
                         descriptor_record.value.required_evidence,
@@ -580,6 +569,13 @@ class K3XReferenceTests(unittest.TestCase):
                           else (descriptor_record.value.complete_fragment,)),
                     }) | frozenset().union(*(
                         asserted_target_roots(target)
+                        if descriptor_local not in {
+                            "CAP(bounds)", "CAP(confluence)", "LEX_CAP"}
+                        else asserted_target_roots(target, {
+                            "CAP(bounds)": "bounds",
+                            "CAP(confluence)": "confluence",
+                            "LEX_CAP": "lexical",
+                        }[descriptor_local])
                         for target in descriptor_record.value.supported_targets)))
         descriptors = {
             item.identity.key.local: item.value for item in package.services}
@@ -611,9 +607,13 @@ class K3XReferenceTests(unittest.TestCase):
             frozenset({ref.ProfileTarget(fx.key(
                 "PK(implementation_evidence)", namespace="coding.profile"))}))
         asserted_reasoning_targets = {
-            "CAP(bounds)": ("CONSISTENCY", ("C_b",), "E_b"),
-            "CAP(confluence)": ("CONSISTENCY", ("C_c",), "E_c"),
-            "LEX_CAP": ("FORMULA_ENTAILMENT", ("f_lex", "g_lex"), "E_lex"),
+            "CAP(bounds)": ("CONSISTENCY", (
+                ref.ContractSubject(ref.frozen_bounds_contract()),), "E_b"),
+            "CAP(confluence)": ("CONSISTENCY", (
+                ref.ContractSubject(ref.frozen_confluence_contract()),), "E_c"),
+            "LEX_CAP": ("FORMULA_ENTAILMENT", (ref.FormulaSubject(
+                frozenset(ref.frozen_lexical_formulas()),
+                ref.frozen_lexical_scope()),), "E_lex"),
         }
         for local, (judgment, subjects, environment) in asserted_reasoning_targets.items():
             self.assertEqual(len(descriptors[local].supported_targets), 1)
@@ -621,13 +621,68 @@ class K3XReferenceTests(unittest.TestCase):
             self.assertIsInstance(target, ref.ReasoningTarget)
             self.assertEqual(target.judgment, judgment)
             self.assertEqual(target.semantic_environment.key.local, environment)
-            self.assertEqual(tuple(
-                subject.contract_identity.key.local
-                if isinstance(subject, ref.ContractSubject)
-                else subject.formula.value
-                if isinstance(subject, ref.FormulaSubject)
-                else self.fail("bare reasoning subject")
-                for subject in target.subjects), subjects)
+            self.assertEqual(target.subjects, subjects)
+            self.assertTrue(all(
+                isinstance(root, ref.DependencyKey)
+                and ref._record_for_dependency(root, composition) is not None
+                for root in _asserted_reasoning_roots(target, {
+                    "CAP(bounds)": "bounds",
+                    "CAP(confluence)": "confluence",
+                    "LEX_CAP": "lexical",
+                }[local])))
+        bounds_target = next(iter(descriptors["CAP(bounds)"].supported_targets))
+        assert isinstance(bounds_target, ref.ReasoningTarget)
+        bounds_subject = bounds_target.subjects[0]
+        assert isinstance(bounds_subject, ref.ContractSubject)
+        clause = bounds_subject.contract.attributed_clauses[0]
+        formula = next(iter(clause.requirement.members))
+        assert formula.symbol is not None
+        foreign_formula = replace(
+            formula, symbol=replace(formula.symbol, owner="foreign.owner"))
+        foreign_contract = replace(
+            bounds_subject.contract,
+            attributed_clauses=(replace(
+                clause, requirement=replace(
+                    clause.requirement,
+                    members=(clause.requirement.members - {formula})
+                    | {foreign_formula})),))
+        self.assertNotEqual(
+            ref.required_subject(bounds_subject),
+            ref.required_subject(ref.ContractSubject(foreign_contract)))
+        lexical_subject = next(iter(
+            descriptors["LEX_CAP"].supported_targets)).subjects[0]
+        assert isinstance(lexical_subject, ref.FormulaSubject)
+        foreign_scope_subject = replace(
+            lexical_subject,
+            lexical_scope=replace(
+                lexical_subject.lexical_scope,
+                judgment_or_binder_kind="PREDICATE_EVALUATION"))
+        self.assertNotEqual(lexical_subject, foreign_scope_subject)
+        for descriptor_local, changed_target in (
+            ("CAP(bounds)", replace(
+                bounds_target,
+                subjects=(ref.ContractSubject(foreign_contract),))),
+            ("LEX_CAP", replace(
+                next(iter(descriptors["LEX_CAP"].supported_targets)),
+                subjects=(foreign_scope_subject,))),
+        ):
+            descriptor_record = next(
+                item for item in package.services
+                if item.identity.key.local == descriptor_local)
+            changed_descriptor = replace(
+                descriptor_record,
+                value=replace(
+                    descriptor_record.value,
+                    supported_targets=frozenset({changed_target})))
+            self.assertIsInstance(ref.replay(_rewrite(
+                construction.universe,
+                {descriptor_record.identity: changed_descriptor})),
+                ref.CompositionReplay)
+        unresolved = ref.DependencyKey(
+            ref.DependencyTag.SYMBOL,
+            replace(formula.symbol, owner="foreign.owner"))
+        with self.assertRaises(ValueError):
+            ref.dependency_reachability(frozenset({unresolved}), composition)
         with self.assertRaises(TypeError):
             ref.ReasoningTarget(
                 "FORMULA_ENTAILMENT", ("f_lex", "g_lex"),  # type: ignore[arg-type]
@@ -636,7 +691,12 @@ class K3XReferenceTests(unittest.TestCase):
         lexical_target = next(iter(descriptors["LEX_CAP"].supported_targets))
         assert isinstance(lexical_target, ref.ReasoningTarget)
         omitted_subject = replace(
-            lexical_target, subjects=lexical_target.subjects[:1])
+            lexical_target, subjects=(replace(
+                lexical_target.subjects[0], formulas=frozenset({
+                    ref.frozen_lexical_formulas()[0]}),
+                lexical_scope=ref.LexicalScopeIdentity(
+                    "FORMULA_ENTAILMENT",
+                    (ref.frozen_lexical_formulas()[0],))),))
         lexical_descriptor_record = next(
             item for item in package.services
             if item.identity.key.local == "LEX_CAP")
@@ -698,9 +758,11 @@ class K3XReferenceTests(unittest.TestCase):
             for item in composition.records
             if item.identity.kind is ref.RecordKind.BINDING
             and hasattr(item.value, "dependency_closure")}
-        def combined_scope(*locals_: str) -> frozenset[ref.RecordIdentity]:
-            return frozenset().union(*(binding_closures[local]
-                                       for local in locals_))
+        def combined_scope(*locals_: str) -> frozenset[ref.DependencyKey]:
+            return frozenset().union(*(
+                frozenset(_asserted_dependency_key(root)
+                          for root in binding_closures[local])
+                for local in locals_))
         self.assertEqual(
             {local: descriptor.dependency_scope
              for local, descriptor in descriptors.items()},
@@ -711,7 +773,9 @@ class K3XReferenceTests(unittest.TestCase):
                     "BINDING(DF(observe))"),
                 "CAP(predicates)": combined_scope(
                     *sorted(asserted_binding_targets["CAP(predicates)"])),
-                "CAP(profile)": profile_record.value.dependency_closure,
+                "CAP(profile)": frozenset(
+                    _asserted_dependency_key(root)
+                    for root in profile_record.value.dependency_closure),
                 "CAP(bounds)": combined_scope(
                     "BINDING(DF(snapshot_of))",
                     "BINDING(DP(task_accepts))",
