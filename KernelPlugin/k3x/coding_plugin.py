@@ -1,6 +1,6 @@
 """Closed, pure coding semantics for the accepted finite K3-S slice."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, is_dataclass
 from enum import Enum
 from typing import Any, Callable, Iterable
 
@@ -803,6 +803,13 @@ class TaskSpec:
     criteria: frozenset[Criterion] = frozenset()
     required_verifications: frozenset[VerificationSpec] = frozenset()
 
+    def __post_init__(self) -> None:
+        if (type(self.criteria) is not frozenset
+                or any(type(item) not in _CRITERION_TYPES for item in self.criteria)
+                or type(self.required_verifications) is not frozenset
+                or any(type(item) is not VerificationSpec for item in self.required_verifications)):
+            raise ValueError("TaskSpec contains only admitted criteria and verification specs")
+
 
 @dataclass(frozen=True)
 class ImplementationCoverageSubject:
@@ -961,6 +968,63 @@ class TraceEvent:
     def __post_init__(self) -> None:
         if not self.actor:
             raise ValueError("trace actor is nonempty")
+
+
+_CRITERION_TYPES = (
+    ObservationEquals, OneFormatOf, ArtifactsNonempty, ArtifactSizeLt,
+    ArtifactSizeAtLeast, UniversalObservation, DependencyReproducible,
+    AdapterCorresponds,
+)
+
+_ADMISSION_TYPES: dict[str, type[Any] | tuple[type[Any], ...]] = {
+    "PathSegment": PathSegment, "Path": Path, "PathSet": frozenset,
+    "ArtifactRole": ArtifactRole, "Format": Format, "ByteSize": ByteSize,
+    "ContentIdentity": ContentIdentity, "FieldId": FieldId,
+    "FieldValue": FieldValue, "SubjectId": SubjectId,
+    "BehaviorValue": BehaviorValue, "ArtifactBodyKind": ArtifactBodyKind,
+    "ArtifactContent": ArtifactContent, "RepositorySnapshot": RepositorySnapshot,
+    "SnapshotIdentity": RepositorySnapshot, "ArtifactSelector": ArtifactSelector,
+    "ArtifactProjection": ArtifactProjection, "Coverage": Coverage,
+    "ObservationSpec": ObservationSpec, "ObservationValue": ObservationValue,
+    "ObservationResult": ObservationResult, "ObservationRelation": ObservationRelation,
+    "VerificationSpec": VerificationSpec, "VerificationStatus": VerificationStatus,
+    "Criterion": _CRITERION_TYPES, "TaskSpec": TaskSpec,
+    "ChangeKind": ChangeKind, "CommandId": str, "ContactClass": str,
+    "ReleaseId": str, "EventPattern": EventPattern,
+}
+
+
+def admission_type(type_name: str) -> type[Any] | tuple[type[Any], ...]:
+    """Resolve one frozen K3-S type-table row for its embedded relation."""
+    admitted = _ADMISSION_TYPES.get(type_name)
+    if admitted is None:
+        raise FiniteCodingProfileError(f"unsupported type-admission row: {type_name}")
+    return admitted
+
+
+def admitted_closed_value(expected_type: type[Any] | tuple[type[Any], ...], value: Any) -> bool:
+    """Evaluate exact constructor and nested-field membership, including int/bool separation."""
+    expected_types = expected_type if isinstance(expected_type, tuple) else (expected_type,)
+    return type(value) in expected_types and _admitted_payload(value)
+
+
+def _admitted_payload(value: Any) -> bool:
+    if value is None or type(value) in {bool, int}:
+        return True
+    if type(value) is str:
+        return bool(value)
+    if isinstance(value, Enum):
+        return type(value)(value.value) is value
+    if type(value) in {tuple, frozenset}:
+        return all(_admitted_payload(item) for item in value)
+    if is_dataclass(value):
+        try:
+            payload = {field.name: getattr(value, field.name) for field in fields(value)}
+            return (all(_admitted_payload(item) for item in payload.values())
+                    and type(value)(**payload) == value)
+        except (AttributeError, TypeError, ValueError):
+            return False
+    return False
 
 
 def snapshot_identity(snapshot: RepositorySnapshot) -> RepositorySnapshot:

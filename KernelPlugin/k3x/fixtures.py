@@ -5,6 +5,7 @@ from enum import Enum
 from typing import Any
 
 from .coding_plugin import (
+    admission_type,
     ArtifactContent,
     ArtifactProjection,
     ArtifactRole,
@@ -86,30 +87,37 @@ from .reference import (
     ModelContract,
     ModelCapabilitySummary,
     NamedCarrier,
-    NodeOperation,
+    ConfluenceSubject,
+    EnvironmentUse,
+    ReasoningTarget,
+    ReasoningUnknown,
+    ReasoningResultValue,
     ObservationEnvironment,
     ObservationEvaluation,
     ObservationKind,
-    ObservationNode,
     ObservationQuery,
     OccurrenceSemanticContractBundle,
     PairBinding,
     PairDeclaration,
     PairReplay,
     PairReplayRequest,
-    PairRequestData,
+    PairAdmissionRequest,
     PairTarget,
     PairUse,
     ServiceUseTrustTarget,
     PairTrustTarget,
     PairCoherenceAdmission,
-    CertificateAdmissionRecord,
-    PairValidationCarrier,
+    CertificateAdmission,
     EvolutionTarget,
     EvolutionTrustTarget,
+    MigrationAdmissionSubject,
+    CompatibilityAdmissionSubject,
+    SemanticExtensionAdmissionSubject,
     EvolutionAdmissionRequest,
     EvolutionProof,
-    EvolutionAdmissionConclusion,
+    MigrationRelationAdmitted,
+    CompatibilityClaimAdmitted,
+    SemanticExtensionAdmitted,
     EvolutionAdmissionResult,
     PairFullEvalProof,
     CertificateEnvelope,
@@ -139,6 +147,7 @@ from .reference import (
     TrustRootJudgment,
     TrustState,
     TypeDeclaration,
+    TypeAdmissionRelation,
     Universe,
     Version,
 )
@@ -385,11 +394,11 @@ def core_construction(
     task_admission = LogicalRecord(task_admission_id, ContractSpec(
         task_admission_id.key, Layer.DELTA, ContractRole.TYPE_ADMISSION,
         ("TaskSpec",), frozenset({"ADMITTED", "NOT_ADMITTED"}), (), frozenset(),
-        "admit_task_spec", frozenset({"TASK"})))
+        "admit_task_spec", TypeAdmissionRelation(admission_type("TaskSpec"))))
     snapshot_admission = LogicalRecord(snapshot_admission_id, ContractSpec(
         snapshot_admission_id.key, Layer.DELTA, ContractRole.TYPE_ADMISSION,
         ("RepositorySnapshot",), frozenset({"ADMITTED", "NOT_ADMITTED"}), (), frozenset(),
-        "admit_repository_snapshot", frozenset({"REPOSITORY_SNAPSHOT"})))
+        "admit_repository_snapshot", TypeAdmissionRelation(admission_type("RepositorySnapshot"))))
     task_type = LogicalRecord(
         task_type_id,
         TypeDeclaration(task_type_id.key, task_admission.value, frozenset({task_admission_id})),
@@ -1020,6 +1029,7 @@ def pair_construction() -> PairConstruction:
         "B_alt(refresh_occurred)",
         namespace="coding.binding",
     )
+    occurrence_binding_id = RecordIdentity(RecordKind.BINDING, right_decl_id.key)
     left = LogicalRecord(
         left_id,
         SemanticBinding(
@@ -1064,12 +1074,12 @@ def pair_construction() -> PairConstruction:
         )
     )
 
-    validator_owner = "capknow.audit.pair-capability"
+    validator_owner = "capknow.audit.pair-validator"
     validator_service_id = rid(
         RecordKind.SERVICE,
-        "PVSK",
+        "refresh",
         owner=validator_owner,
-        namespace="pair.service",
+        namespace="coding.validation",
     )
     validator_service = LogicalRecord(
         validator_service_id,
@@ -1149,7 +1159,7 @@ def pair_construction() -> PairConstruction:
             Layer.SERVICE,
             ContractRole.SERVICE_FAILURE_BEHAVIOR,
             ("InterfaceFailure",),
-            frozenset({"PAIR_VALIDATION_ERROR"}),
+            frozenset({"PairValidationResult.REASONING_ERROR"}),
             (),
             frozenset(),
             "pair_failure_projection",
@@ -1157,10 +1167,24 @@ def pair_construction() -> PairConstruction:
     )
     validation_capability_id = rid(
         RecordKind.CAPABILITY,
-        "PVC",
+        "refresh_full_eval",
         owner=validator_owner,
-        namespace="pair.capability",
+        namespace="coding.validation.capability",
     )
+    pair_dependency_scope = frozenset({
+        pair_id, left_id, right_id,
+        left_decl_id, right_decl_id, pair_event_id,
+        left_spec_id, right_spec_id, pair_evidence_id, pair_access_id,
+        pair_unknown_id, pair_error_id,
+        rid(RecordKind.MODEL_CONTRACT, "MODEL_refresh_occurred_pair", namespace="pair.model"),
+    })
+    capability_proper = frozenset({
+        validator_service_id, pair_id, psound_id, pcomplete_id,
+        pevidence_id, pfailure_id,
+    })
+    capability_closure = capability_proper | frozenset({
+        left_decl_id, right_decl_id, pair_event_id,
+    })
     validation_capability = LogicalRecord(
         validation_capability_id,
         CapabilityDescriptor(
@@ -1174,9 +1198,9 @@ def pair_construction() -> PairConstruction:
             frozenset({PairTarget(pair_id)}),
             psound_id,
             pcomplete_id,
-            frozenset({left_id, right_id}),
-            frozenset({validator_service_id, pair_id, psound_id, pcomplete_id, pevidence_id, pfailure_id}),
-            frozenset({validator_service_id, pair_id, psound_id, pcomplete_id, pevidence_id, pfailure_id}),
+            pair_dependency_scope,
+            capability_proper,
+            capability_closure,
             pevidence_id,
             frozenset({rid(RecordKind.TRUST_ROOT, "TRP", namespace="pair.trust")}),
             pfailure_id,
@@ -1217,7 +1241,7 @@ def pair_construction() -> PairConstruction:
             validation_capability.value.complete_fragment,
             validation_capability.value.dependency_scope)})))
     right_model = LogicalRecord(right_model_id, ModelContract(
-        right_model_id.key, right_id, V1, right_decl.value.symbol_key,
+        right_model_id.key, occurrence_binding_id, V1, right_decl.value.symbol_key,
         right_decl.value.argument_types, right_decl.value.result_kind,
         right_decl.value.facet_positions, pair_evidence_id, pair_unknown_id,
         pair_error_id, right_spec_id, frozenset({ModelCapabilitySummary(
@@ -1236,7 +1260,7 @@ def pair_construction() -> PairConstruction:
         PairBinding(
             pair_id.key,
             left_id,
-            right_id,
+            occurrence_binding_id,
             right_model_id,
             right_id,
             certificate_id,
@@ -1324,11 +1348,9 @@ def pair_construction() -> PairConstruction:
     request_id = rid(RecordKind.REQUEST, "R_p", namespace="pair.request")
     conclusion = PairCoherenceAdmission(pair_id, certificate_id)
     request = LogicalRecord(
-        request_id, PairRequestData(
-            ABI0, pair_binding_id, semantic_environment_id, trust_id,
-            dependency_environment_id, PairTarget(pair_id), validation_capability_id,
-            CertificateAdmissionRecord(certificate_id, conclusion),
-            PairValidationCarrier(pair_id, certificate_id))
+        request_id, PairAdmissionRequest(
+            ABI0, pair_id, semantic_environment_id, trust_id,
+            dependency_environment_id, PairTarget(pair_id), validation_capability_id)
     )
     envelope = LogicalRecord(
         certificate_id,
@@ -1341,6 +1363,15 @@ def pair_construction() -> PairConstruction:
         ),
     )
     proof_package = _package("pair-proof", proof_owner, certificates=(envelope,))
+    admission = record(
+        RecordKind.OUTCOME, "PADMIT", CertificateAdmission(certificate_id, conclusion),
+        namespace="pair.admission",
+    )
+    validation_result = record(
+        RecordKind.RESULT, "PRESULT",
+        PairValidationResult(pair_id.key, certificate_id.key, conclusion),
+        namespace="pair.result",
+    )
     producers = (
         record(
             RecordKind.PRODUCER,
@@ -1424,6 +1455,8 @@ def pair_construction() -> PairConstruction:
         trust,
         request,
         envelope,
+        admission,
+        validation_result,
         *producers,
     )
     manifest = frozenset(
@@ -1459,6 +1492,8 @@ def pair_construction() -> PairConstruction:
             trust,
             request,
             envelope,
+            admission,
+            validation_result,
             *producers,
         )
     )
@@ -2033,12 +2068,38 @@ def _literal_missing_rows() -> tuple[LiteralMissingRow, ...]:
     evolution_envelopes: list[LogicalRecord] = []
     evolution_admissions: list[LogicalRecord] = []
     evolution_results: list[LogicalRecord] = []
+    evolution_producers: list[LogicalRecord] = []
     evolution_targets: list[EvolutionTarget] = []
     evolution_trust_targets: list[EvolutionTrustTarget] = []
     for row_name, candidate, certificate_identity, validator_identity, judgment_name, certificate_kind, relation_identity in evolution_rows:
         candidate_identity = candidate.identity
-        target = EvolutionTarget(judgment_name, candidate_identity, environment.identity)
-        trust_target = EvolutionTrustTarget(judgment_name, candidate_identity)
+        if isinstance(candidate.value, MigrationDeclaration):
+            subject = MigrationAdmissionSubject(
+                candidate.value.migration_key, candidate.value.source_environment,
+                candidate.value.target_environment, candidate.value.semantic_relation,
+                candidate.value.relation_contract, candidate.identity.key.owner,
+            )
+            conclusion = MigrationRelationAdmitted(candidate.identity.key, certificate_identity)
+            service_role = "MIGRATION_VALIDATION"
+        elif isinstance(candidate.value, CompatibilityClaim):
+            subject = CompatibilityAdmissionSubject(
+                candidate.value.claim_key, candidate.value.source_abi,
+                candidate.value.target_abi, candidate.value.source_keys,
+                candidate.value.target_keys, candidate.value.compatibility_contract,
+                candidate.identity.key.owner,
+            )
+            conclusion = CompatibilityClaimAdmitted(candidate.identity.key, certificate_identity)
+            service_role = "COMPATIBILITY_VALIDATION"
+        else:
+            subject = SemanticExtensionAdmissionSubject(
+                candidate.value.extension_key, candidate.value.target_record_identity,
+                candidate.value.owner_layer, candidate.value.semantic_effect,
+                candidate.value.payload, candidate.identity.key.owner,
+            )
+            conclusion = SemanticExtensionAdmitted(candidate.identity.key, certificate_identity)
+            service_role = "SEMANTIC_EXTENSION_VALIDATION"
+        target = EvolutionTarget(judgment_name, subject, environment.identity)
+        trust_target = EvolutionTrustTarget(judgment_name, subject)
         evolution_targets.append(target)
         evolution_trust_targets.append(trust_target)
         service_id = rid(RecordKind.SERVICE, f"EVSK_{row_name}", owner="capknow.audit.evolution-validator", namespace="evolution.service")
@@ -2058,22 +2119,24 @@ def _literal_missing_rows() -> tuple[LiteralMissingRow, ...]:
         row_specs = (
             LogicalRecord(spec_ids[ContractRole.SOUND_FRAGMENT], ContractSpec(
                 spec_ids[ContractRole.SOUND_FRAGMENT].key, Layer.SERVICE, ContractRole.SOUND_FRAGMENT,
-                ("EvolutionAdmissionSubject",), frozenset({"IN_FRAGMENT", "OUTSIDE_FRAGMENT"}), (), frozenset(), f"evolution_sound_{row_name}")),
+                ("EvolutionAdmissionSubject",), frozenset({"IN_FRAGMENT", "OUTSIDE_FRAGMENT"}), (), frozenset(), "evolution_sound_fragment")),
             LogicalRecord(spec_ids[ContractRole.COMPLETE_FRAGMENT], ContractSpec(
                 spec_ids[ContractRole.COMPLETE_FRAGMENT].key, Layer.SERVICE, ContractRole.COMPLETE_FRAGMENT,
-                ("EvolutionAdmissionSubject",), frozenset({"IN_FRAGMENT", "OUTSIDE_FRAGMENT"}), (), frozenset(), f"evolution_complete_{row_name}")),
+                ("EvolutionAdmissionSubject",), frozenset({"IN_FRAGMENT", "OUTSIDE_FRAGMENT"}), (), frozenset(), "evolution_complete_fragment")),
             LogicalRecord(spec_ids[ContractRole.REQUIRED_EVIDENCE], ContractSpec(
                 spec_ids[ContractRole.REQUIRED_EVIDENCE].key, Layer.SERVICE, ContractRole.REQUIRED_EVIDENCE,
-                ("EvolutionAdmissionSubject", "EvolutionProof", "EvidenceSet"), frozenset({"ADMISSIBLE", "INADMISSIBLE"}), (), frozenset(), f"evolution_evidence_{row_name}")),
+                ("EvolutionAdmissionSubject", "EvolutionProof", "EvidenceSet"), frozenset({"ADMISSIBLE", "INADMISSIBLE"}), (), frozenset(), "evolution_required_evidence")),
             LogicalRecord(spec_ids[ContractRole.SERVICE_FAILURE_BEHAVIOR], ContractSpec(
                 spec_ids[ContractRole.SERVICE_FAILURE_BEHAVIOR].key, Layer.SERVICE, ContractRole.SERVICE_FAILURE_BEHAVIOR,
-                ("InterfaceFailure",), frozenset({"REASONING_ERROR"}), (), frozenset(), f"evolution_failure_{row_name}")),
+                ("InterfaceFailure",), frozenset({"REASONING_ERROR"}), (), frozenset(), "evolution_failure_projection")),
         )
         dependency_id = rid(RecordKind.DEPENDENCY_ENVIRONMENT, f"D_ev_{row_name}", namespace="evolution.environment")
         if isinstance(candidate.value, MigrationDeclaration):
-            proper = frozenset({candidate_identity, relation_identity})
+            proper = frozenset({candidate_identity, candidate.value.source_environment,
+                                candidate.value.target_environment, relation_identity})
         elif isinstance(candidate.value, CompatibilityClaim):
-            proper = frozenset({candidate_identity, relation_identity, migration_id})
+            proper = frozenset({candidate_identity, relation_identity,
+                                *candidate.value.source_keys, *candidate.value.target_keys})
         else:
             proper = frozenset({candidate_identity, candidate.value.target_record_identity,
                                 candidate.value.semantic_effect, candidate.value.payload})
@@ -2086,11 +2149,7 @@ def _literal_missing_rows() -> tuple[LiteralMissingRow, ...]:
         evolution_capability = LogicalRecord(validator_identity, CapabilityDescriptor(
             validator_identity.key, service_id, ABI0,
             key("evolution-validator", "capknow.audit.evolution-validator", "plugin"),
-            {
-                "MIGRATION_RELATION_ADMISSION": "MIGRATION_VALIDATION",
-                "COMPATIBILITY_CLAIM_ADMISSION": "COMPATIBILITY_VALIDATION",
-                "SEMANTIC_EXTENSION_ADMISSION": "SEMANTIC_EXTENSION_VALIDATION",
-            }[judgment_name],
+            service_role,
             "COMPLETE_FOR_DECLARED_FRAGMENT", frozenset({judgment_name}),
             frozenset({target}), spec_ids[ContractRole.SOUND_FRAGMENT],
             spec_ids[ContractRole.COMPLETE_FRAGMENT], proper, descriptor_proper,
@@ -2104,14 +2163,13 @@ def _literal_missing_rows() -> tuple[LiteralMissingRow, ...]:
         ))
         proof_id = rid(RecordKind.EVIDENCE, f"EVOLUTION_PROOF_{row_name}", owner="capknow.audit.evolution-proof", namespace="evolution.proof")
         evidence_id = rid(RecordKind.EVIDENCE, f"ER_{row_name}", owner="capknow.audit.evolution-proof", namespace="evolution.evidence")
-        proof = LogicalRecord(proof_id, EvolutionProof(row_name, candidate_identity, trust_target))
+        proof = LogicalRecord(proof_id, EvolutionProof(subject, candidate_identity, trust_target))
         evidence_item = LogicalRecord(evidence_id, EvidenceRecord(
             "capknow.audit.evolution-proof", "coding.evolution", row_name,
             spec_ids[ContractRole.REQUIRED_EVIDENCE],
         ))
-        conclusion = EvolutionAdmissionConclusion(judgment_name.replace("_ADMISSION", "_ADMITTED"), candidate_identity.key, certificate_identity)
         envelope = LogicalRecord(certificate_identity, CertificateEnvelope(
-            certificate_identity.key, certificate_kind, request_id, (candidate_identity,),
+            certificate_identity.key, certificate_kind, request_id, (subject,),
             environment.identity, validator_identity, spec_ids[ContractRole.SOUND_FRAGMENT],
             dependency_id, conclusion, validator_identity, evolution_root_id,
             "SYMBOLIC", proof_id, frozenset({evidence_id}),
@@ -2126,8 +2184,25 @@ def _literal_missing_rows() -> tuple[LiteralMissingRow, ...]:
         evolution_proofs.append(proof)
         evolution_evidence.append(evidence_item)
         evolution_envelopes.append(envelope)
-        evolution_admissions.append(LogicalRecord(admission_id, CertificateAdmissionRecord(certificate_identity, conclusion)))
+        evolution_admissions.append(LogicalRecord(admission_id, CertificateAdmission(certificate_identity, conclusion)))
         evolution_results.append(LogicalRecord(result_id, EvolutionAdmissionResult(conclusion)))
+        for index, producer_name in enumerate((evo_owner, "capknow.semantic", "abi0")):
+            evolution_producers.append(record(
+                RecordKind.PRODUCER, f"producer.evolution.subject.{row_name}.{index}",
+                ProducerRecord(candidate_identity, producer_name, "EVOLUTION_SUBJECT_PRODUCER"),
+                namespace="evolution.producer",
+            ))
+        evolution_producers.extend((
+            record(RecordKind.PRODUCER, f"producer.evolution.certificate.{row_name}",
+                   ProducerRecord(certificate_identity, "capknow.audit.evolution-proof", "CERTIFICATE_OWNER"),
+                   namespace="evolution.producer"),
+            record(RecordKind.PRODUCER, f"producer.evolution.validator.{row_name}",
+                   ProducerRecord(validator_identity, "capknow.audit.evolution-validator", "VALIDATOR_OWNER"),
+                   namespace="evolution.producer"),
+            record(RecordKind.PRODUCER, f"producer.evolution.service.{row_name}",
+                   ProducerRecord(service_id, "capknow.audit.evolution-validator", "SERVICE_OWNER"),
+                   namespace="evolution.producer"),
+        ))
     evolution_root = LogicalRecord(evolution_root_id, TrustRootRecord(
         evolution_root_id.key, "embedding-policy",
         frozenset(item.identity for item in evolution_capabilities),
@@ -2138,6 +2213,11 @@ def _literal_missing_rows() -> tuple[LiteralMissingRow, ...]:
     evolution_trust = LogicalRecord(evolution_trust_id, TrustEnvironment(
         evolution_policy_id, "embedding-policy",
         ((evolution_root_id, TrustRootJudgment(TrustState.ADMITTED, evolution_root.value)),),
+    ))
+    evolution_producers.append(record(
+        RecordKind.PRODUCER, "producer.evolution.root",
+        ProducerRecord(evolution_root_id, "embedding-policy", "TRUST_ROOT_OWNER"),
+        namespace="evolution.producer",
     ))
     evolution_validator_package = _package(
         "evolution-validator", "capknow.audit.evolution-validator",
@@ -2154,6 +2234,7 @@ def _literal_missing_rows() -> tuple[LiteralMissingRow, ...]:
         *evolution_services, *evolution_specs, *evolution_dependencies,
         *evolution_requests, *evolution_proofs, *evolution_evidence,
         *evolution_admissions, *evolution_results,
+        *evolution_producers,
     )
     evo_package = _package(
         "evolution-owner",
@@ -3745,12 +3826,6 @@ def confluence_construction(order: OrderTag) -> ConfluenceConstruction:
         selector,
         ArtifactProjection(ProjectionTag.CONTENT),
     )
-    node_one_id = rid(
-        RecordKind.OBSERVATION_NODE, "N_o", namespace="confluence"
-    )
-    node_two_id = rid(
-        RecordKind.OBSERVATION_NODE, "N_d", namespace="confluence"
-    )
     spec_one_id = rid(
         RecordKind.CONTRACT_SPEC,
         "CS(CONFLUENCE,observe)",
@@ -3796,18 +3871,6 @@ def confluence_construction(order: OrderTag) -> ConfluenceConstruction:
         LogicalRecord(conf_access_id, ContractSpec(conf_access_id.key, Layer.SIGMA, ContractRole.ACCESS_BOUNDARY, ("RepositorySnapshot",), frozenset({"ADMITTED", "INADMISSIBLE"}), (), frozenset(), "confluence_access")),
         LogicalRecord(conf_unknown_id, ContractSpec(conf_unknown_id.key, Layer.SIGMA, ContractRole.UNKNOWN_BEHAVIOR, ("UnknownReasonSet",), frozenset({"TermResult"}), (), frozenset(), "confluence_unknown")),
         LogicalRecord(conf_error_id, ContractSpec(conf_error_id.key, Layer.SIGMA, ContractRole.EVALUATION_ERROR_BEHAVIOR, ("FailureReasonSet",), frozenset({"TermResult"}), (), frozenset(), "confluence_error")),
-    )
-    node_one = LogicalRecord(
-        node_one_id,
-        ObservationNode(
-            NodeOperation.OBSERVE, (observed_spec, new), spec_one_id
-        ),
-    )
-    node_two = LogicalRecord(
-        node_two_id,
-        ObservationNode(
-            NodeOperation.CHANGES_BETWEEN, (old, new), spec_two_id
-        ),
     )
     observe_declaration_id = rid(
         RecordKind.DECLARATION, "DF(observe)", namespace="confluence.declaration"
@@ -3871,6 +3934,8 @@ def confluence_construction(order: OrderTag) -> ConfluenceConstruction:
         ),
         namespace="confluence.binding",
     )
+    node_one_id = binding_one.identity
+    node_two_id = binding_two.identity
     semantic_id = rid(RecordKind.SEMANTIC_ENVIRONMENT, "E_c", namespace="confluence.environment")
     confluence_service_id = rid(RecordKind.SERVICE, "SK(confluence)", namespace="coding.service")
     confluence_capability_id = rid(RecordKind.CAPABILITY, "CAP(confluence)", namespace="coding.capability")
@@ -3897,13 +3962,15 @@ def confluence_construction(order: OrderTag) -> ConfluenceConstruction:
         confluence_service_id.key, ABI0, key("coding-minimal", namespace="plugin")))
     confluence_proper = binding_one.value.proper_semantic_dependencies | binding_two.value.proper_semantic_dependencies
     confluence_closure = binding_one.value.dependency_closure | binding_two.value.dependency_closure
-    descriptor_proper = frozenset({confluence_service_id, semantic_id, csound_id, creq_id, cfail_id})
-    descriptor_closure = descriptor_proper | frozenset({node_one_id, node_two_id})
+    descriptor_proper = frozenset({confluence_service_id, csound_id, creq_id, cfail_id})
+    descriptor_closure = descriptor_proper | confluence_closure | frozenset({
+        node_one_id, node_two_id,
+    })
     confluence_capability = LogicalRecord(confluence_capability_id, CapabilityDescriptor(
         confluence_capability_id.key, confluence_service_id, ABI0,
         key("coding-minimal", namespace="plugin"), "REASONING",
         "PARTIAL_SYMBOLIC_REASONING", frozenset({"CONSISTENCY"}),
-        frozenset({semantic_id}), csound_id, None,
+        frozenset({ReasoningTarget("CONSISTENCY", (ConfluenceSubject(observed_spec, old, new),), semantic_id)}), csound_id, None,
         confluence_closure,
         descriptor_proper,
         descriptor_closure,
@@ -3915,7 +3982,6 @@ def confluence_construction(order: OrderTag) -> ConfluenceConstruction:
         bindings=(binding_one, binding_two),
         specs=(spec_one, spec_two),
         services=(confluence_capability,),
-        others=(node_one, node_two),
     )
 
     policy_id = rid(
@@ -3935,7 +4001,11 @@ def confluence_construction(order: OrderTag) -> ConfluenceConstruction:
             "embedding-policy",
             frozenset({capability_target}),
             frozenset({"CONTRADICTION_PROOF"}),
-            frozenset({semantic_id, confluence_service_id}),
+            frozenset({ServiceUseTrustTarget(
+                confluence_capability_id, "CONSISTENCY",
+                EnvironmentUse("CONSISTENCY", (ConfluenceSubject(observed_spec, old, new),)),
+                semantic_id,
+            )}),
             "V0_EXTERNAL_TRUST_PREMISE",
         ),
     )
@@ -3990,9 +4060,32 @@ def confluence_construction(order: OrderTag) -> ConfluenceConstruction:
     request_record = LogicalRecord(
         request_id,
         ReasoningRequest(
-            ABI0, "CONSISTENCY", ("C_c",), semantic_id, trust_id,
-            csound_id, dependency_id, semantic_id, confluence_capability_id,
+            ABI0, "CONSISTENCY", (ConfluenceSubject(observed_spec, old, new),), semantic_id, trust_id,
+            csound_id, dependency_id,
+            ReasoningTarget("CONSISTENCY", (ConfluenceSubject(observed_spec, old, new),), semantic_id),
+            confluence_capability_id,
         ),
+    )
+    confluence_producers = tuple(
+        record(
+            RecordKind.PRODUCER, f"producer.confluence.subject.{index}",
+            ProducerRecord(request_id, producer, "REASONING_SUBJECT_PRODUCER"),
+            namespace="confluence.producer",
+        )
+        for index, producer in enumerate((
+            "capknow.semantic", "capknow.authority", "capknow.attestation",
+            "capknow.validation", "embedding-authority-policy", "abi0",
+        ))
+    ) + (
+        record(RecordKind.PRODUCER, "producer.confluence.capability",
+               ProducerRecord(confluence_capability_id, "capknow.semantic", "CAPABILITY_OWNER"),
+               namespace="confluence.producer"),
+        record(RecordKind.PRODUCER, "producer.confluence.service",
+               ProducerRecord(confluence_service_id, "capknow.semantic", "SERVICE_OWNER"),
+               namespace="confluence.producer"),
+        record(RecordKind.PRODUCER, "producer.confluence.root",
+               ProducerRecord(root_id, "embedding-policy", "TRUST_ROOT_OWNER"),
+               namespace="confluence.producer"),
     )
     observation = ObservationResult(
         ObservationResultTag.ARTIFACT,
@@ -4027,7 +4120,13 @@ def confluence_construction(order: OrderTag) -> ConfluenceConstruction:
     result_record = record(
         RecordKind.RESULT,
         "Y_c",
-        ResultRecord(request_id, "ReasoningResult", "COMPLETED_INCONCLUSIVE"),
+        ResultRecord(request_id, "ReasoningResult", ReasoningResultValue(
+            "COMPLETED_INCONCLUSIVE",
+            frozenset({ReasoningUnknown(
+                "capknow.semantic", "coding.confluence", "fixture_inconclusive",
+                (request_id, observation_environment.identity),
+            )}),
+        )),
         namespace="confluence.result",
     )
     lifecycle_record = record(
@@ -4075,8 +4174,6 @@ def confluence_construction(order: OrderTag) -> ConfluenceConstruction:
         creq,
         cfail,
         confluence_service,
-        node_one,
-        node_two,
         policy,
         root,
         trust,
@@ -4087,6 +4184,7 @@ def confluence_construction(order: OrderTag) -> ConfluenceConstruction:
         result_record,
         lifecycle_record,
         status_record,
+        *confluence_producers,
     )
     manifest = frozenset(
         (
@@ -4104,8 +4202,6 @@ def confluence_construction(order: OrderTag) -> ConfluenceConstruction:
             cfail,
             confluence_service,
             confluence_capability,
-            node_one,
-            node_two,
             policy,
             root,
             trust,
@@ -4116,13 +4212,16 @@ def confluence_construction(order: OrderTag) -> ConfluenceConstruction:
             result_record,
             lifecycle_record,
             status_record,
+            *confluence_producers,
         )
     )
     return ConfluenceConstruction(
         Universe(
             top_level,
             GraphEvaluationRequest(
-                (node_one_id, node_two_id), preferred, request_id, trust_id,
+                (node_one_id, node_two_id), preferred,
+                ((node_one_id, (observed_spec, new)), (node_two_id, (old, new))),
+                request_id, trust_id,
                 semantic_id, dependency_id, observation_environment.identity,
                 result_record.identity, lifecycle_record.identity,
                 status_record.identity,
@@ -4134,7 +4233,7 @@ def confluence_construction(order: OrderTag) -> ConfluenceConstruction:
     )
 
 
-def cycle_universe() -> Universe:
+def cycle_universe(cyclic: bool = True) -> Universe:
     cycle_type_dependencies = {
         "PathSegment": (),
         "Path": ("PathSegment",),
@@ -4174,7 +4273,7 @@ def cycle_universe() -> Universe:
             admission_identity.key, Layer.DELTA, ContractRole.TYPE_ADMISSION,
             (type_name,), frozenset({"ADMITTED", "NOT_ADMITTED"}),
             tuple(ObservationQuery(item, ObservationKind.TYPE_ADMISSION_FACT, ("nested_value",)) for item in sorted(nested)),
-            nested, f"admit_{type_name}", frozenset({type_name.upper()}),
+            nested, f"admit_{type_name}", TypeAdmissionRelation(admission_type(type_name)),
         ))
         cycle_admissions[type_name] = admission
         cycle_types[type_name] = LogicalRecord(
@@ -4220,9 +4319,9 @@ def cycle_universe() -> Universe:
             ContractRole.PREDICATE_MEANING,
             ("EventPattern", "EventValue"),
             frozenset({"Eval"}),
-            (first_query,),
-            frozenset({second_id}),
-            "event_matches_cycle",
+            (first_query,) if cyclic else (),
+            frozenset({second_id}) if cyclic else frozenset(),
+            "event_matches_cycle" if cyclic else "event_matches",
         ),
     )
     second_spec = LogicalRecord(
@@ -4278,11 +4377,13 @@ def cycle_universe() -> Universe:
         LogicalRecord(cycle_unknown_id, ContractSpec(cycle_unknown_id.key, Layer.SIGMA, ContractRole.UNKNOWN_BEHAVIOR, ("UnknownReasonSet",), frozenset({"Eval"}), (), frozenset(), "cycle_unknown")),
         LogicalRecord(cycle_error_id, ContractSpec(cycle_error_id.key, Layer.SIGMA, ContractRole.EVALUATION_ERROR_BEHAVIOR, ("FailureReasonSet",), frozenset({"Eval"}), (), frozenset(), "cycle_error")),
     )
-    first_direct = frozenset({first_decl_id, first_spec_id, cycle_evidence_id, cycle_access_id, cycle_unknown_id, cycle_error_id, second_id})
+    first_direct = frozenset({first_decl_id, first_spec_id, cycle_evidence_id, cycle_access_id, cycle_unknown_id, cycle_error_id}) | (frozenset({second_id}) if cyclic else frozenset())
     second_direct = frozenset({second_decl_id, second_spec_id, cycle_evidence_id, cycle_access_id, cycle_unknown_id, cycle_error_id, first_id})
-    cycle_closure = first_direct | second_direct | frozenset({first_id, second_id}) | frozenset(
+    type_closure = frozenset(
         item.identity for item in (*cycle_types.values(), *cycle_admissions.values())
     )
+    first_closure = first_direct | type_closure | (second_direct | frozenset({first_id, second_id}) if cyclic else frozenset())
+    second_closure = second_direct | first_direct | type_closure | frozenset({first_id}) | (frozenset({second_id}) if cyclic else frozenset())
     first = LogicalRecord(
         first_id,
         SemanticBinding(
@@ -4290,7 +4391,7 @@ def cycle_universe() -> Universe:
             first_decl_id,
             "PREDICATE",
             first_spec_id,
-            (frozenset(), frozenset()), first_direct, cycle_closure,
+            (frozenset(), frozenset()), first_direct, first_closure,
             cycle_evidence_id, cycle_access_id, cycle_unknown_id, cycle_error_id,
             "SAME_SEMANTIC_INPUTS_SAME_COMPLETE_RESULT",
         ),
@@ -4302,13 +4403,13 @@ def cycle_universe() -> Universe:
             second_decl_id,
             "PREDICATE",
             second_spec_id,
-            (frozenset(), frozenset({"trace"})), second_direct, cycle_closure,
+            (frozenset(), frozenset({"trace"})), second_direct, second_closure,
             cycle_evidence_id, cycle_access_id, cycle_unknown_id, cycle_error_id,
             "SAME_SEMANTIC_INPUTS_SAME_COMPLETE_RESULT",
         ),
     )
     first_model_id = rid(RecordKind.MODEL_CONTRACT, "MODEL_event_matches_cycle", namespace="cycle.model")
-    second_model_id = rid(RecordKind.MODEL_CONTRACT, "MODEL_event_occurred_cycle", namespace="cycle.model")
+    second_model_id = rid(RecordKind.MODEL_CONTRACT, "MODEL_event_occurred", namespace="cycle.model")
     first_model = LogicalRecord(first_model_id, ModelContract(
         first_model_id.key, first_id, V1, first_decl.value.symbol_key,
         first_decl.value.argument_types, first_decl.value.result_kind,
@@ -4321,22 +4422,105 @@ def cycle_universe() -> Universe:
         second_decl.value.facet_positions, cycle_evidence_id, cycle_unknown_id,
         cycle_error_id, second_spec_id, frozenset(),
     ))
+    snapshot_decl_id = rid(RecordKind.DECLARATION, "DF(snapshot_of)", namespace="cycle")
+    changes_decl_id = rid(RecordKind.DECLARATION, "DF(changes_between)", namespace="cycle")
+    observe_decl_id = rid(RecordKind.DECLARATION, "DF(observe)", namespace="cycle")
+    snapshot_decl = LogicalRecord(snapshot_decl_id, DeclarationShape(
+        snapshot_decl_id.key, key("SF(snapshot_of)", namespace="cycle.symbol"),
+        "FUNCTION", (key("State", namespace="carrier.type"),), "TERM_RESULT",
+        (frozenset({"pre", "final"}),), frozenset(),
+    ))
+    changes_decl = LogicalRecord(changes_decl_id, DeclarationShape(
+        changes_decl_id.key, key("SF(changes_between)", namespace="cycle.symbol"),
+        "FUNCTION", (cycle_types["RepositorySnapshot"].identity.key,) * 2,
+        "TERM_RESULT", (frozenset({"pre"}), frozenset({"final"})),
+        frozenset({cycle_types["RepositorySnapshot"].identity}),
+    ))
+    observe_decl = LogicalRecord(observe_decl_id, DeclarationShape(
+        observe_decl_id.key, key("SF(observe)", namespace="cycle.symbol"),
+        "FUNCTION", (cycle_types["ObservationSpec"].identity.key,
+                     cycle_types["RepositorySnapshot"].identity.key),
+        "TERM_RESULT", (frozenset(), frozenset({"pre", "final"})),
+        frozenset({cycle_types["ObservationSpec"].identity,
+                   cycle_types["RepositorySnapshot"].identity}),
+    ))
+    snapshot_spec_id = rid(RecordKind.CONTRACT_SPEC, "CS(FUNCTION_MEANING,snapshot_of)", namespace="cycle.contract")
+    changes_spec_id = rid(RecordKind.CONTRACT_SPEC, "CS(FUNCTION_MEANING,changes_between)", namespace="cycle.contract")
+    observe_spec_id = rid(RecordKind.CONTRACT_SPEC, "CS(FUNCTION_MEANING,observe)", namespace="cycle.contract")
+    snapshot_spec = LogicalRecord(snapshot_spec_id, ContractSpec(
+        snapshot_spec_id.key, Layer.SIGMA, ContractRole.FUNCTION_MEANING,
+        ("State",), frozenset({"TermResult"}),
+        (ObservationQuery(cycle_admissions["RepositorySnapshot"].identity,
+                          ObservationKind.TYPE_ADMISSION_FACT, ("state",)),),
+        frozenset({cycle_admissions["RepositorySnapshot"].identity}), "snapshot_of",
+    ))
+    changes_spec = LogicalRecord(changes_spec_id, ContractSpec(
+        changes_spec_id.key, Layer.SIGMA, ContractRole.FUNCTION_MEANING,
+        ("RepositorySnapshot", "RepositorySnapshot"), frozenset({"TermResult"}),
+        (), frozenset(), "changes_between",
+    ))
+    observe_spec = LogicalRecord(observe_spec_id, ContractSpec(
+        observe_spec_id.key, Layer.SIGMA, ContractRole.FUNCTION_MEANING,
+        ("ObservationSpec", "RepositorySnapshot"), frozenset({"TermResult"}),
+        (), frozenset(), "observe",
+    ))
+    snapshot_access_id = rid(RecordKind.CONTRACT_SPEC, "CS(ACCESS_BOUNDARY,state_only)", namespace="cycle.contract")
+    changes_access_id = rid(RecordKind.CONTRACT_SPEC, "CS(ACCESS_BOUNDARY,snapshot_pair)", namespace="cycle.contract")
+    observe_access_id = rid(RecordKind.CONTRACT_SPEC, "CS(ACCESS_BOUNDARY,observe)", namespace="cycle.contract")
+    function_access_specs = (
+        LogicalRecord(snapshot_access_id, ContractSpec(snapshot_access_id.key, Layer.SIGMA, ContractRole.ACCESS_BOUNDARY, ("State",), frozenset({"ADMITTED", "INADMISSIBLE"}), (), frozenset(), "state_only")),
+        LogicalRecord(changes_access_id, ContractSpec(changes_access_id.key, Layer.SIGMA, ContractRole.ACCESS_BOUNDARY, ("RepositorySnapshot", "RepositorySnapshot"), frozenset({"ADMITTED", "INADMISSIBLE"}), (), frozenset(), "snapshot_pair")),
+        LogicalRecord(observe_access_id, ContractSpec(observe_access_id.key, Layer.SIGMA, ContractRole.ACCESS_BOUNDARY, ("ObservationSpec", "RepositorySnapshot"), frozenset({"ADMITTED", "INADMISSIBLE"}), (), frozenset(), "observe")),
+    )
+    snapshot_id = rid(RecordKind.BINDING, "BINDING(DF(snapshot_of))", namespace="cycle.binding")
+    changes_id = rid(RecordKind.BINDING, "BINDING(DF(changes_between))", namespace="cycle.binding")
+    observe_id = rid(RecordKind.BINDING, "BINDING(DF(observe))", namespace="cycle.binding")
+    function_rows = (
+        (snapshot_id, snapshot_decl, snapshot_spec, snapshot_access_id),
+        (changes_id, changes_decl, changes_spec, changes_access_id),
+        (observe_id, observe_decl, observe_spec, observe_access_id),
+    )
+    function_bindings: list[LogicalRecord] = []
+    function_models: list[LogicalRecord] = []
+    for binding_id, declaration_record, spec_record, access_identity in function_rows:
+        direct = frozenset({declaration_record.identity, spec_record.identity,
+                            cycle_evidence_id, access_identity, cycle_unknown_id,
+                            cycle_error_id})
+        closure = direct | declaration_record.value.proper_type_dependencies | spec_record.value.support
+        binding_record = LogicalRecord(binding_id, SemanticBinding(
+            binding_id.key, declaration_record.identity, "FUNCTION", spec_record.identity,
+            declaration_record.value.facet_positions, direct, closure,
+            cycle_evidence_id, access_identity, cycle_unknown_id, cycle_error_id,
+            "SAME_SEMANTIC_INPUTS_SAME_COMPLETE_RESULT",
+        ))
+        model_id = rid(RecordKind.MODEL_CONTRACT,
+                       f"MODEL_{binding_id.key.local[11:-2]}_cycle", namespace="cycle.model")
+        function_bindings.append(binding_record)
+        function_models.append(LogicalRecord(model_id, ModelContract(
+            model_id.key, binding_id, V1, declaration_record.value.symbol_key,
+            declaration_record.value.argument_types, declaration_record.value.result_kind,
+            declaration_record.value.facet_positions, cycle_evidence_id,
+            cycle_unknown_id, cycle_error_id, spec_record.identity, frozenset(),
+        )))
     package = _package(
         "coding-minimal",
         "capknow.semantic",
-        declarations=(*cycle_types.values(), first_decl, second_decl),
-        bindings=(first, second),
-        models=(first_model, second_model),
-        specs=(first_spec, second_spec),
+        declarations=(*cycle_types.values(), first_decl, second_decl,
+                      snapshot_decl, changes_decl, observe_decl),
+        bindings=(first, second, *function_bindings),
+        models=(first_model, second_model, *function_models),
+        specs=(first_spec, second_spec, snapshot_spec, changes_spec, observe_spec,
+               *function_access_specs),
     )
     environment = record(
         RecordKind.SEMANTIC_ENVIRONMENT,
         "E_PROPER_CYCLE",
         SemanticEnvironment(
             ABI0,
-            (*tuple(item.identity for item in cycle_types.values()), first_decl_id, second_decl_id),
+            (*tuple(item.identity for item in cycle_types.values()), first_decl_id, second_decl_id,
+             snapshot_decl_id, changes_decl_id, observe_decl_id),
             (),
-            (first_id, second_id),
+            (first_id, second_id, snapshot_id, changes_id, observe_id),
             mechanically_extracted_dependencies=frozenset(
                 {first_id, second_id}
             ),
@@ -4352,7 +4536,8 @@ def cycle_universe() -> Universe:
     )
     return Universe(
         (abi, package, *cycle_admissions.values(), first_spec, second_spec,
-         *cycle_aux, first_model, second_model, environment),
+         snapshot_spec, changes_spec, observe_spec, *function_access_specs,
+         *cycle_aux, first_model, second_model, *function_models, environment),
         FormationRequest((first_id, second_id))
     )
 
@@ -4411,7 +4596,7 @@ def _literal_permutation_records() -> tuple[
                 (),
                 frozenset(),
                 f"admit_UNIT_{name}",
-                frozenset({f"UNIT_{name}"}),
+                TypeAdmissionRelation(str),
             ),
         )
         declaration = LogicalRecord(
@@ -4599,7 +4784,7 @@ def _literal_duplicate_context() -> tuple[
                     ),
                     nested,
                     f"admit_{name}",
-                    frozenset({name.upper()}),
+                    TypeAdmissionRelation(admission_type(name)),
                 ),
             )
         )
@@ -4782,7 +4967,7 @@ _EI_008_BINDING_DF_changes_between: IdentityLiteral = ('BINDING_RECORD', 'capkno
 _EI_009_BINDING_DF_observe: IdentityLiteral = ('BINDING_RECORD', 'capknow.semantic', 'confluence.binding', 'BINDING(DF(observe))', (1,))
 _EI_010_BINDING_DP_event_matches: IdentityLiteral = ('BINDING_RECORD', 'capknow.semantic', 'cycle.binding', 'BINDING(DP(event_matches))', (1,))
 _EI_011_BINDING_DP_event_occurred: IdentityLiteral = ('BINDING_RECORD', 'capknow.semantic', 'cycle.binding', 'BINDING(DP(event_occurred))', (1,))
-_EI_012_PVC: IdentityLiteral = ('CAPABILITY_RECORD', 'capknow.audit.pair-capability', 'pair.capability', 'PVC', (1,))
+_EI_012_PVC: IdentityLiteral = ('CAPABILITY_RECORD', 'capknow.audit.pair-validator', 'coding.validation.capability', 'refresh_full_eval', (1,))
 _EI_013_CAP_confluence: IdentityLiteral = ('CAPABILITY_RECORD', 'capknow.semantic', 'coding.capability', 'CAP(confluence)', (1,))
 _EI_014_CAP_predicates: IdentityLiteral = ('CAPABILITY_RECORD', 'capknow.semantic', 'coding.capability', 'CAP(predicates)', (1,))
 _EI_015_PCERT: IdentityLiteral = ('CERTIFICATE_RECORD', 'capknow.audit.pair-proof', 'pair.certificate', 'PCERT', (1,))
@@ -4790,10 +4975,10 @@ _EI_016_cb0: IdentityLiteral = ('CHOICE_BINDING_RECORD', 'capknow.semantic', 'au
 _EI_017_CCK0: IdentityLiteral = ('COMPATIBILITY_RECORD', 'capknow.fixture.evolution-owner', 'evolution', 'CCK0', (1,))
 _EI_018_conflict0: IdentityLiteral = ('CONFLICT_RECORD', 'capknow.semantic', 'conflict', 'conflict0', (1,))
 _EI_019_conflict1: IdentityLiteral = ('CONFLICT_RECORD', 'capknow.semantic', 'conflict', 'conflict1', (1,))
-_EI_020_PCOMPLETE: IdentityLiteral = ('CONTRACT_SPEC_RECORD', 'capknow.audit.pair-capability', 'pair.contract', 'PCOMPLETE', (1,))
-_EI_021_PEVIDENCE: IdentityLiteral = ('CONTRACT_SPEC_RECORD', 'capknow.audit.pair-capability', 'pair.contract', 'PEVIDENCE', (1,))
-_EI_022_PFAILURE: IdentityLiteral = ('CONTRACT_SPEC_RECORD', 'capknow.audit.pair-capability', 'pair.contract', 'PFAILURE', (1,))
-_EI_023_PSOUND: IdentityLiteral = ('CONTRACT_SPEC_RECORD', 'capknow.audit.pair-capability', 'pair.contract', 'PSOUND', (1,))
+_EI_020_PCOMPLETE: IdentityLiteral = ('CONTRACT_SPEC_RECORD', 'capknow.audit.pair-validator', 'pair.contract', 'PCOMPLETE', (1,))
+_EI_021_PEVIDENCE: IdentityLiteral = ('CONTRACT_SPEC_RECORD', 'capknow.audit.pair-validator', 'pair.contract', 'PEVIDENCE', (1,))
+_EI_022_PFAILURE: IdentityLiteral = ('CONTRACT_SPEC_RECORD', 'capknow.audit.pair-validator', 'pair.contract', 'PFAILURE', (1,))
+_EI_023_PSOUND: IdentityLiteral = ('CONTRACT_SPEC_RECORD', 'capknow.audit.pair-validator', 'pair.contract', 'PSOUND', (1,))
 _EI_024_A_fixture_unit_one: IdentityLiteral = ('CONTRACT_SPEC_RECORD', 'capknow.fixture.permutation-one', 'coding.fixture.type-admission', 'A(fixture_unit_one)', (1,))
 _EI_025_A_fixture_unit_two: IdentityLiteral = ('CONTRACT_SPEC_RECORD', 'capknow.fixture.permutation-one', 'coding.fixture.type-admission', 'A(fixture_unit_two)', (1,))
 _EI_026_A_fixture_unit_four: IdentityLiteral = ('CONTRACT_SPEC_RECORD', 'capknow.fixture.permutation-two', 'coding.fixture.type-admission', 'A(fixture_unit_four)', (1,))
@@ -4882,13 +5067,11 @@ _EI_108_MODEL_refresh_occurred_pair: IdentityLiteral = ('MODEL_CONTRACT_RECORD',
 _EI_109_MODEL_refresh_scope_pair: IdentityLiteral = ('MODEL_CONTRACT_RECORD', 'capknow.semantic', 'pair.model', 'MODEL_refresh_scope_pair', (1,))
 _EI_110_M_c: IdentityLiteral = ('OBSERVATION_ENVIRONMENT_RECORD', 'capknow.semantic', 'confluence.result', 'M_c', (1,))
 _EI_111_M_c_missing: IdentityLiteral = ('OBSERVATION_ENVIRONMENT_RECORD', 'capknow.semantic', 'confluence.result', 'M_c_missing', (1,))
-_EI_112_N_d: IdentityLiteral = ('OBSERVATION_NODE_RECORD', 'capknow.semantic', 'confluence', 'N_d', (1,))
-_EI_113_N_o: IdentityLiteral = ('OBSERVATION_NODE_RECORD', 'capknow.semantic', 'confluence', 'N_o', (1,))
 _EI_114_K_c: IdentityLiteral = ('OUTCOME_RECORD', 'capknow.semantic', 'confluence.result', 'K_c', (1,))
 _EI_115_t_t_evidence_subject: IdentityLiteral = ('OUTCOME_RECORD', 'capknow.semantic', 'evidence', 't_t_evidence_subject', (1,))
 _EI_116_O_w: IdentityLiteral = ('OUTCOME_RECORD', 'capknow.semantic', 'outcome', 'O_w', (1,))
 _EI_117_VALUE_UNKNOWN: IdentityLiteral = ('OUTCOME_RECORD', 'capknow.semantic', 'reason', 'VALUE(UNKNOWN)', (1,))
-_EI_118_pair_validator: IdentityLiteral = ('PACKAGE_RECORD', 'capknow.audit.pair-capability', 'plugin', 'pair-validator', (1,))
+_EI_118_pair_validator: IdentityLiteral = ('PACKAGE_RECORD', 'capknow.audit.pair-validator', 'plugin', 'pair-validator', (1,))
 _EI_119_pair_proof: IdentityLiteral = ('PACKAGE_RECORD', 'capknow.audit.pair-proof', 'plugin', 'pair-proof', (1,))
 _EI_120_evolution_owner: IdentityLiteral = ('PACKAGE_RECORD', 'capknow.fixture.evolution-owner', 'plugin', 'evolution-owner', (1,))
 _EI_121_permutation_one: IdentityLiteral = ('PACKAGE_RECORD', 'capknow.fixture.permutation-one', 'plugin', 'permutation-one', (1,))
@@ -4927,7 +5110,7 @@ _EI_153_E_lex: IdentityLiteral = ('SEMANTIC_ENVIRONMENT_RECORD', 'capknow.semant
 _EI_154_E_p: IdentityLiteral = ('SEMANTIC_ENVIRONMENT_RECORD', 'capknow.semantic', 'pair.environment', 'E_p', (1,))
 _EI_155_XK0: IdentityLiteral = ('SEMANTIC_EXTENSION_RECORD', 'capknow.fixture.evolution-owner', 'evolution', 'XK0', (1,))
 _EI_156_XK1: IdentityLiteral = ('SEMANTIC_EXTENSION_RECORD', 'capknow.fixture.evolution-owner', 'evolution', 'XK1', (1,))
-_EI_157_PVSK: IdentityLiteral = ('SERVICE_RECORD', 'capknow.audit.pair-capability', 'pair.service', 'PVSK', (1,))
+_EI_157_PVSK: IdentityLiteral = ('SERVICE_RECORD', 'capknow.audit.pair-validator', 'coding.validation', 'refresh', (1,))
 _EI_158_SK_confluence: IdentityLiteral = ('SERVICE_RECORD', 'capknow.semantic', 'coding.service', 'SK(confluence)', (1,))
 _EI_159_SK_predicates: IdentityLiteral = ('SERVICE_RECORD', 'capknow.semantic', 'coding.service', 'SK(predicates)', (1,))
 _EI_160_SRC_choice_1: IdentityLiteral = ('SOURCE_RECORD', 'capknow.semantic', 'authority.source', 'SRC(choice,1)', (1,))
@@ -5002,10 +5185,10 @@ _EXPECTED_C_OBSERVATION = ObservationResult(
 _EXPECTED_CONFLUENCE_OUTCOME = (
     "OBSERVATION",
     (
-        (_EI_112_N_d, TermResult(value=ChangeSet(((_EXPECTED_C_PATH, ChangeEntry(
+        (_EI_008_BINDING_DF_changes_between, TermResult(value=ChangeSet(((_EXPECTED_C_PATH, ChangeEntry(
             ChangeKind.MODIFIED, _EXPECTED_C_OLD, _EXPECTED_C_NEW,
         )),)))),
-        (_EI_113_N_o, TermResult(value=_EXPECTED_C_OBSERVATION)),
+        (_EI_009_BINDING_DF_observe, TermResult(value=_EXPECTED_C_OBSERVATION)),
     ),
     ("COMPLETED_INCONCLUSIVE", ()),
     "COMPLETED",
@@ -5030,7 +5213,22 @@ _EXPECTED_CYCLE_ADDITIONS: tuple[IdentityLiteral, ...] = tuple(
     for name in _EXPECTED_CYCLE_TYPE_NAMES
 ) + (
     ("MODEL_CONTRACT_RECORD", "capknow.semantic", "cycle.model", "MODEL_event_matches_cycle", (1,)),
-    ("MODEL_CONTRACT_RECORD", "capknow.semantic", "cycle.model", "MODEL_event_occurred_cycle", (1,)),
+    ("MODEL_CONTRACT_RECORD", "capknow.semantic", "cycle.model", "MODEL_event_occurred", (1,)),
+    ("DECLARATION_RECORD", "capknow.semantic", "cycle", "DF(snapshot_of)", (1,)),
+    ("DECLARATION_RECORD", "capknow.semantic", "cycle", "DF(changes_between)", (1,)),
+    ("DECLARATION_RECORD", "capknow.semantic", "cycle", "DF(observe)", (1,)),
+    ("BINDING_RECORD", "capknow.semantic", "cycle.binding", "BINDING(DF(snapshot_of))", (1,)),
+    ("BINDING_RECORD", "capknow.semantic", "cycle.binding", "BINDING(DF(changes_between))", (1,)),
+    ("BINDING_RECORD", "capknow.semantic", "cycle.binding", "BINDING(DF(observe))", (1,)),
+    ("CONTRACT_SPEC_RECORD", "capknow.semantic", "cycle.contract", "CS(FUNCTION_MEANING,snapshot_of)", (1,)),
+    ("CONTRACT_SPEC_RECORD", "capknow.semantic", "cycle.contract", "CS(FUNCTION_MEANING,changes_between)", (1,)),
+    ("CONTRACT_SPEC_RECORD", "capknow.semantic", "cycle.contract", "CS(FUNCTION_MEANING,observe)", (1,)),
+    ("CONTRACT_SPEC_RECORD", "capknow.semantic", "cycle.contract", "CS(ACCESS_BOUNDARY,state_only)", (1,)),
+    ("CONTRACT_SPEC_RECORD", "capknow.semantic", "cycle.contract", "CS(ACCESS_BOUNDARY,snapshot_pair)", (1,)),
+    ("CONTRACT_SPEC_RECORD", "capknow.semantic", "cycle.contract", "CS(ACCESS_BOUNDARY,observe)", (1,)),
+    ("MODEL_CONTRACT_RECORD", "capknow.semantic", "cycle.model", "MODEL_snapshot_of_cycle", (1,)),
+    ("MODEL_CONTRACT_RECORD", "capknow.semantic", "cycle.model", "MODEL_changes_between_cycle", (1,)),
+    ("MODEL_CONTRACT_RECORD", "capknow.semantic", "cycle.model", "MODEL_observe_cycle", (1,)),
 )
 
 _EXPECTED_EVOLUTION_ROW_NAMES = ("m", "c", "x0", "x1")
@@ -5066,11 +5264,35 @@ _EXPECTED_EVOLUTION_ADDITIONS: tuple[IdentityLiteral, ...] = (
     ("CERTIFICATE_RECORD", "capknow.audit.evolution-proof", "evolution.certificate", "EC_c", (1,)),
     ("CERTIFICATE_RECORD", "capknow.audit.evolution-proof", "evolution.certificate", "EC_x0", (1,)),
     ("CERTIFICATE_RECORD", "capknow.audit.evolution-proof", "evolution.certificate", "EC_x1", (1,)),
+) + tuple(
+    identity
+    for name in _EXPECTED_EVOLUTION_ROW_NAMES
+    for identity in (
+        *(('PRODUCER_RECORD', 'capknow.semantic', 'evolution.producer', f'producer.evolution.subject.{name}.{index}', (1,)) for index in range(3)),
+        ('PRODUCER_RECORD', 'capknow.semantic', 'evolution.producer', f'producer.evolution.certificate.{name}', (1,)),
+        ('PRODUCER_RECORD', 'capknow.semantic', 'evolution.producer', f'producer.evolution.validator.{name}', (1,)),
+        ('PRODUCER_RECORD', 'capknow.semantic', 'evolution.producer', f'producer.evolution.service.{name}', (1,)),
+    )
+) + (
+    ('PRODUCER_RECORD', 'capknow.semantic', 'evolution.producer', 'producer.evolution.root', (1,)),
 )
 
 _EXPECTED_CONFLUENCE_DECLARATIONS: tuple[IdentityLiteral, ...] = (
     ("DECLARATION_RECORD", "capknow.semantic", "confluence.declaration", "DF(observe)", (1,)),
     ("DECLARATION_RECORD", "capknow.semantic", "confluence.declaration", "DF(changes_between)", (1,)),
+) + tuple(
+    ('PRODUCER_RECORD', 'capknow.semantic', 'confluence.producer',
+     f'producer.confluence.subject.{index}', (1,))
+    for index in range(6)
+) + (
+    ('PRODUCER_RECORD', 'capknow.semantic', 'confluence.producer', 'producer.confluence.capability', (1,)),
+    ('PRODUCER_RECORD', 'capknow.semantic', 'confluence.producer', 'producer.confluence.service', (1,)),
+    ('PRODUCER_RECORD', 'capknow.semantic', 'confluence.producer', 'producer.confluence.root', (1,)),
+)
+
+_EXPECTED_PAIR_REPAIR5_ADDITIONS: tuple[IdentityLiteral, ...] = (
+    ('OUTCOME_RECORD', 'capknow.semantic', 'pair.admission', 'PADMIT', (1,)),
+    ('RESULT_RECORD', 'capknow.semantic', 'pair.result', 'PRESULT', (1,)),
 )
 _EVOLUTION_MISSING_ROWS = frozenset({
     MissingRowId.MIGRATION, MissingRowId.COMPATIBILITY_CLAIM,
@@ -5535,12 +5757,12 @@ _EXPECTED_REPLAY_ASSERTIONS_LITERAL: dict[FixtureId, ReplayAssertion] = {
         ('LOOKUP', 'CONFLICT_REPLACED', (('CONFLICT_RECORD', 'capknow.semantic', 'conflict', 'conflict1', (1,)), 'MALFORMED')),
     ),
     FixtureId(FixtureFamily.CONFLUENCE_ORDER, (OrderTag.FORWARD,)): ReplayAssertion(
-        (_EI_000_ABI0, _EI_008_BINDING_DF_changes_between, _EI_009_BINDING_DF_observe, _EI_013_CAP_confluence, _EI_040_CFAIL, _EI_041_CREQ, _EI_042_CSOUND, _EI_073_CS_ACCESS_BOUNDARY_snapshot_pair, _EI_074_CS_CONFLUENCE_changes_between, _EI_075_CS_CONFLUENCE_observe, _EI_076_CS_EVALUATION_ERROR_BEHAVIOR_term, _EI_077_CS_EVIDENCE_SCHEMA_none, _EI_078_CS_UNKNOWN_BEHAVIOR_never, _EI_090_D_c, _EI_104_L_c_final, _EI_110_M_c, _EI_112_N_d, _EI_113_N_o, _EI_114_K_c, _EI_124_coding_minimal, _EI_136_R_c, _EI_145_Y_c, _EI_148_E_c, _EI_158_SK_confluence, _EI_162_T_c, _EI_169_TP, _EI_172_ROOT_TR_c),
+        (_EI_000_ABI0, _EI_008_BINDING_DF_changes_between, _EI_009_BINDING_DF_observe, _EI_013_CAP_confluence, _EI_040_CFAIL, _EI_041_CREQ, _EI_042_CSOUND, _EI_073_CS_ACCESS_BOUNDARY_snapshot_pair, _EI_074_CS_CONFLUENCE_changes_between, _EI_075_CS_CONFLUENCE_observe, _EI_076_CS_EVALUATION_ERROR_BEHAVIOR_term, _EI_077_CS_EVIDENCE_SCHEMA_none, _EI_078_CS_UNKNOWN_BEHAVIOR_never, _EI_090_D_c, _EI_104_L_c_final, _EI_110_M_c, _EI_114_K_c, _EI_124_coding_minimal, _EI_136_R_c, _EI_145_Y_c, _EI_148_E_c, _EI_158_SK_confluence, _EI_162_T_c, _EI_169_TP, _EI_172_ROOT_TR_c),
         (),
         _EXPECTED_CONFLUENCE_OUTCOME,
     ),
     FixtureId(FixtureFamily.CONFLUENCE_ORDER, (OrderTag.REVERSE,)): ReplayAssertion(
-        (_EI_000_ABI0, _EI_008_BINDING_DF_changes_between, _EI_009_BINDING_DF_observe, _EI_013_CAP_confluence, _EI_040_CFAIL, _EI_041_CREQ, _EI_042_CSOUND, _EI_073_CS_ACCESS_BOUNDARY_snapshot_pair, _EI_074_CS_CONFLUENCE_changes_between, _EI_075_CS_CONFLUENCE_observe, _EI_076_CS_EVALUATION_ERROR_BEHAVIOR_term, _EI_077_CS_EVIDENCE_SCHEMA_none, _EI_078_CS_UNKNOWN_BEHAVIOR_never, _EI_090_D_c, _EI_104_L_c_final, _EI_110_M_c, _EI_112_N_d, _EI_113_N_o, _EI_114_K_c, _EI_124_coding_minimal, _EI_136_R_c, _EI_145_Y_c, _EI_148_E_c, _EI_158_SK_confluence, _EI_162_T_c, _EI_169_TP, _EI_172_ROOT_TR_c),
+        (_EI_000_ABI0, _EI_008_BINDING_DF_changes_between, _EI_009_BINDING_DF_observe, _EI_013_CAP_confluence, _EI_040_CFAIL, _EI_041_CREQ, _EI_042_CSOUND, _EI_073_CS_ACCESS_BOUNDARY_snapshot_pair, _EI_074_CS_CONFLUENCE_changes_between, _EI_075_CS_CONFLUENCE_observe, _EI_076_CS_EVALUATION_ERROR_BEHAVIOR_term, _EI_077_CS_EVIDENCE_SCHEMA_none, _EI_078_CS_UNKNOWN_BEHAVIOR_never, _EI_090_D_c, _EI_104_L_c_final, _EI_110_M_c, _EI_114_K_c, _EI_124_coding_minimal, _EI_136_R_c, _EI_145_Y_c, _EI_148_E_c, _EI_158_SK_confluence, _EI_162_T_c, _EI_169_TP, _EI_172_ROOT_TR_c),
         (),
         _EXPECTED_CONFLUENCE_OUTCOME,
     ),
@@ -5611,6 +5833,11 @@ def _build_expected_assertions() -> dict[FixtureId, ReplayAssertion]:
                    else ())
                 + (_EXPECTED_CONFLUENCE_DECLARATIONS
                    if identifier.family is FixtureFamily.CONFLUENCE_ORDER
+                   else ())
+                + (_EXPECTED_PAIR_REPAIR5_ADDITIONS
+                   if identifier.family is FixtureFamily.PAIR_INDEPENDENT
+                   or (identifier.family in {FixtureFamily.MISSING_BASE, FixtureFamily.MISSING_VARIANT}
+                       and identifier.parameters[0] in pair_missing_rows)
                    else ())
             )),
             assertion.conflicts,
