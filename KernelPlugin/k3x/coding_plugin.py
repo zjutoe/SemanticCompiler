@@ -1,6 +1,6 @@
 """Closed, pure coding semantics for the accepted finite K3-S slice."""
 
-from dataclasses import dataclass, fields, is_dataclass
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable, Iterable
 
@@ -208,6 +208,14 @@ class PatternKind(Enum):
     REFRESHES = "REFRESHES"
 
 
+class PairTraceDomain(Enum):
+    ALL_ADMITTED_TRACES = "ALL_ADMITTED_TRACES"
+
+
+class PairComparedFields(Enum):
+    COMPLETE_EVAL_RECORD = "COMPLETE_EVAL_RECORD"
+
+
 VERIFICATION_SCHEMA = "CS(EVIDENCE_SCHEMA,verification)"
 IMPLEMENTATION_PROFILE_SCHEMA = "CS(EVIDENCE_SCHEMA,implementation_profile)"
 
@@ -226,7 +234,7 @@ class Path:
     segments: tuple[PathSegment, ...]
 
     def __post_init__(self) -> None:
-        if not self.segments or any(not isinstance(item, PathSegment) for item in self.segments):
+        if type(self.segments) is not tuple or not self.segments or any(type(item) is not PathSegment for item in self.segments):
             raise ValueError("Path is nonempty")
 
 
@@ -246,6 +254,33 @@ class ContentIdentity:
     def __post_init__(self) -> None:
         if type(self.atom) is not str or not self.atom:
             raise ValueError("ContentIdentity atom is nonempty")
+
+
+@dataclass(frozen=True, order=True)
+class CommandId:
+    atom: str
+
+    def __post_init__(self) -> None:
+        if type(self.atom) is not str or not self.atom:
+            raise ValueError("CommandId atom is nonempty")
+
+
+@dataclass(frozen=True, order=True)
+class ContactClass:
+    atom: str
+
+    def __post_init__(self) -> None:
+        if type(self.atom) is not str or not self.atom:
+            raise ValueError("ContactClass atom is nonempty")
+
+
+@dataclass(frozen=True, order=True)
+class ReleaseId:
+    atom: str
+
+    def __post_init__(self) -> None:
+        if type(self.atom) is not str or not self.atom:
+            raise ValueError("ReleaseId atom is nonempty")
 
 
 @dataclass(frozen=True, order=True)
@@ -286,8 +321,8 @@ class SubjectId:
     atom: str
 
     def __post_init__(self) -> None:
-        if not self.atom:
-            raise ValueError("SubjectId atom is nonempty")
+        if not isinstance(self.tag, SubjectTag) or type(self.atom) is not str or not self.atom:
+            raise ValueError("SubjectId tag and atom are admitted sorts")
 
 
 @dataclass(frozen=True)
@@ -300,6 +335,12 @@ class BehaviorValue:
     right: tuple[tuple[FieldId, Any], ...] = ()
 
     def __post_init__(self) -> None:
+        if (type(self.tag) is not BehaviorTag
+                or (self.metric is not None and type(self.metric) is not FieldId)
+                or (self.integer is not None and type(self.integer) is not int)
+                or (self.content is not None and type(self.content) is not ContentIdentity)
+                or type(self.left) is not tuple or type(self.right) is not tuple):
+            raise ValueError("BehaviorValue nested sort")
         if len({key for key, _ in self.left}) != len(self.left):
             raise ValueError("duplicate left correspondence field")
         if len({key for key, _ in self.right}) != len(self.right):
@@ -382,6 +423,15 @@ class RepositorySnapshot:
 
 
 @dataclass(frozen=True)
+class SnapshotIdentity:
+    snapshot: RepositorySnapshot
+
+    def __post_init__(self) -> None:
+        if type(self.snapshot) is not RepositorySnapshot:
+            raise ValueError("SnapshotIdentity contains an exact RepositorySnapshot")
+
+
+@dataclass(frozen=True)
 class ArtifactSelector:
     tag: SelectorTag
     paths: frozenset[Path] = frozenset()
@@ -410,6 +460,9 @@ class ArtifactProjection:
     field: FieldId | None = None
 
     def __post_init__(self) -> None:
+        if (type(self.tag) is not ProjectionTag
+                or (self.field is not None and type(self.field) is not FieldId)):
+            raise ValueError("ArtifactProjection nested sort")
         if (self.tag is ProjectionTag.STRUCTURED_FIELD) != (self.field is not None):
             raise ValueError("ArtifactProjection fields do not match its tag")
 
@@ -423,6 +476,13 @@ class ObservationSpec:
     metric: FieldId | None = None
 
     def __post_init__(self) -> None:
+        if (type(self.tag) is not ObservationSpecTag
+                or type(self.domain) is not frozenset
+                or any(type(subject) is not SubjectId for subject in self.domain)
+                or (self.selector is not None and type(self.selector) is not ArtifactSelector)
+                or (self.projection is not None and type(self.projection) is not ArtifactProjection)
+                or (self.metric is not None and type(self.metric) is not FieldId)):
+            raise ValueError("ObservationSpec nested sort")
         if self.tag is ObservationSpecTag.ARTIFACT_VIEW:
             valid = self.selector is not None and self.projection is not None and not self.domain and self.metric is None
         elif self.tag is ObservationSpecTag.WORKLOAD_METRIC_VIEW:
@@ -449,6 +509,9 @@ class Coverage:
     missing_subjects: frozenset[SubjectId] = frozenset()
 
     def __post_init__(self) -> None:
+        if (type(self.tag) is not CoverageTag or type(self.missing_subjects) is not frozenset
+                or any(type(subject) is not SubjectId for subject in self.missing_subjects)):
+            raise ValueError("Coverage nested sort")
         if (self.tag is CoverageTag.COMPLETE) == bool(self.missing_subjects):
             raise ValueError("Coverage fields do not match its tag")
 
@@ -459,6 +522,13 @@ class ObservationValue:
     payload: tuple[Any, ...] = ()
 
     def __post_init__(self) -> None:
+        if type(self.tag) is not ObservationValueTag or type(self.payload) is not tuple:
+            raise ValueError("ObservationValue nested sort")
+        def correspondence_map(value: Any) -> bool:
+            return (type(value) is tuple
+                    and len({key for key, _ in value}) == len(value)
+                    and all(type(key) is FieldId and type(item) is FieldValue
+                            for key, item in value))
         arity = {
             ObservationValueTag.ABSENT: 0,
             ObservationValueTag.ROLE_MISMATCH: 2,
@@ -486,8 +556,8 @@ class ObservationValue:
             ObservationValueTag.PRESENT_SIZE: lambda values: isinstance(values[0], ByteSize),
             ObservationValueTag.METRIC_VALUE: lambda values: type(values[0]) is int,
             ObservationValueTag.RESOLUTION_VALUE: lambda values: isinstance(values[0], ContentIdentity),
-            ObservationValueTag.CORRESPONDENCE_VALUE: lambda values: all(isinstance(value, tuple) for value in values),
-            ObservationValueTag.BEHAVIOR_CONFLICT: lambda values: isinstance(values[0], frozenset) and all(isinstance(value, BehaviorValue) for value in values[0]),
+            ObservationValueTag.CORRESPONDENCE_VALUE: lambda values: all(correspondence_map(value) for value in values),
+            ObservationValueTag.BEHAVIOR_CONFLICT: lambda values: type(values[0]) is frozenset and bool(values[0]) and all(type(value) is BehaviorValue for value in values[0]),
         }
         if self.tag in checks and not checks[self.tag](self.payload):
             raise ValueError("ObservationValue payload type")
@@ -501,6 +571,13 @@ class ObservationResult:
     values: tuple[tuple[Any, ObservationValue], ...]
 
     def __post_init__(self) -> None:
+        if (type(self.tag) is not ObservationResultTag
+                or type(self.spec_identity) is not ObservationSpec
+                or type(self.coverage) is not Coverage
+                or type(self.values) is not tuple
+                or any(type(item) is not tuple or len(item) != 2
+                       or type(item[1]) is not ObservationValue for item in self.values)):
+            raise ValueError("ObservationResult nested sort")
         if len({key for key, _ in self.values}) != len(self.values):
             raise ValueError("duplicate observation-result key")
         expected = {
@@ -512,6 +589,9 @@ class ObservationResult:
         }[self.spec_identity.tag]
         if self.tag is not expected:
             raise ValueError("result tag does not match observation spec")
+        key_type = Path if self.tag is ObservationResultTag.ARTIFACT else SubjectId
+        if any(type(key) is not key_type for key, _ in self.values):
+            raise ValueError("observation result key sort")
         allowed = {
             ObservationSpecTag.ARTIFACT_VIEW: {
                 ObservationValueTag.ABSENT,
@@ -559,6 +639,12 @@ class ObservationRelation:
     field_bijection: tuple[tuple[FieldId, FieldId], ...] = ()
 
     def __post_init__(self) -> None:
+        if (type(self.tag) is not ObservationRelationTag
+                or type(self.field_bijection) is not tuple
+                or any(type(pair) is not tuple or len(pair) != 2
+                       or type(pair[0]) is not FieldId or type(pair[1]) is not FieldId
+                       for pair in self.field_bijection)):
+            raise ValueError("ObservationRelation nested sort")
         if self.tag is ObservationRelationTag.FIELD_CORRESPONDENCE:
             left = {key for key, _ in self.field_bijection}
             right = {value for _, value in self.field_bijection}
@@ -653,13 +739,13 @@ class VerificationSpec:
 @dataclass(frozen=True)
 class VerificationRecord:
     spec: VerificationSpec
-    snapshot_identity: RepositorySnapshot
+    snapshot_identity: SnapshotIdentity
     status: VerificationStatus
     observation: ObservationResult
     evidence_refs: frozenset[EvidenceRef]
 
     def __post_init__(self) -> None:
-        if not self.evidence_refs:
+        if type(self.snapshot_identity) is not SnapshotIdentity or not self.evidence_refs:
             raise ValueError("VerificationRecord evidence_refs is nonempty")
         if self.observation.spec_identity != self.spec.subject:
             raise ValueError("verification observation/spec mismatch")
@@ -685,13 +771,15 @@ class ReasoningResult:
 class ImplementationEvidence:
     tag: ImplementationEvidenceTag
     contract_identity: str
-    snapshot_identity: RepositorySnapshot
+    snapshot_identity: SnapshotIdentity
     certificate_key: str | None = None
     implementation_identity: str | None = None
     dimension: str | None = None
     reason: str | None = None
 
     def __post_init__(self) -> None:
+        if type(self.snapshot_identity) is not SnapshotIdentity:
+            raise ValueError("ImplementationEvidence snapshot identity sort")
         if self.tag is ImplementationEvidenceTag.ABSTRACT_ACCEPTANCE:
             valid = self.certificate_key is not None and self.implementation_identity is None and self.dimension is None and self.reason is None
         elif self.tag is ImplementationEvidenceTag.CONCRETE_IMPLEMENTATION:
@@ -738,10 +826,11 @@ class ObservationEquals:
 @dataclass(frozen=True)
 class OneFormatOf:
     selector: ArtifactSelector
-    formats: frozenset[Format]
+    formats: frozenset[Format | OtherFormat]
 
     def __post_init__(self) -> None:
-        if not self.formats:
+        if (type(self.formats) is not frozenset or not self.formats
+                or any(type(item) not in {Format, OtherFormat} for item in self.formats)):
             raise ValueError("ONE_FORMAT_OF format set is nonempty")
 
 
@@ -847,23 +936,23 @@ class ProfileResult:
 
 @dataclass(frozen=True)
 class CommandEventPayload:
-    command_id: str
+    command_id: CommandId
     purpose: str
 
     def __post_init__(self) -> None:
-        if not self.command_id or not self.purpose:
+        if type(self.command_id) is not CommandId or type(self.purpose) is not str or not self.purpose:
             raise ValueError("command-event atoms are nonempty")
 
 
 @dataclass(frozen=True)
 class TestEventPayload:
     spec: VerificationSpec
-    snapshot: RepositorySnapshot
+    snapshot: SnapshotIdentity
     status: VerificationStatus
     evidence_refs: frozenset[EvidenceRef]
 
     def __post_init__(self) -> None:
-        if not self.evidence_refs:
+        if type(self.snapshot) is not SnapshotIdentity or not self.evidence_refs:
             raise ValueError("test-event evidence_refs is nonempty")
 
 
@@ -875,28 +964,32 @@ class PathChangeEventPayload:
 
 @dataclass(frozen=True)
 class NetworkContactEventPayload:
-    contact_class: str
+    contact_class: ContactClass
     purpose: str
 
     def __post_init__(self) -> None:
-        if not self.contact_class or not self.purpose:
+        if type(self.contact_class) is not ContactClass or type(self.purpose) is not str or not self.purpose:
             raise ValueError("network-event atoms are nonempty")
 
 
 @dataclass(frozen=True)
 class ReleaseEventPayload:
-    release_id: str
-    snapshot: RepositorySnapshot
+    release_id: ReleaseId
+    snapshot: SnapshotIdentity
 
     def __post_init__(self) -> None:
-        if not self.release_id:
-            raise ValueError("release id is nonempty")
+        if type(self.release_id) is not ReleaseId or type(self.snapshot) is not SnapshotIdentity:
+            raise ValueError("release event fields are admitted sorts")
 
 
 @dataclass(frozen=True)
 class DependencyRefreshEventPayload:
     selector: ArtifactSelector
-    snapshot: RepositorySnapshot
+    snapshot: SnapshotIdentity
+
+    def __post_init__(self) -> None:
+        if type(self.selector) is not ArtifactSelector or type(self.snapshot) is not SnapshotIdentity:
+            raise ValueError("dependency refresh fields are admitted sorts")
 
 
 EventPayload = CommandEventPayload | TestEventPayload | PathChangeEventPayload | NetworkContactEventPayload | ReleaseEventPayload | DependencyRefreshEventPayload
@@ -924,15 +1017,15 @@ class EventValue:
 class EventPattern:
     tag: PatternKind
     event_key: EventKind | None = None
-    command_id: str | None = None
+    command_id: CommandId | None = None
     verification_spec: VerificationSpec | None = None
     statuses: frozenset[VerificationStatus] = frozenset()
     paths: frozenset[Path] = frozenset()
     change_kinds: frozenset[ChangeKind] = frozenset()
-    contact_class: str | None = None
-    release_id: str | None = None
+    contact_class: ContactClass | None = None
+    release_id: ReleaseId | None = None
     selector: ArtifactSelector | None = None
-    snapshot: RepositorySnapshot | None = None
+    snapshot: SnapshotIdentity | None = None
 
     def __post_init__(self) -> None:
         populated = {
@@ -958,6 +1051,25 @@ class EventPattern:
         }[self.tag]
         if {name for name, present in populated.items() if present} != required:
             raise ValueError("EventPattern fields do not match its tag")
+        typed = {
+            "event_key": EventKind,
+            "command_id": CommandId,
+            "verification_spec": VerificationSpec,
+            "statuses": frozenset,
+            "paths": frozenset,
+            "change_kinds": frozenset,
+            "contact_class": ContactClass,
+            "release_id": ReleaseId,
+            "selector": ArtifactSelector,
+            "snapshot": SnapshotIdentity,
+        }
+        if any(populated[name] and type(getattr(self, name)) is not expected
+               for name, expected in typed.items()):
+            raise ValueError("EventPattern nested sort")
+        if (any(type(value) is not VerificationStatus for value in self.statuses)
+                or any(type(value) is not Path for value in self.paths)
+                or any(type(value) is not ChangeKind for value in self.change_kinds)):
+            raise ValueError("EventPattern set member sort")
 
 
 @dataclass(frozen=True)
@@ -978,19 +1090,23 @@ _CRITERION_TYPES = (
 
 _ADMISSION_TYPES: dict[str, type[Any] | tuple[type[Any], ...]] = {
     "PathSegment": PathSegment, "Path": Path, "PathSet": frozenset,
-    "ArtifactRole": ArtifactRole, "Format": Format, "ByteSize": ByteSize,
+    "ArtifactRole": (ArtifactRole, OtherArtifactRole),
+    "Format": (Format, OtherFormat), "ByteSize": ByteSize,
     "ContentIdentity": ContentIdentity, "FieldId": FieldId,
     "FieldValue": FieldValue, "SubjectId": SubjectId,
     "BehaviorValue": BehaviorValue, "ArtifactBodyKind": ArtifactBodyKind,
     "ArtifactContent": ArtifactContent, "RepositorySnapshot": RepositorySnapshot,
-    "SnapshotIdentity": RepositorySnapshot, "ArtifactSelector": ArtifactSelector,
+    "SnapshotIdentity": SnapshotIdentity, "ArtifactSelector": ArtifactSelector,
     "ArtifactProjection": ArtifactProjection, "Coverage": Coverage,
     "ObservationSpec": ObservationSpec, "ObservationValue": ObservationValue,
     "ObservationResult": ObservationResult, "ObservationRelation": ObservationRelation,
     "VerificationSpec": VerificationSpec, "VerificationStatus": VerificationStatus,
     "Criterion": _CRITERION_TYPES, "TaskSpec": TaskSpec,
-    "ChangeKind": ChangeKind, "CommandId": str, "ContactClass": str,
-    "ReleaseId": str, "EventPattern": EventPattern,
+    "ChangeKind": ChangeKind, "CommandId": CommandId, "ContactClass": ContactClass,
+    "ReleaseId": ReleaseId, "EventPattern": EventPattern,
+    "DependencyRefreshEventPayload": DependencyRefreshEventPayload,
+    "PairTraceDomain": PairTraceDomain,
+    "PairComparedFields": PairComparedFields,
 }
 
 
@@ -1005,30 +1121,190 @@ def admission_type(type_name: str) -> type[Any] | tuple[type[Any], ...]:
 def admitted_closed_value(expected_type: type[Any] | tuple[type[Any], ...], value: Any) -> bool:
     """Evaluate exact constructor and nested-field membership, including int/bool separation."""
     expected_types = expected_type if isinstance(expected_type, tuple) else (expected_type,)
+    if expected_types == (frozenset,):
+        return type(value) is frozenset and all(
+            type(item) is Path and _admitted_payload(item) for item in value)
     return type(value) in expected_types and _admitted_payload(value)
 
 
 def _admitted_payload(value: Any) -> bool:
-    if value is None or type(value) in {bool, int}:
+    """Exact membership predicate for every retained closed constructor."""
+    kind = type(value)
+    if kind in {ArtifactRole, Format, ArtifactBodyKind, VerificationStatus, ChangeKind}:
+        return kind(value.value) is value
+    if kind in {PairTraceDomain, PairComparedFields}:
+        return kind(value.value) is value
+    if kind is PathSegment:
+        return type(value.atom) is str and bool(value.atom) and value.atom not in {".", ".."}
+    if kind is Path:
+        return type(value.segments) is tuple and bool(value.segments) and all(
+            type(item) is PathSegment and _admitted_payload(item) for item in value.segments)
+    if kind is frozenset:
+        return all(_admitted_payload(item) for item in value)
+    if kind in {OtherArtifactRole, OtherFormat, ContentIdentity, FieldId,
+                CommandId, ContactClass, ReleaseId}:
+        return type(value.atom) is str and bool(value.atom)
+    if kind is ByteSize:
+        return type(value.kib) is int and value.kib >= 0
+    if kind is FieldValue:
+        return ((value.tag is FieldValueTag.BOOL and type(value.value) is bool)
+                or (value.tag is FieldValueTag.INT and type(value.value) is int)
+                or (value.tag is FieldValueTag.ATOM and type(value.value) is str and bool(value.value)))
+    if kind is SubjectId:
+        return type(value.tag) is SubjectTag and type(value.atom) is str and bool(value.atom)
+    if kind is BehaviorValue:
+        try:
+            return (BehaviorValue(value.tag, value.metric, value.integer, value.content,
+                                  value.left, value.right) == value
+                    and (value.metric is None or _admitted_payload(value.metric))
+                    and (value.content is None or _admitted_payload(value.content))
+                    and (value.left is None or _admitted_payload(value.left))
+                    and (value.right is None or _admitted_payload(value.right)))
+        except (TypeError, ValueError):
+            return False
+    if kind is ArtifactContent:
+        try:
+            return (ArtifactContent(value.tag, value.role, value.format, value.size,
+                                    value.content, value.fields, value.observations) == value
+                    and _admitted_payload(value.role) and _admitted_payload(value.format)
+                    and _admitted_payload(value.size)
+                    and (value.content is None or _admitted_payload(value.content))
+                    and all(_admitted_payload(key) and _admitted_payload(item) for key, item in value.fields)
+                    and all(_admitted_payload(key) and _admitted_payload(item) for key, item in value.observations))
+        except (TypeError, ValueError):
+            return False
+    if kind is RepositorySnapshot:
+        try:
+            return (RepositorySnapshot(value.entries) == value
+                    and all(_admitted_payload(path) and _admitted_payload(item)
+                            for path, item in value.entries))
+        except (TypeError, ValueError):
+            return False
+    if kind is SnapshotIdentity:
+        return type(value.snapshot) is RepositorySnapshot and _admitted_payload(value.snapshot)
+    if kind is ArtifactSelector:
+        try:
+            return (ArtifactSelector(value.tag, value.paths, value.role) == value
+                    and type(value.paths) is frozenset
+                    and all(type(path) is Path and _admitted_payload(path) for path in value.paths)
+                    and (value.role is None or _admitted_payload(value.role)))
+        except (TypeError, ValueError):
+            return False
+    if kind is ArtifactProjection:
+        try:
+            return (ArtifactProjection(value.tag, value.field) == value
+                    and (value.field is None or _admitted_payload(value.field)))
+        except (TypeError, ValueError):
+            return False
+    if kind is ObservationSpec:
+        try:
+            return (ObservationSpec(value.tag, value.selector, value.projection,
+                                    value.domain, value.metric) == value
+                    and (value.selector is None or _admitted_payload(value.selector))
+                    and (value.projection is None or _admitted_payload(value.projection))
+                    and all(_admitted_payload(subject) for subject in value.domain)
+                    and (value.metric is None or _admitted_payload(value.metric)))
+        except (TypeError, ValueError):
+            return False
+    if kind is Coverage:
+        try:
+            return (Coverage(value.tag, value.missing_subjects) == value
+                    and all(_admitted_payload(subject) for subject in value.missing_subjects))
+        except (TypeError, ValueError):
+            return False
+    if kind is ObservationValue:
+        try:
+            return (ObservationValue(value.tag, value.payload) == value
+                    and all(_admitted_payload(item) for item in value.payload))
+        except (TypeError, ValueError):
+            return False
+    if kind is ObservationResult:
+        try:
+            return (ObservationResult(value.tag, value.spec_identity, value.coverage,
+                                      value.values) == value
+                    and _admitted_payload(value.spec_identity)
+                    and _admitted_payload(value.coverage)
+                    and all(_admitted_payload(key) and _admitted_payload(item)
+                            for key, item in value.values))
+        except (TypeError, ValueError):
+            return False
+    if kind is ObservationRelation:
+        try:
+            return (ObservationRelation(value.tag, value.field_bijection) == value
+                    and all(_admitted_payload(left) and _admitted_payload(right)
+                            for left, right in value.field_bijection))
+        except (TypeError, ValueError):
+            return False
+    if kind is VerificationSpec:
+        return (type(value.protocol_identity) is str and bool(value.protocol_identity)
+                and _admitted_payload(value.subject)
+                and type(value.evidence_schema_key) is str and bool(value.evidence_schema_key))
+    if kind is ObservationEquals:
+        return _admitted_payload(value.spec) and _admitted_payload(value.expected)
+    if kind is OneFormatOf:
+        return (_admitted_payload(value.selector) and type(value.formats) is frozenset
+                and bool(value.formats)
+                and all(type(item) in {Format, OtherFormat} and _admitted_payload(item)
+                        for item in value.formats))
+    if kind is ArtifactsNonempty:
+        return _admitted_payload(value.selector)
+    if kind is ArtifactSizeLt:
+        return _admitted_payload(value.selector) and _admitted_payload(value.upper)
+    if kind is ArtifactSizeAtLeast:
+        return _admitted_payload(value.selector) and _admitted_payload(value.lower)
+    if kind is UniversalObservation:
+        return (_admitted_payload(value.spec) and _admitted_payload(value.baseline)
+                and _admitted_payload(value.relation))
+    if kind is DependencyReproducible:
+        return _admitted_payload(value.spec)
+    if kind is AdapterCorresponds:
+        return _admitted_payload(value.spec) and _admitted_payload(value.relation)
+    if kind is TaskSpec:
+        return (type(value.criteria) is frozenset
+                and all(type(item) in _CRITERION_TYPES and _admitted_payload(item)
+                        for item in value.criteria)
+                and type(value.required_verifications) is frozenset
+                and all(type(item) is VerificationSpec and _admitted_payload(item)
+                        for item in value.required_verifications))
+    if kind is EventPattern:
+        try:
+            return (EventPattern(
+                value.tag, value.event_key, value.command_id,
+                value.verification_spec, value.statuses, value.paths,
+                value.change_kinds, value.contact_class, value.release_id,
+                value.selector, value.snapshot,
+            ) == value
+                    and all(_admitted_payload(item) for item in (
+                        value.event_key, value.command_id, value.verification_spec,
+                        value.statuses, value.paths, value.change_kinds,
+                        value.contact_class, value.release_id, value.selector,
+                        value.snapshot,
+                    )))
+        except (TypeError, ValueError):
+            return False
+    if kind is DependencyRefreshEventPayload:
+        return (_admitted_payload(value.selector)
+                and _admitted_payload(value.snapshot))
+    if kind.__module__ == "KernelPlugin.k3x.reference" and kind.__name__ == "PairCoherenceSubject":
+        from .reference import RecordIdentity
+        return (type(value.pair) is RecordIdentity
+                and type(value.scope_binding) is RecordIdentity
+                and type(value.occurrence_binding) is RecordIdentity
+                and value.trace_domain is PairTraceDomain.ALL_ADMITTED_TRACES
+                and value.compared_fields is PairComparedFields.COMPLETE_EVAL_RECORD)
+    if value is None or kind in {bool, int}:
         return True
-    if type(value) is str:
+    if kind is str:
         return bool(value)
     if isinstance(value, Enum):
         return type(value)(value.value) is value
-    if type(value) in {tuple, frozenset}:
+    if kind is tuple:
         return all(_admitted_payload(item) for item in value)
-    if is_dataclass(value):
-        try:
-            payload = {field.name: getattr(value, field.name) for field in fields(value)}
-            return (all(_admitted_payload(item) for item in payload.values())
-                    and type(value)(**payload) == value)
-        except (AttributeError, TypeError, ValueError):
-            return False
     return False
 
 
-def snapshot_identity(snapshot: RepositorySnapshot) -> RepositorySnapshot:
-    return snapshot
+def snapshot_identity(snapshot: RepositorySnapshot) -> SnapshotIdentity:
+    return SnapshotIdentity(snapshot)
 
 
 def snapshot_of(state: Any) -> TermResult:
@@ -1233,7 +1509,7 @@ def verification_passed(spec: VerificationSpec, snapshot: RepositorySnapshot, ev
         # deliberately does not re-observe or compare a returned value.
         if (
             record.spec == spec
-            and record.snapshot_identity == snapshot
+            and record.snapshot_identity == SnapshotIdentity(snapshot)
             and record.observation.spec_identity == spec.subject
             and reference.schema_binding == spec.evidence_schema_key
         ):
@@ -1419,7 +1695,7 @@ def implementation_evidence_profile(subject: ImplementationCoverageSubject) -> P
             continue
         item = payload.value
         assert isinstance(item, ImplementationEvidence)
-        if item.contract_identity != subject.contract_identity or item.snapshot_identity != subject.snapshot:
+        if item.contract_identity != subject.contract_identity or item.snapshot_identity != SnapshotIdentity(subject.snapshot):
             continue
         if item.tag is ImplementationEvidenceTag.ABSTRACT_ACCEPTANCE:
             abstract = subject.abstract_result
