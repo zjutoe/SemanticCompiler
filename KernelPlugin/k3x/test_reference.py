@@ -317,10 +317,24 @@ def _complete_value_literal(
     """Intern one immutable value into a canonical, lossless value graph."""
     if isinstance(value, Enum):
         kind = type(value)
-        return ("ENUM", kind.__module__, kind.__qualname__, value.value)
-    if value is None or isinstance(value, (bool, int, str, bytes)):
-        return ("ATOM", value)
-    if is_dataclass(value) and not isinstance(value, type):
+        return (
+            "ENUM", kind.__module__, kind.__qualname__,
+            _complete_value_literal(value.value, nodes),
+        )
+    if isinstance(value, type):
+        tag = "ENUM_CLASS" if issubclass(value, Enum) else "CLASS"
+        descriptor = (tag, value.__module__, value.__qualname__)
+    elif value is None:
+        return ("NONE",)
+    elif isinstance(value, bool):
+        return ("BOOL", value)
+    elif isinstance(value, int):
+        return ("INT", value)
+    elif isinstance(value, str):
+        return ("STR", value)
+    elif isinstance(value, bytes):
+        return ("BYTES", value)
+    elif is_dataclass(value):
         kind = type(value)
         descriptor = (
             "DATACLASS", kind.__module__, kind.__qualname__,
@@ -340,7 +354,10 @@ def _complete_value_literal(
                       for key, item in value.items())
         descriptor = ("DICT", tuple(sorted(items, key=repr)))
     else:
-        descriptor = ("OPAQUE", type(value).__module__, type(value).__qualname__)
+        raise TypeError(
+            "unsupported complete authoritative value: "
+            f"{type(value).__module__}.{type(value).__qualname__}"
+        )
     identity = sha256(repr(descriptor).encode("utf-8")).hexdigest()
     previous = nodes.setdefault(identity, descriptor)
     if previous != descriptor:
@@ -2683,6 +2700,132 @@ class K3XReferenceTests(unittest.TestCase):
                 self.assertEqual(_replay_assertion(universe, replayed), assertions[identifier])
                 self.assertFalse(_contains_fixture_id(universe))
 
+        literal_nodes = fx._EXPECTED_VALUE_NODES_LITERAL
+        self.assertEqual(
+            {descriptor[0] for descriptor in literal_nodes.values()},
+            {"CLASS", "DATACLASS", "ENUM_CLASS", "FROZENSET", "TUPLE"},
+        )
+        canonical_tags = {
+            "BOOL", "BYTES", "CLASS", "DATACLASS", "DICT", "ENUM",
+            "ENUM_CLASS", "FROZENSET", "INT", "NONE", "REF", "STR",
+            "TUPLE",
+        }
+        reachable_tags: set[str] = set()
+        for identity, descriptor in literal_nodes.items():
+            with self.subTest(assertion_node_hash=identity):
+                self.assertEqual(
+                    sha256(repr(descriptor).encode("utf-8")).hexdigest(),
+                    identity,
+                )
+            pending = [descriptor]
+            while pending:
+                item = pending.pop()
+                if not isinstance(item, tuple):
+                    continue
+                if item and item[0] in canonical_tags:
+                    reachable_tags.add(item[0])
+                if len(item) == 2 and item[0] == "REF":
+                    self.assertIn(item[1], literal_nodes)
+                else:
+                    pending.extend(item)
+        self.assertEqual(
+            reachable_tags,
+            {"CLASS", "DATACLASS", "ENUM", "ENUM_CLASS", "FROZENSET",
+             "INT", "NONE", "REF", "STR", "TUPLE"},
+        )
+
+        admission_classes: set[type[object]] = set()
+        for identifier, universe in packet.items():
+            if identifier.family is fx.FixtureFamily.PERMUTATION:
+                continue
+            replayed = ref.replay(universe)
+            composition = (
+                replayed.authoritative
+                if isinstance(replayed, (
+                    ref.CoreReplay, ref.PairReplay, ref.LookupReplay))
+                else replayed.composition
+                if isinstance(replayed, ref.CompositionReplay)
+                else ref.compose_records(universe.records)
+            )
+            for record in composition.records:
+                if not (isinstance(record.value, ref.ContractSpec)
+                        and record.value.type_admission_relation is not None):
+                    continue
+                value_type = record.value.type_admission_relation.value_type
+                admission_classes.update(
+                    value_type if isinstance(value_type, tuple)
+                    else (value_type,))
+        ordinary_classes = {
+            kind for kind in admission_classes if not issubclass(kind, Enum)
+        }
+        enum_classes = admission_classes - ordinary_classes
+        self.assertEqual((len(ordinary_classes), len(enum_classes)), (56, 9))
+        class_nodes: dict[str, object] = {}
+        class_references = {
+            _complete_value_literal(kind, class_nodes)
+            for kind in admission_classes
+        }
+        self.assertEqual(len(class_references), 65)
+        self.assertEqual(
+            {descriptor[0] for descriptor in class_nodes.values()},
+            {"CLASS", "ENUM_CLASS"},
+        )
+        with self.assertRaisesRegex(
+            TypeError, "unsupported complete authoritative value: builtins.object"
+        ):
+            _complete_value_literal(object(), {})
+
+        duplicate_id = fx.FixtureId(
+            fx.FixtureFamily.DUPLICATE_EQUAL, (fx.OrderTag.FORWARD,))
+        duplicate = packet[duplicate_id]
+        type_identity = fx.rid(
+            ref.RecordKind.TYPE_DECLARATION, "T(PathSegment)",
+            namespace="coding.type")
+        spec_identity = fx.rid(
+            ref.RecordKind.CONTRACT_SPEC,
+            "CS(TYPE_ADMISSION,type.PathSegment)",
+            namespace="coding.type-admission")
+
+        def substitute_admission(record: ref.LogicalRecord) -> ref.LogicalRecord:
+            if record.identity == spec_identity:
+                return replace(record, value=replace(
+                    record.value,
+                    type_admission_relation=ref.TypeAdmissionRelation(cp.Path)))
+            if record.identity == type_identity:
+                return replace(record, value=replace(
+                    record.value,
+                    admitted_value_domain=replace(
+                        record.value.admitted_value_domain,
+                        type_admission_relation=ref.TypeAdmissionRelation(
+                            cp.Path))))
+            if isinstance(record.value, ref.PluginPackage):
+                return replace(record, value=replace(
+                    record.value,
+                    declarations=tuple(
+                        substitute_admission(item)
+                        for item in record.value.declarations)))
+            return record
+
+        substituted = replace(
+            duplicate,
+            request=replace(
+                duplicate.request,
+                presentations=tuple(
+                    tuple(substitute_admission(item) for item in presentation)
+                    for presentation in duplicate.request.presentations)))
+        baseline_assertion = _replay_assertion(
+            duplicate, ref.replay(duplicate))
+        substituted_assertion = _replay_assertion(
+            substituted, ref.replay(substituted))
+        self.assertEqual(
+            (substituted_assertion.outcome, substituted_assertion.conflicts),
+            (baseline_assertion.outcome, baseline_assertion.conflicts),
+        )
+        self.assertNotEqual(
+            substituted_assertion.authoritative_map,
+            baseline_assertion.authoritative_map,
+        )
+
         core_id = fx.FixtureId(fx.FixtureFamily.CORE_DEFINITIONAL)
         core = packet[core_id]
         frozen = assertions[core_id]
@@ -2710,7 +2853,12 @@ class K3XReferenceTests(unittest.TestCase):
             request,
             value=replace(
                 request.value,
-                arguments=(*request.value.arguments[:-1], frozenset({object()}))),
+                arguments=(
+                    *request.value.arguments[:-1],
+                    frozenset({cp.EvidenceRef(
+                        "assertion-falsifier", "coding", "extra-evidence",
+                        "assertion-schema")}),
+                )),
         )
         changed_evidence = _rewrite(core, {request_identity: changed_request})
         self.assertNotEqual(
