@@ -1305,6 +1305,7 @@ def _resolve(composition: Composition, identity: RecordIdentity, value_type: typ
 def validate_packages(
     composition: Composition,
     evolution_focus: RecordIdentity | None = None,
+    allow_finite_omission: bool = False,
 ) -> Judgment:
     if composition.conflicts:
         return Judgment("MALFORMED", ("CONFLICT", composition.conflicts))
@@ -1500,14 +1501,40 @@ def validate_packages(
                 ],
                 validator.value.required_evidence,
             )
+            canonical_migrations = tuple(
+                item.value for item in composition.records
+                if isinstance(item.value, MigrationDeclaration)
+                and item.identity.key.local == "MK0")
+            canonical_environment = (
+                canonical_migrations[0].source_environment
+                if len(canonical_migrations) == 1
+                and canonical_migrations[0].source_environment
+                    == canonical_migrations[0].target_environment
+                else None)
+            exact_environment_members = (
+                frozenset(semantic_environment.value.declarations
+                          + semantic_environment.value.bindings)
+                if semantic_environment is not None else frozenset())
             if (request.abi_version.components != (0,)
                     or semantic_environment is None
                     or source_environment is None or target_environment is None
+                    or canonical_environment is None
+                    or request.semantic_environment != canonical_environment
                     or request.semantic_environment != envelope.value.environment
                     or (isinstance(value, MigrationDeclaration)
                         and request.semantic_environment not in {
                             value.source_environment, value.target_environment})
                     or any(environment.abi_version != request.abi_version
+                           or environment.pair_declarations
+                           or environment.profile_bindings
+                           or environment.pair_bindings
+                           or environment.authority_facts
+                           or environment.semantic_extensions
+                           or environment.lexical_bindings
+                           or environment.choice_bindings
+                           or environment.chi_c
+                           or environment.mechanically_extracted_dependencies
+                                != exact_environment_members
                            or len(environment.all_references()) != sum(map(len, (
                                environment.declarations,
                                environment.pair_declarations,
@@ -1523,6 +1550,18 @@ def validate_packages(
                                   for identity in environment.all_references())
                            or any(_resolve(composition, identity) is None
                                   for identity in environment.mechanically_extracted_dependencies)
+                           or any(identity.kind not in {
+                               RecordKind.TYPE_DECLARATION,
+                               RecordKind.DECLARATION,
+                           } for identity in environment.declarations)
+                           or any(identity.kind is not RecordKind.BINDING
+                                  for identity in environment.bindings)
+                           or any((binding_record := _resolve(
+                                      composition, identity,
+                                      SemanticBinding)) is None
+                                  or binding_record.value.declaration
+                                      not in environment.declarations
+                                  for identity in environment.bindings)
                            for environment_record_item in (source_environment, target_environment)
                            for environment in (environment_record_item.value,))
                     or request.capability_target != expected_target
@@ -1653,6 +1692,40 @@ def validate_packages(
         for members, kinds in categories:
             if any(member.identity.kind not in kinds for member in members):
                 return Judgment("MALFORMED", ("PACKAGE_MEMBER_CATEGORY", record.identity))
+        package_declaration_ids = frozenset(item.identity for item in package.declarations)
+        package_binding_ids = frozenset(item.identity for item in package.bindings)
+        package_model_targets = tuple(
+            item.value.target_binding for item in package.model_contracts
+            if isinstance(item.value, ModelContract))
+        package_occurrence_targets = frozenset(
+            item.value.occurrence_bundle
+            for item in package.pair_bindings
+            if isinstance(item.value, PairBinding))
+        literal_declarations = frozenset(
+            item.identity for item in package.declarations
+            if isinstance(item.value, DeclarationShape)
+            and item.value.declaration_kind == "LITERAL")
+        literal_binding_declarations = tuple(
+            item.value.declaration for item in package.bindings
+            if isinstance(item.value, SemanticBinding)
+            and item.value.binding_kind == "LITERAL")
+        retained_ck = (
+            package.plugin_key.local == "coding-minimal"
+            and (len(literal_declarations) >= 40
+                 or any(item.identity.key.local == "CAP(functions)"
+                        for item in package.services)))
+        if (retained_ck and not allow_finite_omission and (
+                frozenset(literal_binding_declarations) != literal_declarations
+                or len(literal_binding_declarations)
+                    != len(set(literal_binding_declarations))
+                or any(item.value.declaration not in package_declaration_ids
+                       for item in package.bindings
+                       if isinstance(item.value, SemanticBinding))
+                or frozenset(package_model_targets)
+                    != package_binding_ids | package_occurrence_targets
+                or len(package_model_targets) != len(set(package_model_targets)))):
+            return Judgment("MALFORMED", ("PACKAGE_BINDING_MODEL_BIJECTION",
+                                          record.identity))
         if any(isinstance(member.value, CapabilityDescriptor) and (member.value.abi_version != package.abi_version or member.value.plugin_key != package.plugin_key) for member in package.services):
             return Judgment("MALFORMED", ("DESCRIPTOR_PACKAGE_ABI_OR_PLUGIN", record.identity))
     return Judgment("WELL_FORMED")
@@ -1836,6 +1909,15 @@ def topological_order(bindings: tuple[RecordIdentity, ...], composition: Composi
 
 
 def validate_dependency_graph(bindings: tuple[RecordIdentity, ...], composition: Composition) -> Judgment:
+    # The proper graph is keyed by retained binding identity.  Detect a
+    # same-key replacement cycle before checking stored derived closures: an
+    # unchanged predecessor binding must resolve its support through the
+    # replacement, rather than being rewritten merely to make the cycle
+    # visible.
+    try:
+        topological_order(bindings, composition)
+    except ValueError as error:
+        return Judgment("MALFORMED", (str(error),))
     for identity in bindings:
         binding = _resolve(composition, identity, SemanticBinding)
         if binding is None:
@@ -1863,10 +1945,6 @@ def validate_dependency_graph(bindings: tuple[RecordIdentity, ...], composition:
                 or model.unknown_contract != binding.value.unknown_contract
                 or model.error_contract != binding.value.evaluation_error_contract):
             return Judgment("MALFORMED", ("binding model mismatch", identity))
-    try:
-        topological_order(bindings, composition)
-    except ValueError as error:
-        return Judgment("MALFORMED", (str(error),))
     return Judgment("WELL_FORMED")
 
 
@@ -2430,7 +2508,10 @@ def validate_pair(request_identity: RecordIdentity, composition: Composition) ->
 
 
 def evaluate_observation_graph(request: GraphEvaluationRequest, composition: Composition) -> ObservationEvaluation:
-    from .coding_plugin import changes_between, observe
+    from .coding_plugin import (
+        AuthorityAttestationSubjectIdentity, AuthorityAttestationValue,
+        AuthorityClauseTag, AuthoritySubjectTag, changes_between, observe,
+    )
     reasoning = _resolve(composition, request.reasoning_request, ReasoningRequest)
     trust = _resolve(composition, request.trust_environment, TrustEnvironment)
     semantic = _resolve(composition, request.semantic_environment, SemanticEnvironment)
@@ -2507,24 +2588,44 @@ def evaluate_observation_graph(request: GraphEvaluationRequest, composition: Com
         composition, authority_fact_one_id, AuthorityFactRecord)
     authority_fact_two = _resolve(
         composition, authority_fact_two_id, AuthorityFactRecord)
+    expected_attestation_one = AuthorityAttestationValue(
+        authority_one_id, source_one_id, "fixture_principal", "REQUIRE",
+        AuthorityAttestationSubjectIdentity(
+            AuthoritySubjectTag.CLAUSE, subject.contract_identity,
+            clause_tag=AuthorityClauseTag.CONFLUENCE_OBSERVATION))
+    expected_attestation_two = AuthorityAttestationValue(
+        authority_two_id, source_two_id, "fixture_principal", "REQUIRE",
+        AuthorityAttestationSubjectIdentity(
+            AuthoritySubjectTag.CLAUSE, subject.contract_identity,
+            clause_tag=AuthorityClauseTag.CONFLUENCE_CHANGE))
+    evidence_one = RecordIdentity(
+        RecordKind.EVIDENCE, ExactKey(
+            "PLUGIN_ISSUER(ATK)", "coding.authority.attestation",
+            "AUTHORITY_EVIDENCE_LOCAL(c,1)", Version((1,))))
+    evidence_two = RecordIdentity(
+        RecordKind.EVIDENCE, ExactKey(
+            "PLUGIN_ISSUER(ATK)", "coding.authority.attestation",
+            "AUTHORITY_EVIDENCE_LOCAL(c,2)", Version((1,))))
     if (source_one is None or source_one.value != SourceRecord(
-            "capknow.semantic", "coding.confluence.observation", "c1")
+            "PLUGIN_ISSUER(APK)", "AUTHENTICATED_FIXTURE_INSTRUCTION",
+            "CODING_SOURCE(c,1)")
             or source_two is None or source_two.value != SourceRecord(
-                "capknow.semantic", "coding.confluence.change", "c2")
+                "PLUGIN_ISSUER(APK)", "AUTHENTICATED_FIXTURE_INSTRUCTION",
+                "CODING_SOURCE(c,2)")
             or authority_one is None or authority_one.value != AuthorityRefRecord(
-                "capknow.authority", "fixture_principal", "CLAUSE_ATTESTATION")
+                "PLUGIN_ISSUER(APK)", "coding.fixture", "CODING_AUTHORITY(c,1)")
             or authority_two is None or authority_two.value != AuthorityRefRecord(
-                "capknow.authority", "fixture_principal", "CLAUSE_ATTESTATION")
+                "PLUGIN_ISSUER(APK)", "coding.fixture", "CODING_AUTHORITY(c,2)")
             or authority_fact_one is None
             or authority_fact_one.value != AuthorityFactRecord(
                 ExactKey("capknow.semantic", "confluence.authority.fact", "AF(c,1)", Version((1,))),
                 authority_one_id, source_one_id, "fixture_principal",
-                "CONFLUENCE_OBSERVATION_CLAUSE", frozenset())
+                expected_attestation_one, frozenset({evidence_one}))
             or authority_fact_two is None
             or authority_fact_two.value != AuthorityFactRecord(
                 ExactKey("capknow.semantic", "confluence.authority.fact", "AF(c,2)", Version((1,))),
                 authority_two_id, source_two_id, "fixture_principal",
-                "CONFLUENCE_CHANGE_CLAUSE", frozenset())):
+                expected_attestation_two, frozenset({evidence_two}))):
         raise ValueError("malformed confluence authority/adoption closure")
     expected_target = ReasoningTarget("CONSISTENCY", rr.subjects, request.semantic_environment)
     if (rr.abi_version.components != (0,) or rr.judgment != "CONSISTENCY"
@@ -2558,21 +2659,49 @@ def evaluate_observation_graph(request: GraphEvaluationRequest, composition: Com
                                  ("initial_snapshot", "final_snapshot")),
             ))):
         raise ValueError("malformed confluence capability/fragment")
-    expected_semantic_bindings = frozenset(
-        record.identity for record in composition.records
-        if isinstance(record.value, SemanticBinding)
-        and record.identity.key.namespace == "confluence.binding"
-    )
-    expected_semantic_declarations = frozenset(
-        record.identity for record in composition.records
-        if isinstance(record.value, DeclarationShape)
-        and record.identity.key.namespace == "confluence.declaration"
-    )
+    packages = tuple(
+        item.value for item in composition.records
+        if isinstance(item.value, PluginPackage)
+        and all(any(member.identity == node for member in item.value.bindings)
+                for node in request.nodes))
+    if len(packages) != 1:
+        raise ValueError("confluence graph nodes are not retained package members")
+    retained_package = packages[0]
+    package_declarations = frozenset(
+        item.identity for item in retained_package.declarations)
+    package_bindings = frozenset(item.identity for item in retained_package.bindings)
+    expected_semantic_bindings = frozenset(semantic.value.bindings)
+    expected_semantic_declarations = frozenset(semantic.value.declarations)
+    resolved_bindings = tuple(
+        _resolve(composition, identity, SemanticBinding)
+        for identity in expected_semantic_bindings)
+    literal_bindings = tuple(
+        item for item in resolved_bindings if item is not None
+        and item.value.binding_kind == "LITERAL")
+    literal_values = frozenset(
+        declaration.value.literal_value
+        for binding_record in literal_bindings
+        if (declaration := _resolve(
+            composition, binding_record.value.declaration,
+            DeclarationShape)) is not None)
+    expected_literal_values = frozenset({
+        subject.observation_spec, subject.prior_snapshot,
+        subject.final_snapshot,
+        observe(subject.observation_spec, subject.final_snapshot).value,
+    })
     if (semantic.value.abi_version != rr.abi_version
             or len(semantic.value.declarations) != len(expected_semantic_declarations)
-            or frozenset(semantic.value.declarations) != expected_semantic_declarations
             or len(semantic.value.bindings) != len(expected_semantic_bindings)
-            or frozenset(semantic.value.bindings) != expected_semantic_bindings
+            or not expected_semantic_declarations <= package_declarations
+            or not expected_semantic_bindings <= package_bindings
+            or not frozenset(request.nodes) <= expected_semantic_bindings
+            or tuple(node.key.local for node in request.nodes)
+                != ("BINDING(DF(observe))", "BINDING(DF(changes_between))")
+            or len(literal_bindings) != 4
+            or literal_values != expected_literal_values
+            or any(record is None
+                   or record.value.declaration not in expected_semantic_declarations
+                   for record in resolved_bindings)
             or semantic.value.pair_declarations
             or semantic.value.pair_bindings
             or semantic.value.profile_bindings
@@ -2581,7 +2710,7 @@ def evaluate_observation_graph(request: GraphEvaluationRequest, composition: Com
             or semantic.value.choice_bindings
             or semantic.value.chi_c
             or semantic.value.mechanically_extracted_dependencies
-                != expected_semantic_bindings
+                != frozenset(request.nodes)
             or semantic.value.authority_facts != (
             authority_fact_one_id, authority_fact_two_id)
             ):
@@ -2618,7 +2747,11 @@ def evaluate_observation_graph(request: GraphEvaluationRequest, composition: Com
     })
     required_evidence = _resolve(composition, capability.value.required_evidence, ContractSpec)
     failure_contract = _resolve(composition, capability.value.failure_contract, ContractSpec)
-    if (capability.value.dependency_scope != expected_closure
+    exact_lower_scope = frozenset().union(*(
+        record.value.dependency_closure
+        for identity in request.nodes
+        if (record := _resolve(composition, identity, SemanticBinding)) is not None))
+    if (capability.value.dependency_scope != exact_lower_scope
             or capability.value.proper_semantic_dependencies != descriptor_expected
             or capability.value.dependency_closure != _reachable_closure(descriptor_expected, composition)
             or required_evidence is None
@@ -3184,7 +3317,9 @@ def replay(universe: Universe) -> Any:
         }
         else None
     )
-    package_status = validate_packages(composition, evolution_focus)
+    package_status = validate_packages(
+        composition, evolution_focus,
+        allow_finite_omission=isinstance(request, LookupRequest))
     if package_status.tag != "WELL_FORMED":
         return CompositionReplay(composition, Formation.MALFORMED, Closure.NOT_APPLICABLE)
     if isinstance(request, InvocationReplayRequest):

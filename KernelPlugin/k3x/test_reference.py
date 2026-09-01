@@ -168,11 +168,195 @@ class K3XReferenceTests(unittest.TestCase):
                  for item in package.declarations)),
             (55, 47),
         )
+        type_rows = tuple(
+            item for item in package.declarations
+            if isinstance(item.value, ref.TypeDeclaration))
+        self.assertEqual(
+            {item.identity.key.local for item in type_rows},
+            {f"T({name})" for name in cp._ADMISSION_TYPES})
+        for declaration_record in type_rows:
+            spec = declaration_record.value.admitted_value_domain
+            type_name = declaration_record.identity.key.local[2:-1]
+            with self.subTest(exact_type_admission=type_name):
+                self.assertEqual(spec.primary_input_domain, ("Value",))
+                self.assertEqual(spec.codomain,
+                                 frozenset({"admitted", "not_admitted"}))
+                self.assertEqual(spec.type_admission_relation,
+                                 ref.TypeAdmissionRelation(cp.admission_type(type_name)))
+                self.assertEqual(
+                    frozenset(query.dependency
+                              for query in spec.observation_queries),
+                    spec.support)
+                self.assertEqual(
+                    declaration_record.value.proper_declaration_dependencies,
+                    spec.support | frozenset({ref.RecordIdentity(
+                        ref.RecordKind.CONTRACT_SPEC, spec.contract_key)}))
+        literal_rows = tuple(
+            item for item in package.declarations
+            if isinstance(item.value, ref.DeclarationShape)
+            and item.value.declaration_kind == "LITERAL")
+        literal_bindings = {
+            item.value.declaration: item for item in package.bindings
+            if isinstance(item.value, ref.SemanticBinding)
+            and item.value.binding_kind == "LITERAL"}
+        literal_models = {
+            item.value.target_binding: item for item in package.model_contracts}
+        self.assertEqual(set(literal_bindings),
+                         {item.identity for item in literal_rows})
+        for declaration_record in literal_rows:
+            binding_record = literal_bindings[declaration_record.identity]
+            model_record = literal_models[binding_record.identity]
+            with self.subTest(exact_literal=declaration_record.identity.key.local):
+                self.assertEqual(declaration_record.value.argument_types, ())
+                self.assertEqual(declaration_record.value.facet_positions, ())
+                self.assertEqual(len(declaration_record.value.proper_type_dependencies), 1)
+                self.assertIsNotNone(declaration_record.value.literal_value)
+                self.assertEqual(binding_record.value.declaration,
+                                 declaration_record.identity)
+                self.assertEqual(binding_record.value.binding_kind, "LITERAL")
+                self.assertEqual(binding_record.value.unknown_contract.key.local,
+                                 "CS(UNKNOWN_BEHAVIOR,not_applicable)")
+                self.assertEqual(binding_record.value.permitted_facet_inputs, ())
+                self.assertEqual(
+                    binding_record.value.proper_semantic_dependencies,
+                    frozenset({declaration_record.identity,
+                               binding_record.value.meaning_contract,
+                               binding_record.value.evidence_schema,
+                               binding_record.value.access_boundary,
+                               binding_record.value.unknown_contract,
+                               binding_record.value.evaluation_error_contract}))
+                self.assertEqual(model_record.value.target_binding,
+                                 binding_record.identity)
+                self.assertEqual(model_record.value.exact_symbol_key,
+                                 declaration_record.value.symbol_key)
+                self.assertEqual(model_record.value.exact_argument_types, ())
+                self.assertEqual(model_record.value.exact_result_kind,
+                                 declaration_record.value.result_kind)
+                self.assertEqual(model_record.value.exact_facet_positions, ())
+                self.assertEqual(model_record.value.evidence_contract,
+                                 binding_record.value.evidence_schema)
+                self.assertEqual(model_record.value.unknown_contract,
+                                 binding_record.value.unknown_contract)
+                self.assertEqual(model_record.value.error_contract,
+                                 binding_record.value.evaluation_error_contract)
+                self.assertEqual(model_record.value.semantic_contract,
+                                 binding_record.value.meaning_contract)
+                self.assertEqual(model_record.value.capability_summaries,
+                                 frozenset())
+        callable_declarations = {
+            item.identity.key.local: item.value for item in package.declarations
+            if isinstance(item.value, ref.DeclarationShape)
+            and item.value.declaration_kind in {"FUNCTION", "PREDICATE"}}
+        expected_callable_fields = {
+            "DF(snapshot_of)": (("State",), "T(RepositorySnapshot)",
+                                (frozenset({"pre", "final"}),)),
+            "DF(changes_between)": (("RepositorySnapshot", "RepositorySnapshot"),
+                                    "T(ChangeSet)",
+                                    (frozenset({"pre"}), frozenset({"final"}))),
+            "DF(observe)": (("ObservationSpec", "RepositorySnapshot"),
+                            "T(ObservationResult)",
+                            (frozenset(), frozenset({"pre", "final"}))),
+            "DP(observations_equal)": (("ObservationResult", "ObservationResult"),
+                                       "Bool",
+                                       (frozenset({"pre"}), frozenset({"final"}))),
+            "DP(task_accepts)": (("TaskSpec", "RepositorySnapshot", "EvidenceStore"),
+                                 "Bool", (frozenset(), frozenset({"final"}),
+                                          frozenset({"evidence"}))),
+            "DP(dependency_metadata_changed)": (("ChangeSet",), "Bool",
+                                                (frozenset({"pre", "final"}),)),
+            "DP(verification_passed)": (("VerificationSpec", "RepositorySnapshot",
+                                         "EvidenceStore"), "Bool",
+                                        (frozenset(), frozenset({"final"}),
+                                         frozenset({"evidence"}))),
+            "DP(event_matches)": (("EventPattern", "EventValue"), "Bool",
+                                  (frozenset(), frozenset())),
+            "DP(event_occurred)": (("EventPattern", "Trace"), "Bool",
+                                   (frozenset(), frozenset({"trace"}))),
+            "DP(refresh_scope)": (("EventValue",), "Bool", (frozenset(),)),
+            "DP(refresh_occurred)": (("Trace",), "Bool",
+                                     (frozenset({"trace"}),)),
+        }
+        self.assertEqual(set(callable_declarations), set(expected_callable_fields))
+        for local, (argument_names, result_kind, facets) in expected_callable_fields.items():
+            declaration = callable_declarations[local]
+            self.assertEqual(
+                tuple(item.local[2:-1] if item.local.startswith("T(")
+                      else item.local for item in declaration.argument_types),
+                argument_names)
+            self.assertEqual(declaration.result_kind, result_kind)
+            self.assertEqual(declaration.facet_positions, facets)
+        attestation_values = tuple(
+            item.value.literal_value for item in literal_rows
+            if isinstance(item.value.literal_value,
+                          cp.AuthorityAttestationValue))
+        self.assertEqual(len(attestation_values), 6)
+        self.assertEqual(
+            [item.normative_role for item in attestation_values].count("REQUIRE"),
+            5)
+        choice_attestation = next(
+            item for item in attestation_values
+            if item.normative_role == "BIND_CHOICE(storage)")
+        self.assertEqual(choice_attestation.principal, "user")
+        self.assertEqual(choice_attestation.subject_identity.choice_id,
+                         "storage")
+        for item in attestation_values:
+            with self.subTest(authority_attestation=item.subject_identity):
+                self.assertEqual(item.authority_ref.key.owner,
+                                 "capknow.authority.coding-fixture-source")
+                self.assertEqual(item.source_ref.key.owner,
+                                 "capknow.authority.coding-fixture-source")
+                if item is not choice_attestation:
+                    self.assertEqual(item.principal, "fixture_principal")
+                    self.assertEqual(item.normative_role, "REQUIRE")
+        authority_subject_values = tuple(
+            item.value.literal_value for item in literal_rows
+            if isinstance(item.value.literal_value,
+                          cp.ServiceAdmissionSubject)
+            and item.value.literal_value.tag
+                is cp.ServiceSubjectTag.AUTHORITY_ATTESTATION)
+        self.assertEqual(len(authority_subject_values), 6)
+        for subject_value in authority_subject_values:
+            self.assertIn(subject_value.attestation, attestation_values)
+            self.assertEqual(len(subject_value.offered_evidence_refs), 1)
+            evidence_ref = next(iter(subject_value.offered_evidence_refs))
+            self.assertEqual((evidence_ref.issuer_scope, evidence_ref.namespace,
+                              evidence_ref.schema_binding),
+                             ("PLUGIN_ISSUER(ATK)",
+                              "coding.authority.attestation", "AREQUIRED"))
         self.assertEqual(
             {item.identity.key.local for item in package.services},
             {"CAP(functions)", "CAP(predicates)", "CAP(profile)",
              "CAP(bounds)", "CAP(confluence)", "LEX_CAP"},
         )
+        descriptor_coordinates = {
+            item.identity.key.local: (
+                item.value.service_role, item.value.capability_class,
+                item.value.supported_judgments,
+                item.value.sound_fragment.key.local,
+                None if item.value.complete_fragment is None
+                else item.value.complete_fragment.key.local,
+                item.value.required_evidence.key.local,
+                item.value.failure_contract.key.local)
+            for item in package.services}
+        self.assertEqual(descriptor_coordinates, {
+            "CAP(functions)": ("FUNCTION_EVALUATION", "CONCRETE_EVALUATION_ONLY", frozenset({"FUNCTION_EVALUATION"}), "FSOUND", None, "FREQ", "FFAIL"),
+            "CAP(predicates)": ("PREDICATE_EVALUATION", "CONCRETE_EVALUATION_ONLY", frozenset({"PREDICATE_EVALUATION"}), "QSOUND", None, "QREQ", "QFAIL"),
+            "CAP(profile)": ("PROFILE_CONCRETE", "CONCRETE_EVALUATION_ONLY", frozenset({"PROFILE_COVERAGE"}), "PROFSOUND", None, "PROFREQ", "PROFFAIL"),
+            "CAP(bounds)": ("REASONING", "COMPLETE_FOR_DECLARED_FRAGMENT", frozenset({"CONSISTENCY"}), "BSOUND", "BCOMPLETE", "BREQ", "BFAIL"),
+            "CAP(confluence)": ("REASONING", "PARTIAL_SYMBOLIC_REASONING", frozenset({"CONSISTENCY"}), "CSOUND", None, "CREQ", "CFAIL"),
+            "LEX_CAP": ("REASONING", "PARTIAL_SYMBOLIC_REASONING", frozenset({"FORMULA_ENTAILMENT"}), "LEX_SOUND", None, "LEX_REQ", "LEX_FAIL"),
+        })
+        for descriptor_record in package.services:
+            with self.subTest(exact_descriptor=descriptor_record.identity.key.local):
+                self.assertTrue(descriptor_record.value.supported_targets)
+                self.assertTrue(descriptor_record.value.dependency_scope)
+                self.assertTrue(descriptor_record.value.required_trust_roots)
+        self.assertEqual(
+            {item.identity.key.local: len(item.value.supported_targets)
+             for item in package.services},
+            {"CAP(functions)": 3, "CAP(predicates)": 8,
+             "CAP(profile)": 1, "CAP(bounds)": 1,
+             "CAP(confluence)": 1, "LEX_CAP": 1})
         benv = package.certificates[0]
         self.assertEqual(benv.identity.key.local, "BENV")
         self.assertEqual(
@@ -182,6 +366,21 @@ class K3XReferenceTests(unittest.TestCase):
             ("PLUGIN_CERTIFICATE_ISSUER(CK)", "coding.certificate",
              "bundle_bounds_unsat"),
         )
+        self.assertEqual(
+            (benv.value.certificate_kind,
+             benv.value.request_binding.key.local,
+             tuple(item.key.local for item in benv.value.subjects),
+             benv.value.environment.key.local,
+             benv.value.capability_key.key.local,
+             benv.value.fragment.key.local,
+             benv.value.dependencies.key.local,
+             benv.value.claimed_conclusion,
+             benv.value.validator_key.key.local,
+             benv.value.trust_root_key.key.local,
+             benv.value.abstraction_class),
+            ("CONTRADICTION_PROOF", "R_b", ("C_b",), "E_b",
+             "CAP(bounds)", "BSOUND", "D_b", "CONSISTENCY_UNSAT",
+             "CAP(validate_bounds)", "TRB", "SYMBOLIC"))
 
         empty_package = replace(_at(construction.universe, construction.package), value=replace(_at(construction.universe, construction.package).value, declarations=(), pair_declarations=(), bindings=(), pair_bindings=(), profile_bindings=(), model_contracts=(), aliases=(), services=(), certificates=(), authority_facts=(), compatibility_claims=(), migrations=(), semantic_extensions=()))
         empty_result = ref.replay(_rewrite(construction.universe, {construction.package: empty_package}))
@@ -795,10 +994,15 @@ class K3XReferenceTests(unittest.TestCase):
         self.assertEqual(
             {identity.key.local for identity in changed},
             {"coding-minimal", "BINDING(DP(event_matches))",
-             "BINDING(DP(event_occurred))", "MODEL_task_accepts",
-             "MODEL_event_matches",
-            },
+             "MODEL_event_matches"},
         )
+        occurred_identity = next(
+            identity for identity in baseline_records
+            if identity.key.local == "BINDING(DP(event_occurred))")
+        self.assertEqual(baseline_records[occurred_identity],
+                         cycle_records[occurred_identity])
+        for identity in frozenset(baseline_records) & frozenset(cycle_records) - changed:
+            self.assertEqual(baseline_records[identity], cycle_records[identity])
         self.assertEqual(
             {item.identity.key.local for item in cycle_records.values()
              if isinstance(item.value, ref.ModelContract)
@@ -938,6 +1142,40 @@ class K3XReferenceTests(unittest.TestCase):
         )
         self.assertEqual(forward_package, retained_package)
         self.assertEqual(reverse_package, retained_package)
+        retained_authority_literal = next(
+            item for item in forward_package.value.declarations
+            if isinstance(item.value, ref.DeclarationShape)
+            and isinstance(item.value.literal_value,
+                           cp.AuthorityAttestationValue))
+        package_without_authority_literal = replace(
+            forward_package, value=replace(
+                forward_package.value,
+                declarations=tuple(
+                    item for item in forward_package.value.declarations
+                    if item.identity != retained_authority_literal.identity)))
+        self.assertNotIsInstance(
+            ref.replay(_rewrite(
+                forward.universe,
+                {forward_package.identity: package_without_authority_literal})),
+            ref.ObservationEvaluation)
+        retained_confluence_literal_binding = next(
+            item for item in forward_package.value.bindings
+            if isinstance(item.value, ref.SemanticBinding)
+            and item.value.binding_kind == "LITERAL"
+            and item.identity in _at(
+                forward.universe,
+                forward.universe.request.semantic_environment).value.bindings)
+        package_without_confluence_literal = replace(
+            forward_package, value=replace(
+                forward_package.value,
+                bindings=tuple(
+                    item for item in forward_package.value.bindings
+                    if item.identity != retained_confluence_literal_binding.identity)))
+        self.assertNotIsInstance(
+            ref.replay(_rewrite(
+                forward.universe,
+                {forward_package.identity: package_without_confluence_literal})),
+            ref.ObservationEvaluation)
         self.assertEqual(len(forward_result.observations), 2)
         absent_node = fx.rid(ref.RecordKind.BINDING, "absent", namespace="confluence.binding")
         with self.assertRaisesRegex(ValueError, "confluence capability/fragment"):
@@ -994,8 +1232,18 @@ class K3XReferenceTests(unittest.TestCase):
                 if isinstance(item.value, ref.ModelContract)
                 and item.value.target_binding == node_identity
             )
-            with self.assertRaises(ValueError):
-                ref.replay(_rewrite(forward.universe, {node_model.identity: None}))
+            package_without_model = replace(
+                forward_package,
+                value=replace(
+                    forward_package.value,
+                    model_contracts=tuple(
+                        item for item in forward_package.value.model_contracts
+                        if item.identity != node_model.identity)))
+            self.assertNotIsInstance(
+                ref.replay(_rewrite(
+                    forward.universe,
+                    {forward_package.identity: package_without_model})),
+                ref.ObservationEvaluation)
         confluence_service = next(item for item in composition.records if isinstance(item.value, ref.ServiceIdentity) and item.identity.key.local == "SK(confluence)")
         assert_confluence_rejected(replace(confluence_service, value=replace(confluence_service.value, abi_version=fx.V2)))
         assert_confluence_rejected(replace(confluence_service, value=replace(confluence_service.value, plugin_key=fx.key("foreign", namespace="plugin"))))
@@ -1057,6 +1305,29 @@ class K3XReferenceTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     ref.replay(_rewrite(
                         forward.universe, {authority_record.identity: None}))
+        confluence_sources = tuple(
+            item.value for item in confluence_authority_records
+            if isinstance(item.value, ref.SourceRecord))
+        self.assertEqual(
+            {(item.issuer, item.namespace, item.stable_identity)
+             for item in confluence_sources},
+            {("PLUGIN_ISSUER(APK)", "AUTHENTICATED_FIXTURE_INSTRUCTION",
+              "CODING_SOURCE(c,1)"),
+             ("PLUGIN_ISSUER(APK)", "AUTHENTICATED_FIXTURE_INSTRUCTION",
+              "CODING_SOURCE(c,2)")})
+        confluence_facts = tuple(
+            item.value for item in confluence_authority_records
+            if isinstance(item.value, ref.AuthorityFactRecord))
+        self.assertEqual(len(confluence_facts), 2)
+        for fact in confluence_facts:
+            self.assertEqual(fact.principal, "fixture_principal")
+            self.assertEqual(fact.admission_subject_data.normative_role,
+                             "REQUIRE")
+            self.assertEqual(len(fact.evidence_refs), 1)
+            evidence = next(iter(fact.evidence_refs))
+            self.assertEqual(
+                (evidence.key.owner, evidence.key.namespace),
+                ("PLUGIN_ISSUER(ATK)", "coding.authority.attestation"))
         semantic = _at(forward.universe, forward.universe.request.semantic_environment)
         semantic_mutations = (
             replace(semantic.value, abi_version=fx.V2),
@@ -1337,6 +1608,22 @@ class K3XReferenceTests(unittest.TestCase):
             records=(*rewritten_wrong_environment.records, rogue_environment))
         self.assertFalse(isinstance(
             ref.replay(wrong_environment_universe), ref.LookupReplay))
+        for field_name, changed_value in (
+            ("chi_c", (("rogue", "value"),)),
+            ("mechanically_extracted_dependencies", frozenset({
+                fx.rid(ref.RecordKind.MIGRATION, "MK0",
+                       owner="capknow.fixture.evolution-owner",
+                       namespace="evolution")})),
+            ("authority_facts", (fx.rid(
+                ref.RecordKind.MIGRATION, "MK0",
+                owner="capknow.fixture.evolution-owner",
+                namespace="evolution"),)),
+        ):
+            with self.subTest(evolution_environment_field=field_name):
+                assert_evolution_rejected(replace(
+                    evolution_environment,
+                    value=replace(evolution_environment.value,
+                                  **{field_name: changed_value})))
         migration_record = next(
             item for item in evolution_composition.records
             if isinstance(item.value, ref.MigrationDeclaration))
