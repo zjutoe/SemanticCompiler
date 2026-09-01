@@ -83,6 +83,8 @@ from .reference import (
     InvocationRequest,
     ReasoningRequest,
     Judgment,
+    K1SyntaxKey,
+    K1SyntaxTag,
     Layer,
     LexicalBinding,
     LifecycleRecord,
@@ -125,6 +127,7 @@ from .reference import (
     PairUse,
     ServiceUseTrustTarget,
     PairTrustTarget,
+    JudgmentTrustTarget,
     PairCoherenceAdmission,
     PairCoherenceSubject,
     CertificateAdmission,
@@ -179,6 +182,7 @@ from .reference import (
     dependency_key,
     dependency_keys,
     dependency_reachability,
+    frozen_bounds_syntax_roots,
     frozen_confluence_syntax_roots,
     frozen_lexical_syntax_roots,
     frozen_task_syntax_roots,
@@ -1455,6 +1459,9 @@ def pair_construction() -> PairConstruction:
         value=replace(
             validation_capability.value,
             dependency_scope=dependency_environment.value.transitive_dependency_closure,
+            proper_semantic_dependencies=(
+                validation_capability.value.proper_semantic_dependencies
+                | dependency_keys({pair_binding_id, right_id})),
         ),
     )
     left_model = replace(left_model, value=replace(
@@ -5869,6 +5876,165 @@ def _retained_ck() -> tuple[LogicalRecord, tuple[LogicalRecord, ...]]:
                     and item.identity not in literal_spec_ids | ordinary_spec_ids
                     and item.identity != retained_csound.identity))
         ))
+    preliminary = compose_records(_identity_union(
+        (retained_package,), support))
+
+    def environment_projection(
+        identity: RecordIdentity,
+        syntax: frozenset[K1SyntaxKey],
+        literal_locals: frozenset[str] = frozenset(),
+        lexical_bindings: tuple[RecordIdentity, ...] = (),
+        authority_facts: tuple[RecordIdentity, ...] = (),
+    ) -> LogicalRecord:
+        declarations: set[RecordIdentity] = set()
+        bindings: set[RecordIdentity] = set()
+        for root in syntax:
+            if root.tag is K1SyntaxTag.DECLARATION:
+                declaration = (preliminary.at(RecordIdentity(
+                    RecordKind.DECLARATION, root.exact_key))
+                    or preliminary.at(RecordIdentity(
+                        RecordKind.TYPE_DECLARATION, root.exact_key)))
+                if declaration is None:
+                    raise ValueError(("missing environment declaration", root))
+                declarations.add(declaration.identity)
+            elif root.tag is K1SyntaxTag.SYMBOL:
+                matches = tuple(
+                    item for item in preliminary.records
+                    if isinstance(item.value, DeclarationShape)
+                    and item.value.symbol_key == root.exact_key)
+                if len(matches) != 1:
+                    raise ValueError(("ambiguous environment symbol", root))
+                declarations.add(matches[0].identity)
+                associated = tuple(
+                    item for item in retained_package.value.bindings
+                    if isinstance(item.value, SemanticBinding)
+                    and item.value.declaration == matches[0].identity)
+                if len(associated) != 1:
+                    raise ValueError(("ambiguous environment binding", root))
+                bindings.add(associated[0].identity)
+        for local in literal_locals:
+            declaration = next(
+                item for item in retained_package.value.declarations
+                if item.identity.key.local.endswith(f",{local})"))
+            binding = next(
+                item for item in retained_package.value.bindings
+                if isinstance(item.value, SemanticBinding)
+                and item.value.declaration == declaration.identity)
+            declarations.add(declaration.identity)
+            bindings.add(binding.identity)
+        return LogicalRecord(identity, SemanticEnvironment(
+            ABI0, tuple(sorted(declarations)), (), tuple(sorted(bindings)),
+            authority_facts=authority_facts,
+            lexical_bindings=lexical_bindings,
+            mechanically_extracted_dependencies=syntax))
+
+    lexical_binding_id = rid(
+        RecordKind.LEXICAL_BINDING, "lk0", namespace="lexical")
+    lexical_task_declaration = next(
+        item.identity for item in retained_package.value.declarations
+        if item.identity.key.local == "L(T(TaskSpec),t_t)")
+    lexical_binding = LogicalRecord(
+        lexical_binding_id,
+        LexicalBinding(lexical_binding_id.key, lexical_task_declaration,
+                       "scope_lex"))
+    bounds_contract_id = rid(
+        RecordKind.OUTCOME, "C_b", namespace="bounds.contract")
+    bounds_source = record(
+        RecordKind.SOURCE, "SRC(b,1)",
+        SourceRecord(
+            "PLUGIN_ISSUER(APK)", "AUTHENTICATED_FIXTURE_INSTRUCTION",
+            "CODING_SOURCE(b,1)", frozenset({
+                "AUTHENTICATED_BY(APK)",
+                "CLAUSE_LOCAL_IDENTITY(coding.bounds.clause)",
+            })),
+        owner="PLUGIN_ISSUER(APK)", namespace="authenticated.fixture.source")
+    bounds_authority = record(
+        RecordKind.AUTHORITY_REF, "AUTH(b,1)",
+        AuthorityRefRecord(
+            "PLUGIN_ISSUER(APK)", "coding.fixture", "CODING_AUTHORITY(b,1)"),
+        owner="PLUGIN_ISSUER(APK)", namespace="coding.fixture")
+    bounds_attestation = cp.AuthorityAttestationValue(
+        bounds_authority.identity, bounds_source.identity,
+        "fixture_principal", "REQUIRE",
+        cp.AuthorityAttestationSubjectIdentity(
+            cp.AuthoritySubjectTag.CLAUSE, bounds_contract_id,
+            clause_tag=cp.AuthorityClauseTag.BOUNDS))
+    bounds_fact_id = rid(
+        RecordKind.AUTHORITY_FACT, "AFB(b,1)",
+        namespace="bounds.authority.binding")
+    bounds_fact = LogicalRecord(bounds_fact_id, AuthorityFactRecord(
+        key("AF(b,1)", namespace="bounds.authority.fact"),
+        bounds_authority.identity, bounds_source.identity,
+        "fixture_principal", bounds_attestation,
+        frozenset({rid(
+            RecordKind.EVIDENCE, "AUTHORITY_EVIDENCE_LOCAL(b,1)",
+            owner="PLUGIN_ISSUER(ATK)",
+            namespace="coding.authority.attestation")})))
+    confluence_authority_records = tuple(
+        item for item in confluence.manifest
+        if isinstance(item.value, (
+            SourceRecord, AuthorityRefRecord, AuthorityFactRecord)))
+    confluence_fact_ids = tuple(sorted(
+        item.identity for item in confluence_authority_records
+        if isinstance(item.value, AuthorityFactRecord)))
+    environment_records = (
+        environment_projection(
+            rid(RecordKind.SEMANTIC_ENVIRONMENT, "E_b",
+                namespace="bounds.environment"),
+            frozen_bounds_syntax_roots(),
+            frozenset({"ts_nonempty", "ts_lt_100", "ts_ge_200"}),
+            authority_facts=(bounds_fact_id,)),
+        environment_projection(
+            rid(RecordKind.SEMANTIC_ENVIRONMENT, "E_c",
+                namespace="confluence.environment"),
+            frozen_confluence_syntax_roots(),
+            frozenset({"s_c", "P_c", "F_c", "O_c"}),
+            authority_facts=confluence_fact_ids),
+        environment_projection(
+            rid(RecordKind.SEMANTIC_ENVIRONMENT, "E_lex",
+                namespace="lexical.environment"),
+            frozen_lexical_syntax_roots(), frozenset({"t_t"}),
+            (lexical_binding_id,)),
+    )
+    ordinary_root = core_records.at(rid(
+        RecordKind.TRUST_ROOT, "TR", namespace="trust"))
+    confluence_root = next(
+        item for item in confluence.manifest
+        if item.identity == rid(RecordKind.TRUST_ROOT, "ROOT_TR_c",
+                                namespace="confluence.trust"))
+    if ordinary_root is None:
+        raise ValueError("missing retained ordinary trust root")
+    bounds_root_id = rid(
+        RecordKind.TRUST_ROOT, "TRB", namespace="bounds.trust")
+    bounds_capability_id = rid(
+        RecordKind.CAPABILITY, "CAP(bounds)", namespace="coding.capability")
+    bounds_validator_id = rid(
+        RecordKind.CAPABILITY, "CAP(validate_bounds)",
+        namespace="coding.capability")
+    bounds_environment_id = rid(
+        RecordKind.SEMANTIC_ENVIRONMENT, "E_b",
+        namespace="bounds.environment")
+    bounds_subjects = (ContractSubject(frozen_bounds_contract()),)
+    bounds_root = LogicalRecord(bounds_root_id, TrustRootRecord(
+        bounds_root_id.key, "EMBEDDING_POLICY_PRODUCER(TP)",
+        frozenset({bounds_capability_id, bounds_validator_id}),
+        frozenset({"CONTRADICTION_PROOF"}),
+        frozenset({
+            ServiceUseTrustTarget(
+                bounds_capability_id, "CONSISTENCY",
+                EnvironmentUse("CONSISTENCY", bounds_subjects),
+                bounds_environment_id),
+            ServiceUseTrustTarget(
+                bounds_validator_id, "CONSISTENCY",
+                EnvironmentUse("CONSISTENCY", bounds_subjects),
+                bounds_environment_id),
+            JudgmentTrustTarget("CONSISTENCY", bounds_subjects),
+        }), "V0_EXTERNAL_TRUST_PREMISE"))
+    support = _identity_union(
+        support, environment_records,
+        (lexical_binding, bounds_source, bounds_authority, bounds_fact,
+         *confluence_authority_records,
+         ordinary_root, bounds_root, confluence_root))
     if (len(package_value.declarations), len(retained_literals), len(symbols),
             len(package_value.bindings), len(package_value.model_contracts),
             len(package_value.services)) != (119, 47, 17, 57, 58, 6):
@@ -6024,6 +6190,11 @@ def core_construction(
 
 def confluence_construction(order: OrderTag) -> ConfluenceConstruction:
     local = _confluence_construction_local(order)
+    local_composition = compose_records(local.universe.records)
+    graph_request = local.universe.request
+    assert isinstance(graph_request, GraphEvaluationRequest)
+    local_semantic = local_composition.at(graph_request.semantic_environment)
+    assert local_semantic is not None
     package, support = _retained_ck()
     universe = _install_retained_package(local.universe, package, support)
     composition = compose_records(universe.records)
@@ -6094,7 +6265,7 @@ def confluence_construction(order: OrderTag) -> ConfluenceConstruction:
         semantic_record,
         value=SemanticEnvironment(
             ABI0, selected_declarations, (), selected_binding_ids,
-            authority_facts=semantic_value.authority_facts,
+            authority_facts=local_semantic.value.authority_facts,
             mechanically_extracted_dependencies=frozen_confluence_syntax_roots()))
     rebuilt_dependency = replace(
         dependency_record,
@@ -6820,6 +6991,7 @@ _EI_151_E_t_empty: IdentityLiteral = ('SEMANTIC_ENVIRONMENT_RECORD', 'capknow.se
 _EI_152_E_t_extra: IdentityLiteral = ('SEMANTIC_ENVIRONMENT_RECORD', 'capknow.semantic', 'environment', 'E_t_extra', (1,))
 _EI_153_E_lex: IdentityLiteral = ('SEMANTIC_ENVIRONMENT_RECORD', 'capknow.semantic', 'lexical.environment', 'E_lex', (1,))
 _EI_154_E_p: IdentityLiteral = ('SEMANTIC_ENVIRONMENT_RECORD', 'capknow.semantic', 'pair.environment', 'E_p', (1,))
+_EI_205_E_b: IdentityLiteral = ('SEMANTIC_ENVIRONMENT_RECORD', 'capknow.semantic', 'bounds.environment', 'E_b', (1,))
 _EI_155_XK0: IdentityLiteral = ('SEMANTIC_EXTENSION_RECORD', 'capknow.fixture.evolution-owner', 'evolution', 'XK0', (1,))
 _EI_156_XK1: IdentityLiteral = ('SEMANTIC_EXTENSION_RECORD', 'capknow.fixture.evolution-owner', 'evolution', 'XK1', (1,))
 _EI_157_PVSK: IdentityLiteral = ('SERVICE_RECORD', 'capknow.audit.pair-validator', 'coding.validation', 'refresh', (1,))
@@ -6840,6 +7012,7 @@ _EI_171_TP: IdentityLiteral = ('TRUST_POLICY_RECORD', 'capknow.semantic', 'trust
 _EI_172_ROOT_TR_c: IdentityLiteral = ('TRUST_ROOT_RECORD', 'capknow.semantic', 'confluence.trust', 'ROOT_TR_c', (1,))
 _EI_173_TRP: IdentityLiteral = ('TRUST_ROOT_RECORD', 'capknow.semantic', 'pair.trust', 'TRP', (1,))
 _EI_174_TR: IdentityLiteral = ('TRUST_ROOT_RECORD', 'capknow.semantic', 'trust', 'TR', (1,))
+_EI_206_TRB: IdentityLiteral = ('TRUST_ROOT_RECORD', 'capknow.semantic', 'bounds.trust', 'TRB', (1,))
 _EI_175_T_fixture_unit_one: IdentityLiteral = ('TYPE_DECLARATION_RECORD', 'capknow.fixture.permutation-one', 'coding.fixture.type', 'T(fixture_unit_one)', (1,))
 _EI_176_T_fixture_unit_two: IdentityLiteral = ('TYPE_DECLARATION_RECORD', 'capknow.fixture.permutation-one', 'coding.fixture.type', 'T(fixture_unit_two)', (1,))
 _EI_177_T_fixture_unit_four: IdentityLiteral = ('TYPE_DECLARATION_RECORD', 'capknow.fixture.permutation-two', 'coding.fixture.type', 'T(fixture_unit_four)', (1,))
@@ -7252,6 +7425,28 @@ _EXPECTED_RETAINED_CORE_UNIVERSE_ADDITIONS = (
     + _EXPECTED_RETAINED_CONFLUENCE_MEMBERS
     + _EXPECTED_PROFILE_IMPL_SPECS
 )
+_EXPECTED_RETAINED_AUTHORITATIVE_ROOTS = (
+    _EI_102_lk0, _EI_148_E_c, _EI_153_E_lex, _EI_172_ROOT_TR_c,
+    _EI_205_E_b, _EI_206_TRB,
+    ('AUTHORITY_FACT_RECORD', 'capknow.semantic',
+     'bounds.authority.binding', 'AFB(b,1)', (1,)),
+    ('AUTHORITY_FACT_RECORD', 'capknow.semantic',
+     'confluence.authority.binding', 'AFB(c,1)', (1,)),
+    ('AUTHORITY_FACT_RECORD', 'capknow.semantic',
+     'confluence.authority.binding', 'AFB(c,2)', (1,)),
+    ('AUTHORITY_REF_RECORD', 'PLUGIN_ISSUER(APK)',
+     'coding.fixture', 'AUTH(b,1)', (1,)),
+    ('AUTHORITY_REF_RECORD', 'PLUGIN_ISSUER(APK)',
+     'coding.fixture', 'AUTH(c,1)', (1,)),
+    ('AUTHORITY_REF_RECORD', 'PLUGIN_ISSUER(APK)',
+     'coding.fixture', 'AUTH(c,2)', (1,)),
+    ('SOURCE_RECORD', 'PLUGIN_ISSUER(APK)',
+     'authenticated.fixture.source', 'SRC(b,1)', (1,)),
+    ('SOURCE_RECORD', 'PLUGIN_ISSUER(APK)',
+     'authenticated.fixture.source', 'SRC(c,1)', (1,)),
+    ('SOURCE_RECORD', 'PLUGIN_ISSUER(APK)',
+     'authenticated.fixture.source', 'SRC(c,2)', (1,)),
+)
 _EXPECTED_RETAINED_CORE_WITHOUT_MODELS = tuple(
     identity for identity in _EXPECTED_RETAINED_CORE_UNIVERSE_ADDITIONS
     if identity[0] != "MODEL_CONTRACT_RECORD"
@@ -7262,6 +7457,7 @@ _EXPECTED_RETAINED_CYCLE_UNIVERSE_ADDITIONS = (
     + tuple(identity for identity in _EXPECTED_RETAINED_CONFLUENCE_MEMBERS
             if identity[0] != "CAPABILITY_RECORD" and identity[0] != "SERVICE_RECORD")
     + _EXPECTED_PROFILE_IMPL_SPECS
+    + _EXPECTED_RETAINED_AUTHORITATIVE_ROOTS
 )
 _EXPECTED_CONFLUENCE_REPAIR6_ADDITIONS: tuple[IdentityLiteral, ...] = (
     *_EXPECTED_RETAINED_CORE_ADDITIONS,
@@ -7867,7 +8063,7 @@ def _build_expected_assertions() -> dict[FixtureId, ReplayAssertion]:
         if identity[2].startswith("cycle")
         or identity in {
             _EI_091_D_t, _EI_140_Q_t_ADMITTED, _EI_146_RES_t_ADMITTED,
-            _EI_150_E_t, _EI_165_T_admitted, _EI_171_TP, _EI_174_TR,
+            _EI_150_E_t, _EI_165_T_admitted, _EI_171_TP,
             _EI_179_RepositorySnapshot, _EI_204_TaskSpec,
             _EI_071_ADMIT_RepositorySnapshot, _EI_072_ADMIT_TaskSpec,
             ("CERTIFICATE_RECORD", "PLUGIN_CERTIFICATE_ISSUER(CK)",
@@ -7927,6 +8123,12 @@ def _build_expected_assertions() -> dict[FixtureId, ReplayAssertion]:
                 + (_EXPECTED_RETAINED_CORE_ADDITIONS
                    if identifier.family is FixtureFamily.PROPER_CYCLE_REJECTION
                    else ())
+                + (_EXPECTED_RETAINED_AUTHORITATIVE_ROOTS
+                   if identifier.family in {
+                       FixtureFamily.CORE_DEFINITIONAL,
+                       FixtureFamily.TRUST_BRANCH,
+                       FixtureFamily.CONFLUENCE_ORDER,
+                   } else ())
                 + ((_EXPECTED_RETAINED_CORE_WITHOUT_MODELS
                     if identifier.family is FixtureFamily.MISSING_VARIANT
                     and identifier.parameters[0] in retained_core_without_models_rows

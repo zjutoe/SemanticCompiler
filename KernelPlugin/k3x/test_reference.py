@@ -39,14 +39,17 @@ def _asserted_syntax_keys(kind: str) -> frozenset[ref.K1SyntaxKey]:
                         "SP(observations_equal)",
                         "SP(dependency_metadata_changed)"},
     }[kind]
+    def exact(local: str, namespace: str) -> ref.ExactKey:
+        return ref.ExactKey(
+            "capknow.semantic", namespace, local, ref.Version((1,)))
     return frozenset({
         ref.K1SyntaxKey(ref.K1SyntaxTag.PLUGIN,
-                        fx.key("coding-minimal", namespace="plugin")),
+                        exact("coding-minimal", "plugin")),
         *(ref.K1SyntaxKey(ref.K1SyntaxTag.SYMBOL,
-                          fx.key(local, namespace="coding.symbol"))
+                          exact(local, "coding.symbol"))
           for local in symbols),
         *(ref.K1SyntaxKey(ref.K1SyntaxTag.DECLARATION,
-                          fx.key(f"T({name})", namespace="coding.type"))
+                          exact(f"T({name})", "coding.type"))
           for name in type_names),
     })
 
@@ -65,11 +68,16 @@ def _asserted_dependency_key(identity: ref.RecordIdentity) -> ref.DependencyKey:
         ref.RecordKind.PACKAGE: ref.DependencyTag.PLUGIN,
         ref.RecordKind.TYPE_DECLARATION: ref.DependencyTag.DECLARATION,
         ref.RecordKind.DECLARATION: ref.DependencyTag.DECLARATION,
+        ref.RecordKind.EVENT: ref.DependencyTag.EVENT,
         ref.RecordKind.BINDING: ref.DependencyTag.BINDING,
+        ref.RecordKind.PAIR_BINDING: ref.DependencyTag.PAIR_BINDING,
         ref.RecordKind.PROFILE_BINDING: ref.DependencyTag.PROFILE_BINDING,
         ref.RecordKind.PAIR_DECLARATION: ref.DependencyTag.PAIR_DECLARATION,
         ref.RecordKind.CONTRACT_SPEC: ref.DependencyTag.CONTRACT_SPEC,
         ref.RecordKind.SERVICE: ref.DependencyTag.SERVICE,
+        ref.RecordKind.CAPABILITY: ref.DependencyTag.CAPABILITY,
+        ref.RecordKind.CERTIFICATE: ref.DependencyTag.CERTIFICATE,
+        ref.RecordKind.MODEL_CONTRACT: ref.DependencyTag.MODEL_CONTRACT,
         ref.RecordKind.TRUST_ROOT: ref.DependencyTag.TRUST_ROOT,
         ref.RecordKind.SEMANTIC_ENVIRONMENT: ref.DependencyTag.CARRIER,
         ref.RecordKind.SEMANTIC_ENVIRONMENT: ref.DependencyTag.CARRIER,
@@ -115,10 +123,24 @@ def _asserted_dependency_environment(
         if len(declarations) != 1:
             raise AssertionError("independent symbol declaration is not unique")
         declaration = declarations[0]
-        bindings = tuple(
+        ordinary = tuple(
             item for item in composition.records
             if isinstance(item.value, ref.SemanticBinding)
             and item.value.declaration == declaration.identity)
+        pair_owned = tuple(
+            occurrence for pair_binding in composition.records
+            if isinstance(pair_binding.value, ref.PairBinding)
+            and (pair_declaration := composition.at(ref.RecordIdentity(
+                ref.RecordKind.PAIR_DECLARATION,
+                pair_binding.value.pair_key))) is not None
+            and isinstance(pair_declaration.value, ref.PairDeclaration)
+            and pair_declaration.value.occurrence_symbol
+                == declaration.value.symbol_key
+            and (occurrence := composition.at(
+                pair_binding.value.occurrence_bundle)) is not None
+            and isinstance(occurrence.value,
+                           ref.OccurrenceSemanticContractBundle))
+        bindings = ordinary + pair_owned
         if len(bindings) != 1:
             raise AssertionError("independent symbol binding is not unique")
         source = _asserted_lift(root)
@@ -146,13 +168,16 @@ def _asserted_dependency_environment(
         direct = (
             value.proper_declaration_dependencies
             if isinstance(value, ref.TypeDeclaration)
+            else value.proper_declaration_dependencies
+            if isinstance(value, ref.PairDeclaration)
             else value.proper_type_dependencies
             if isinstance(value, ref.DeclarationShape)
             else value.support
             if isinstance(value, ref.ContractSpec)
             else value.proper_semantic_dependencies
             if isinstance(value, (ref.SemanticBinding, ref.ProfileBinding,
-                                  ref.OccurrenceSemanticContractBundle))
+                                  ref.OccurrenceSemanticContractBundle,
+                                  ref.PairBinding))
             else frozenset())
         direct_keys = {_asserted_dependency_key(item) for item in direct}
         proper.update(direct_keys)
@@ -164,6 +189,43 @@ def _asserted_dependency_environment(
     return ref.DependencyEnvironment(
         syntax, roots, frozenset(associations), expanded, frozenset(proper),
         frozenset(reached - roots), frozenset())
+
+
+def _asserted_dependency_resolves(
+    key: ref.DependencyKey, composition: ref.Composition,
+) -> bool:
+    direct = composition.at(ref.RecordIdentity(key.record_kind, key.exact_key))
+    if direct is not None:
+        return True
+    if key.tag is ref.DependencyTag.DECLARATION:
+        return composition.at(ref.RecordIdentity(
+            ref.RecordKind.TYPE_DECLARATION, key.exact_key)) is not None
+    if key.tag is not ref.DependencyTag.SYMBOL:
+        return False
+    declarations = tuple(
+        item for item in composition.records
+        if isinstance(item.value, ref.DeclarationShape)
+        and item.value.symbol_key == key.exact_key)
+    if len(declarations) != 1:
+        return False
+    ordinary = tuple(
+        item for item in composition.records
+        if isinstance(item.value, ref.SemanticBinding)
+        and item.value.declaration == declarations[0].identity)
+    pair_owned = tuple(
+        item for item in composition.records
+        if isinstance(item.value, ref.OccurrenceSemanticContractBundle)
+        and any(
+            isinstance(pair.value, ref.PairBinding)
+            and pair.value.occurrence_bundle == item.identity
+            and (pair_declaration := composition.at(ref.RecordIdentity(
+                ref.RecordKind.PAIR_DECLARATION,
+                pair.value.pair_key))) is not None
+            and isinstance(pair_declaration.value, ref.PairDeclaration)
+            and pair_declaration.value.occurrence_symbol
+                == declarations[0].value.symbol_key
+            for pair in composition.records))
+    return len(ordinary + pair_owned) == 1
 
 
 def _rewrite(universe: ref.Universe, replacements: dict[ref.RecordIdentity, ref.LogicalRecord | None]) -> ref.Universe:
@@ -624,7 +686,7 @@ class K3XReferenceTests(unittest.TestCase):
             self.assertEqual(target.subjects, subjects)
             self.assertTrue(all(
                 isinstance(root, ref.DependencyKey)
-                and ref._record_for_dependency(root, composition) is not None
+                and _asserted_dependency_resolves(root, composition)
                 for root in _asserted_reasoning_roots(target, {
                     "CAP(bounds)": "bounds",
                     "CAP(confluence)": "confluence",
@@ -1290,6 +1352,88 @@ class K3XReferenceTests(unittest.TestCase):
         with self.assertRaises(ref.FiniteProfileError):
             ref.evaluate_invocation(construction.request, ref.compose_records(_rewrite(construction.universe, {sigma.identity: renamed}).records))
 
+        descriptors = {
+            item.identity.key.local: item.value
+            for item in _at(construction.universe, construction.package).value.services
+        }
+        authoritative_roots = {
+            "CAP(bounds)": ref.RecordIdentity(
+                ref.RecordKind.SEMANTIC_ENVIRONMENT,
+                ref.ExactKey("capknow.semantic", "bounds.environment",
+                             "E_b", ref.Version((1,)))),
+            "CAP(confluence)": ref.RecordIdentity(
+                ref.RecordKind.SEMANTIC_ENVIRONMENT,
+                ref.ExactKey("capknow.semantic", "confluence.environment",
+                             "E_c", ref.Version((1,)))),
+            "LEX_CAP": ref.RecordIdentity(
+                ref.RecordKind.SEMANTIC_ENVIRONMENT,
+                ref.ExactKey("capknow.semantic", "lexical.environment",
+                             "E_lex", ref.Version((1,)))),
+        }
+        for local, identity in authoritative_roots.items():
+            carrier = composition.at(identity)
+            self.assertIsNotNone(carrier)
+            assert carrier is not None
+            expected_authority = {
+                "CAP(bounds)": {"AFB(b,1)"},
+                "CAP(confluence)": {"AFB(c,1)", "AFB(c,2)"},
+                "LEX_CAP": set(),
+            }[local]
+            self.assertEqual(
+                {item.key.local for item in carrier.value.authority_facts},
+                expected_authority)
+            missing = ref.compose_records(tuple(
+                item for item in composition.records
+                if item.identity != identity))
+            with self.subTest(missing_environment=identity.key.local):
+                with self.assertRaisesRegex(ValueError, "unresolved"):
+                    ref.dependency_reachability(
+                        descriptors[local].proper_semantic_dependencies,
+                        missing)
+        for local, identity in (
+            ("CAP(bounds)", ref.RecordIdentity(
+                ref.RecordKind.TRUST_ROOT,
+                ref.ExactKey("capknow.semantic", "bounds.trust", "TRB",
+                             ref.Version((1,))))),
+            ("CAP(confluence)", ref.RecordIdentity(
+                ref.RecordKind.TRUST_ROOT,
+                ref.ExactKey("capknow.semantic", "confluence.trust",
+                             "ROOT_TR_c", ref.Version((1,))))),
+        ):
+            missing = ref.compose_records(tuple(
+                item for item in composition.records
+                if item.identity != identity))
+            with self.subTest(missing_trust_root=identity.key.local):
+                with self.assertRaisesRegex(ValueError, "unresolved"):
+                    ref.dependency_reachability(
+                        descriptors[local].proper_semantic_dependencies,
+                        missing)
+        foreign_root = ref.DependencyKey(
+            ref.DependencyTag.TRUST_ROOT,
+            ref.ExactKey("foreign.owner", "foreign.trust", "TR",
+                         ref.Version((1,))))
+        with self.assertRaisesRegex(ValueError, "unresolved"):
+            ref.dependency_reachability(frozenset({foreign_root}), composition)
+        foreign_environment = ref.RecordIdentity(
+            ref.RecordKind.SEMANTIC_ENVIRONMENT,
+            ref.ExactKey("foreign.owner", "foreign.environment", "E",
+                         ref.Version((1,))))
+        with self.assertRaisesRegex(ValueError, "unresolved"):
+            ref.derive_dependency_environment(
+                frozenset(), frozenset({foreign_environment}), composition)
+        bounds_root = composition.at(ref.RecordIdentity(
+            ref.RecordKind.TRUST_ROOT,
+            ref.ExactKey("capknow.semantic", "bounds.trust", "TRB",
+                         ref.Version((1,)))))
+        assert bounds_root is not None
+        self.assertEqual(
+            {item.key.local for item in bounds_root.value.trusted_validators},
+            {"CAP(bounds)", "CAP(validate_bounds)"})
+        self.assertEqual(len(bounds_root.value.permitted_targets), 3)
+        summary = next(iter(model.capability_summaries))
+        with self.assertRaisesRegex(TypeError, "DependencyKey"):
+            replace(summary, dependency_scope=frozenset({construction.binding}))
+
     def test_k3x_04_declaration_binding_and_capability_are_derived(self) -> None:
         construction = fx.core_construction()
         environment_record = _at(construction.universe, construction.semantic_environment)
@@ -1329,6 +1473,37 @@ class K3XReferenceTests(unittest.TestCase):
         self.assertIsInstance(admitted, ref.PairReplay)
         self.assertEqual(admitted.result.result.tag, "PAIR_COHERENCE_ADMITTED")
         binding = _at(construction.universe, construction.pair_binding)
+        without_pair_binding = _rewrite(
+            construction.universe, {binding.identity: None})
+        self.assertNotIsInstance(ref.replay(without_pair_binding), ref.PairReplay)
+        pair_composition = ref.compose_records(construction.universe.records)
+        pair_declaration = pair_composition.at(ref.RecordIdentity(
+            ref.RecordKind.PAIR_DECLARATION, binding.value.pair_key))
+        assert pair_declaration is not None
+        pair_target_roots = ref._capability_target_roots(
+            ref.PairTarget(pair_declaration.identity), pair_composition)
+        self.assertEqual(pair_target_roots, frozenset({
+            _asserted_dependency_key(pair_declaration.identity),
+            _asserted_dependency_key(binding.identity),
+            _asserted_dependency_key(binding.value.occurrence_bundle),
+        }))
+        occurrence_bundle = _at(
+            construction.universe, binding.value.occurrence_bundle)
+        occurrence_symbol = ref.K1SyntaxKey(
+            ref.K1SyntaxTag.SYMBOL,
+            ref.ExactKey("capknow.semantic", "coding.symbol",
+                         "SP(refresh_occurred)", ref.Version((1,))))
+        occurrence_syntax = frozenset({occurrence_symbol})
+        derived_occurrence = ref.derive_dependency_environment(
+            occurrence_syntax, frozenset({binding.identity}),
+            pair_composition)
+        asserted_occurrence = _asserted_dependency_environment(
+            occurrence_syntax, frozenset({binding.identity}),
+            pair_composition)
+        self.assertEqual(derived_occurrence, asserted_occurrence)
+        self.assertIn(
+            _asserted_dependency_key(occurrence_bundle.identity),
+            derived_occurrence.expanded_root_keys)
         self.assertEqual(len(binding.value.validation_references), 2)
         self.assertFalse(binding.value.validation_references & binding.value.proper_semantic_dependencies)
         manifest = construction.manifest
@@ -1672,7 +1847,9 @@ class K3XReferenceTests(unittest.TestCase):
         self.assertTrue(all(projections[tag].result is None for tag in fx.TrustFixtureTag if tag is not fx.TrustFixtureTag.ADMITTED))
         admitted = fx.core_construction()
         without_root = _rewrite(admitted.universe, {admitted.trust_root: None})
-        self.assertEqual(ref.replay(without_root).lifecycle, "TRUST_ROOT_ABSENT")
+        missing_root = ref.replay(without_root)
+        self.assertIsInstance(missing_root, ref.CompositionReplay)
+        self.assertEqual(missing_root.formation, ref.Formation.MALFORMED)
         without_trust = _rewrite(admitted.universe, {admitted.trust_environment: None})
         self.assertEqual(ref.replay(without_trust).formation, ref.Formation.MALFORMED)
 

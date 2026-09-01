@@ -463,7 +463,13 @@ class ModelCapabilitySummary:
     capability_class: str
     sound_fragment_key: RecordIdentity
     complete_fragment_key: RecordIdentity | None
-    dependency_scope: frozenset[RecordIdentity]
+    dependency_scope: frozenset[DependencyKey]
+
+    def __post_init__(self) -> None:
+        if any(not isinstance(item, DependencyKey)
+               for item in self.dependency_scope):
+            raise TypeError(
+                "model capability dependency_scope requires DependencyKey values")
 
 
 @dataclass(frozen=True)
@@ -759,6 +765,12 @@ class ServiceUseTrustTarget:
 @dataclass(frozen=True)
 class PairTrustTarget:
     pair: RecordIdentity
+
+
+@dataclass(frozen=True)
+class JudgmentTrustTarget:
+    judgment: str
+    subjects: tuple[Any, ...]
 
 
 @dataclass(frozen=True)
@@ -2052,6 +2064,8 @@ def _direct_dependencies(identity: RecordIdentity, composition: Composition) -> 
         return value.proper_semantic_dependencies
     if isinstance(value, OccurrenceSemanticContractBundle):
         return value.proper_semantic_dependencies
+    if isinstance(value, PairBinding):
+        return value.proper_semantic_dependencies
     return frozenset()
 
 
@@ -2107,29 +2121,6 @@ def _record_for_dependency(
     if key.tag is DependencyTag.DECLARATION:
         return composition.at(RecordIdentity(
             RecordKind.TYPE_DECLARATION, key.exact_key))
-    if key.tag is DependencyTag.SYMBOL:
-        matches = tuple(
-            item for item in composition.records
-            if isinstance(item.value, DeclarationShape)
-            and item.value.symbol_key == key.exact_key)
-        return matches[0] if len(matches) == 1 else None
-    if (key.tag is DependencyTag.CARRIER
-            and key.carrier_kind is RecordKind.SEMANTIC_ENVIRONMENT):
-        roots_by_key = {
-            _frozen_key("E_b", "bounds.environment"):
-                frozen_bounds_syntax_roots(),
-            _frozen_key("E_c", "confluence.environment"):
-                frozen_confluence_syntax_roots(),
-            _frozen_key("E_lex", "lexical.environment"):
-                frozen_lexical_syntax_roots(),
-        }
-        roots = roots_by_key.get(key.exact_key)
-        if roots is not None:
-            identity = RecordIdentity(
-                RecordKind.SEMANTIC_ENVIRONMENT, key.exact_key)
-            return LogicalRecord(identity, SemanticEnvironment(
-                Version((0,)), (), (), (),
-                mechanically_extracted_dependencies=roots))
     return None
 
 
@@ -2186,7 +2177,19 @@ def _capability_target_roots(
             and item.value.profile_key == target.profile_key)
         return dependency_keys(matches)
     if isinstance(target, PairTarget):
-        return frozenset({dependency_key(target.pair)})
+        declaration = _resolve(composition, target.pair, PairDeclaration)
+        if declaration is None:
+            raise ValueError("missing exact pair declaration")
+        bindings = tuple(
+            item for item in composition.records
+            if isinstance(item.value, PairBinding)
+            and item.value.pair_key == declaration.value.pair_key)
+        if len(bindings) != 1:
+            raise ValueError("missing or ambiguous exact pair binding")
+        return dependency_keys(frozenset({
+            declaration.identity, bindings[0].identity,
+            bindings[0].value.occurrence_bundle,
+        }))
     if isinstance(target, ReasoningTarget):
         return reasoning_target_roots(target)
     if isinstance(target, EvolutionTarget):
@@ -2207,50 +2210,61 @@ def _capability_target_roots(
     raise FiniteProfileError("unsupported finite capability target")
 
 
+def _bindings_for_declaration(
+    declaration: LogicalRecord, composition: Composition,
+) -> tuple[LogicalRecord, ...]:
+    """Return the unique K2 ordinary or pair-owned binding association."""
+    assert isinstance(declaration.value, DeclarationShape)
+    ordinary = tuple(
+        item for item in composition.records
+        if isinstance(item.value, SemanticBinding)
+        and item.value.declaration == declaration.identity)
+    pair_owned: list[LogicalRecord] = []
+    for pair_binding in composition.records:
+        if not isinstance(pair_binding.value, PairBinding):
+            continue
+        pair_declaration = _resolve(
+            composition,
+            RecordIdentity(RecordKind.PAIR_DECLARATION,
+                           pair_binding.value.pair_key),
+            PairDeclaration)
+        occurrence = _resolve(
+            composition, pair_binding.value.occurrence_bundle,
+            OccurrenceSemanticContractBundle)
+        if (pair_declaration is not None and occurrence is not None
+                and pair_declaration.value.occurrence_symbol
+                    == declaration.value.symbol_key):
+            pair_owned.append(occurrence)
+    return ordinary + tuple(pair_owned)
+
+
+def _symbol_associations(
+    key: DependencyKey, composition: Composition,
+) -> frozenset[DependencyKey]:
+    declarations = tuple(
+        item for item in composition.records
+        if isinstance(item.value, DeclarationShape)
+        and item.value.symbol_key == key.exact_key)
+    if len(declarations) != 1:
+        raise ValueError("missing or ambiguous exact symbol declaration")
+    bindings = _bindings_for_declaration(declarations[0], composition)
+    if len(bindings) != 1:
+        raise ValueError("missing or ambiguous exact symbol binding")
+    return frozenset({dependency_key(declarations[0].identity),
+                      dependency_key(bindings[0].identity)})
+
+
 def _dependency_associations(
     key: DependencyKey, record: LogicalRecord,
     composition: Composition,
 ) -> frozenset[DependencyKey]:
     if key.tag is DependencyTag.SYMBOL:
-        assert isinstance(record.value, DeclarationShape)
-        bindings = tuple(
-            item for item in composition.records
-            if (isinstance(item.value, SemanticBinding)
-                and item.value.declaration == record.identity)
-            or (isinstance(item.value, OccurrenceSemanticContractBundle)
-                and any(
-                    isinstance(pair.value, PairBinding)
-                    and pair.value.occurrence_bundle == item.identity
-                    and (declaration := composition.at(RecordIdentity(
-                        RecordKind.PAIR_DECLARATION,
-                        pair.value.pair_key))) is not None
-                    and isinstance(declaration.value, PairDeclaration)
-                    and declaration.value.occurrence_symbol
-                        == record.value.symbol_key
-                    for pair in composition.records)))
-        if len(bindings) != 1:
-            raise ValueError("missing or ambiguous exact symbol binding")
-        return frozenset({dependency_key(record.identity),
-                          dependency_key(bindings[0].identity)})
+        return _symbol_associations(key, composition)
     if (key.tag is DependencyTag.DECLARATION
             and isinstance(record.value, DeclarationShape)
             and record.value.declaration_kind in {
                 "LITERAL", "FUNCTION", "PREDICATE"}):
-        bindings = tuple(
-            item for item in composition.records
-            if (isinstance(item.value, SemanticBinding)
-                and item.value.declaration == record.identity)
-            or (isinstance(item.value, OccurrenceSemanticContractBundle)
-                and any(
-                    isinstance(pair.value, PairBinding)
-                    and pair.value.occurrence_bundle == item.identity
-                    and (declaration := composition.at(RecordIdentity(
-                        RecordKind.PAIR_DECLARATION,
-                        pair.value.pair_key))) is not None
-                    and isinstance(declaration.value, PairDeclaration)
-                    and declaration.value.occurrence_symbol
-                        == record.value.symbol_key
-                    for pair in composition.records)))
+        bindings = _bindings_for_declaration(record, composition)
         if len(bindings) != 1:
             raise ValueError("missing or ambiguous declaration binding")
         return frozenset({dependency_key(bindings[0].identity)})
@@ -2268,13 +2282,18 @@ def dependency_reachability(
         if not isinstance(current, DependencyKey):
             raise TypeError("descriptor dependencies are exact DependencyKey values")
         record = _record_for_dependency(current, composition)
+        associated = (_symbol_associations(current, composition)
+                      if current.tag is DependencyTag.SYMBOL else frozenset())
         if record is None:
-            if current.tag is DependencyTag.TRUST_ROOT:
-                continue
-            raise ValueError(("unresolved descriptor dependency", current))
-        direct = dependency_keys(_direct_dependencies(record.identity, composition))
-        for target in direct | _dependency_associations(
-                current, record, composition):
+            if not associated:
+                raise ValueError(("unresolved descriptor dependency", current))
+            direct = frozenset()
+        else:
+            direct = dependency_keys(_direct_dependencies(
+                record.identity, composition))
+        for target in direct | associated | (
+                _dependency_associations(current, record, composition)
+                if record is not None else frozenset()):
             if target not in reached:
                 reached.add(target)
                 pending.append(target)
@@ -2645,10 +2664,7 @@ def _syntax_associations(
                 raise ValueError("missing or ambiguous exact symbol declaration")
             declaration = declarations[0]
             edges.add((source, dependency_key(declaration.identity)))
-            bindings = tuple(
-                item for item in composition.records
-                if isinstance(item.value, SemanticBinding)
-                and item.value.declaration == declaration.identity)
+            bindings = _bindings_for_declaration(declaration, composition)
             if len(bindings) != 1:
                 raise ValueError("missing or ambiguous exact symbol binding")
             edges.add((source, dependency_key(bindings[0].identity)))
@@ -2658,10 +2674,7 @@ def _syntax_associations(
                     and isinstance(declaration.value, DeclarationShape)
                     and declaration.value.declaration_kind in {
                         "LITERAL", "FUNCTION", "PREDICATE"}):
-                bindings = tuple(
-                    item for item in composition.records
-                    if isinstance(item.value, SemanticBinding)
-                    and item.value.declaration == declaration.identity)
+                bindings = _bindings_for_declaration(declaration, composition)
                 if len(bindings) != 1:
                     raise ValueError("missing or ambiguous exact declaration binding")
                 edges.add((source, dependency_key(bindings[0].identity)))
@@ -2688,6 +2701,8 @@ def derive_dependency_environment(
         current = pending.pop()
         outgoing = set(association_map.get(current, set()))
         record = _record_for_dependency(current, composition)
+        if record is None and not outgoing:
+            raise ValueError(("unresolved dependency root", current))
         if record is not None:
             direct = dependency_keys(_direct_dependencies(
                 record.identity, composition))
@@ -3320,8 +3335,12 @@ def _validate_retained_ck_exact(
                 expected_failure, expected_root,
                 *(tuple() if expected_complete is None else (expected_complete,)),
             })) | expected_target_roots
-            expected_descriptor_closure = dependency_reachability(
-                expected_proper, composition)
+            try:
+                expected_descriptor_closure = dependency_reachability(
+                    expected_proper, composition)
+            except (TypeError, ValueError):
+                return Judgment(
+                    "MALFORMED", ("RETAINED_DESCRIPTOR_DANGLING", local))
             if (descriptor.proper_semantic_dependencies != expected_proper
                     or descriptor.dependency_closure
                         != expected_descriptor_closure):
@@ -3418,10 +3437,9 @@ def validate_model_descriptor(model: ModelContract, descriptor: CapabilityDescri
         return Judgment("MALFORMED", ("DESCRIPTOR_DEPENDENCY_CLOSURE",))
     if any(item.kind is not RecordKind.TRUST_ROOT for item in descriptor.required_trust_roots):
         return Judgment("MALFORMED", ("DESCRIPTOR_TRUST_ROOT_KIND",))
-    trust_dependency_keys = dependency_keys(descriptor.required_trust_roots)
     if any(_record_for_dependency(item, composition) is None
            for item in descriptor.dependency_closure
-           if item not in trust_dependency_keys):
+           if item.tag is not DependencyTag.SYMBOL):
         return Judgment("MALFORMED", ("DESCRIPTOR_DANGLING_REFERENCE",))
     if BindingTarget(model.target_binding) not in descriptor.supported_targets:
         return Judgment("MALFORMED", ("DESCRIPTOR_TARGET",))
@@ -4013,10 +4031,11 @@ def validate_pair(request_identity: RecordIdentity, composition: Composition) ->
         ContractRole.SERVICE_FAILURE_BEHAVIOR: (("InterfaceFailure",), frozenset({"PairValidationResult.REASONING_ERROR"}), "pair_failure_projection"),
     }
     expected_capability_proper = dependency_keys(frozenset({
-        capability.service, declaration_identity, capability.sound_fragment,
+        capability.service, capability.sound_fragment,
         capability.complete_fragment, capability.required_evidence,
         capability.failure_contract,
-    }))
+    })) | _capability_target_roots(
+        PairTarget(declaration_identity), composition)
     expected_capability_closure = dependency_reachability(
         expected_capability_proper, composition)
     if (service is None or service.value.abi_version != request.abi_version
