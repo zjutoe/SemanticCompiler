@@ -290,6 +290,8 @@ class K3XReferenceTests(unittest.TestCase):
             if isinstance(item.value.literal_value,
                           cp.AuthorityAttestationValue))
         self.assertEqual(len(attestation_values), 6)
+        frozen_core_assertion = fx.assertion_results()[
+            fx.FixtureId(fx.FixtureFamily.CORE_DEFINITIONAL)]
         self.assertEqual(
             [item.normative_role for item in attestation_values].count("REQUIRE"),
             5)
@@ -302,9 +304,9 @@ class K3XReferenceTests(unittest.TestCase):
         for item in attestation_values:
             with self.subTest(authority_attestation=item.subject_identity):
                 self.assertEqual(item.authority_ref.key.owner,
-                                 "capknow.authority.coding-fixture-source")
+                                 "PLUGIN_ISSUER(APK)")
                 self.assertEqual(item.source_ref.key.owner,
-                                 "capknow.authority.coding-fixture-source")
+                                 "PLUGIN_ISSUER(APK)")
                 if item is not choice_attestation:
                     self.assertEqual(item.principal, "fixture_principal")
                     self.assertEqual(item.normative_role, "REQUIRE")
@@ -323,6 +325,35 @@ class K3XReferenceTests(unittest.TestCase):
                               evidence_ref.schema_binding),
                              ("PLUGIN_ISSUER(ATK)",
                               "coding.authority.attestation", "AREQUIRED"))
+        authority_literal_rows = tuple(
+            item for item in literal_rows
+            if isinstance(item.value.literal_value, (
+                cp.AuthorityAttestationSubjectIdentity,
+                cp.AuthorityAttestationValue))
+            or (isinstance(item.value.literal_value,
+                          cp.ServiceAdmissionSubject)
+                and item.value.literal_value.tag
+                    is cp.ServiceSubjectTag.AUTHORITY_ATTESTATION))
+        authority_by_type: dict[type[object], list[ref.LogicalRecord]] = {}
+        for item in authority_literal_rows:
+            authority_by_type.setdefault(
+                type(item.value.literal_value), []).append(item)
+        for rows in authority_by_type.values():
+            self.assertEqual(len(rows), 6)
+            for index, declaration_record in enumerate(rows):
+                replacement_value = rows[(index + 1) % len(rows)].value.literal_value
+                changed_declaration = replace(
+                    declaration_record,
+                    value=replace(declaration_record.value,
+                                  literal_value=replacement_value))
+                changed = _rewrite(
+                    construction.universe,
+                    {declaration_record.identity: changed_declaration})
+                with self.subTest(
+                        frozen_authority_literal=declaration_record.identity):
+                    self.assertNotEqual(
+                        _replay_assertion(changed, ref.replay(changed)),
+                        frozen_core_assertion)
         self.assertEqual(
             {item.identity.key.local for item in package.services},
             {"CAP(functions)", "CAP(predicates)", "CAP(profile)",
@@ -351,6 +382,95 @@ class K3XReferenceTests(unittest.TestCase):
                 self.assertTrue(descriptor_record.value.supported_targets)
                 self.assertTrue(descriptor_record.value.dependency_scope)
                 self.assertTrue(descriptor_record.value.required_trust_roots)
+        # Every field of every retained descriptor is executable data.  These
+        # mutations are compared with the separately frozen packet assertion;
+        # no expected value is obtained from replay.
+        foreign_identity = fx.rid(
+            ref.RecordKind.DECLARATION, "foreign-complete-value",
+            namespace="assertion.falsifier")
+
+        def changed_field(value: object) -> object:
+            if isinstance(value, ref.ExactKey):
+                return fx.key("foreign-complete-value",
+                              namespace="assertion.falsifier")
+            if isinstance(value, ref.Version):
+                return fx.V2
+            if isinstance(value, ref.RecordIdentity):
+                return ref.RecordIdentity(value.kind, fx.key(
+                    "foreign-complete-value",
+                    namespace="assertion.falsifier"))
+            if isinstance(value, str):
+                return f"{value}.wrong"
+            if isinstance(value, frozenset):
+                return (frozenset() if value
+                        else frozenset({foreign_identity}))
+            if isinstance(value, tuple):
+                return () if value else (foreign_identity,)
+            if value is None:
+                return foreign_identity
+            raise AssertionError(f"unhandled frozen field type: {type(value)}")
+
+        for descriptor_record in package.services:
+            for field_name in descriptor_record.value.__dataclass_fields__:
+                mutation = replace(
+                    descriptor_record.value,
+                    **{field_name: changed_field(
+                        getattr(descriptor_record.value, field_name))})
+                changed = _rewrite(
+                    construction.universe,
+                    {descriptor_record.identity: replace(
+                        descriptor_record, value=mutation)})
+                with self.subTest(
+                        descriptor_complete_field=(
+                            descriptor_record.identity.key.local, field_name)):
+                    self.assertNotEqual(
+                        _replay_assertion(changed, ref.replay(changed)),
+                        frozen_core_assertion)
+
+        retained_contracts = tuple(
+            item for item in ref.compose_records(
+                construction.universe.records).records
+            if isinstance(item.value, ref.ContractSpec)
+            and item.identity.key.namespace == "coding.contract"
+            and (item.identity.key.local.startswith("CS(FUNCTION_MEANING,")
+                 or item.identity.key.local.startswith(
+                     "CS(PREDICATE_MEANING,")
+                 or item.identity.key.local in {
+                     "CS(EVIDENCE_SCHEMA,none)",
+                     "CS(EVIDENCE_SCHEMA,verification)",
+                     "CS(ACCESS_BOUNDARY,literal)",
+                     "CS(ACCESS_BOUNDARY,task_final_evidence)",
+                     "CS(UNKNOWN_BEHAVIOR,not_applicable)",
+                     "CS(UNKNOWN_BEHAVIOR,task)",
+                     "CS(EVALUATION_ERROR_BEHAVIOR,literal)",
+                     "CS(EVALUATION_ERROR_BEHAVIOR,predicate)",
+                     "CS(EVALUATION_ERROR_BEHAVIOR,term)",
+                 }))
+        for contract_record in retained_contracts:
+            for field_name in contract_record.value.__dataclass_fields__:
+                current = getattr(contract_record.value, field_name)
+                if field_name == "owner_layer":
+                    replacement_value = (
+                        ref.Layer.SERVICE
+                        if current is not ref.Layer.SERVICE else ref.Layer.SIGMA)
+                elif field_name == "role":
+                    replacement_value = ref.ContractRole.SEMANTIC_EXTENSION_PAYLOAD
+                elif field_name == "type_admission_relation":
+                    replacement_value = ref.TypeAdmissionRelation(str)
+                else:
+                    replacement_value = changed_field(current)
+                mutation = replace(
+                    contract_record.value, **{field_name: replacement_value})
+                changed = _rewrite(
+                    construction.universe,
+                    {contract_record.identity: replace(
+                        contract_record, value=mutation)})
+                with self.subTest(
+                        contract_complete_field=(
+                            contract_record.identity.key.local, field_name)):
+                    self.assertNotEqual(
+                        _replay_assertion(changed, ref.replay(changed)),
+                        frozen_core_assertion)
         self.assertEqual(
             {item.identity.key.local: len(item.value.supported_targets)
              for item in package.services},
@@ -358,7 +478,7 @@ class K3XReferenceTests(unittest.TestCase):
              "CAP(profile)": 1, "CAP(bounds)": 1,
              "CAP(confluence)": 1, "LEX_CAP": 1})
         benv = package.certificates[0]
-        self.assertEqual(benv.identity.key.local, "BENV")
+        self.assertEqual(benv.identity.key, benv.value.certificate_key)
         self.assertEqual(
             (benv.value.certificate_key.owner,
              benv.value.certificate_key.namespace,
@@ -381,6 +501,18 @@ class K3XReferenceTests(unittest.TestCase):
             ("CONTRADICTION_PROOF", "R_b", ("C_b",), "E_b",
              "CAP(bounds)", "BSOUND", "D_b", "CONSISTENCY_UNSAT",
              "CAP(validate_bounds)", "TRB", "SYMBOLIC"))
+        for field_name in benv.value.__dataclass_fields__:
+            mutation = replace(
+                benv.value,
+                **{field_name: changed_field(
+                    getattr(benv.value, field_name))})
+            changed = _rewrite(
+                construction.universe,
+                {benv.identity: replace(benv, value=mutation)})
+            with self.subTest(benv_complete_field=field_name):
+                self.assertNotEqual(
+                    _replay_assertion(changed, ref.replay(changed)),
+                    frozen_core_assertion)
 
         empty_package = replace(_at(construction.universe, construction.package), value=replace(_at(construction.universe, construction.package).value, declarations=(), pair_declarations=(), bindings=(), pair_bindings=(), profile_bindings=(), model_contracts=(), aliases=(), services=(), certificates=(), authority_facts=(), compatibility_claims=(), migrations=(), semantic_extensions=()))
         empty_result = ref.replay(_rewrite(construction.universe, {construction.package: empty_package}))
@@ -982,7 +1114,8 @@ class K3XReferenceTests(unittest.TestCase):
         self.assertEqual(
             {identity.key.local for identity in removed},
             {"CAP(functions)", "CAP(predicates)", "CAP(profile)",
-             "CAP(bounds)", "CAP(confluence)", "LEX_CAP", "BENV",
+             "CAP(bounds)", "CAP(confluence)", "LEX_CAP",
+             "bundle_bounds_unsat",
              "CS(PREDICATE_MEANING,event_matches)"},
         )
         self.assertEqual(
@@ -994,7 +1127,11 @@ class K3XReferenceTests(unittest.TestCase):
         self.assertEqual(
             {identity.key.local for identity in changed},
             {"coding-minimal", "BINDING(DP(event_matches))",
-             "MODEL_event_matches"},
+             "MODEL_snapshot_of", "MODEL_changes_between", "MODEL_observe",
+             "MODEL_observations_equal", "MODEL_task_accepts",
+             "MODEL_dependency_metadata_changed", "MODEL_verification_passed",
+             "MODEL_event_matches", "MODEL_event_occurred",
+             "MODEL_refresh_scope", "MODEL_refresh_occurred"},
         )
         occurred_identity = next(
             identity for identity in baseline_records
@@ -1187,8 +1324,11 @@ class K3XReferenceTests(unittest.TestCase):
         spec_two = _at(forward.universe, node_two.value.meaning_contract)
         malformed_query = ref.ObservationQuery(forward.node_one, ref.ObservationKind.TERM_RESULT, ("before", "after"))
         malformed_spec = replace(spec_two, value=replace(spec_two.value, observation_queries=(malformed_query,)))
-        with self.assertRaisesRegex(ValueError, "malformed ContractSpec"):
-            ref.replay(_rewrite(forward.universe, {spec_two.identity: malformed_spec}))
+        self.assertNotIsInstance(
+            ref.replay(_rewrite(
+                forward.universe, {spec_two.identity: malformed_spec})),
+            ref.ObservationEvaluation,
+        )
         service_bad_kind = replace(spec_two.value, owner_layer=ref.Layer.SERVICE, role=ref.ContractRole.SOUND_FRAGMENT, observation_queries=(ref.ObservationQuery(forward.node_one, ref.ObservationKind.PROFILE_RESULT, ("input",)),), support=frozenset({forward.node_one}))
         self.assertEqual(ref.validate_contract_spec(service_bad_kind).tag, "WELL_FORMED")
         duplicate_query = replace(service_bad_kind, observation_queries=service_bad_kind.observation_queries * 2)
@@ -1294,9 +1434,9 @@ class K3XReferenceTests(unittest.TestCase):
                 contract, value=replace(contract.value, value=mutation)))
         confluence_authority_records = tuple(
             item for item in composition.records
-            if item.identity.key.namespace in {
-                "confluence.source", "confluence.authority",
-                "confluence.authority.binding",
+            if item.identity.key.local in {
+                "SRC(c,1)", "SRC(c,2)", "AUTH(c,1)", "AUTH(c,2)",
+                "AFB(c,1)", "AFB(c,2)",
             }
         )
         self.assertEqual(len(confluence_authority_records), 6)
@@ -1309,7 +1449,7 @@ class K3XReferenceTests(unittest.TestCase):
             item.value for item in confluence_authority_records
             if isinstance(item.value, ref.SourceRecord))
         self.assertEqual(
-            {(item.issuer, item.namespace, item.stable_identity)
+            {(item.issuer, item.source_kind, item.stable_source_identity)
              for item in confluence_sources},
             {("PLUGIN_ISSUER(APK)", "AUTHENTICATED_FIXTURE_INSTRUCTION",
               "CODING_SOURCE(c,1)"),
@@ -1706,7 +1846,9 @@ class K3XReferenceTests(unittest.TestCase):
         request = _at(core, request_identity)
         changed_request = replace(
             request,
-            value=replace(request.value, arguments=(*request.value.arguments[:-1], frozenset())),
+            value=replace(
+                request.value,
+                arguments=(*request.value.arguments[:-1], frozenset({object()}))),
         )
         changed_evidence = _rewrite(core, {request_identity: changed_request})
         self.assertNotEqual(

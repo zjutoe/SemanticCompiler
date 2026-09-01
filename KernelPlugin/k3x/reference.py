@@ -888,15 +888,16 @@ class AuthorityFactRecord:
 @dataclass(frozen=True)
 class SourceRecord:
     issuer: str
-    namespace: str
-    stable_identity: str
+    source_kind: str
+    stable_source_identity: str
+    provenance_facts: frozenset[str]
 
 
 @dataclass(frozen=True)
 class AuthorityRefRecord:
     owner: str
-    principal: str
-    authority_kind: str
+    authority_namespace: str
+    stable_attestation_identity: str
 
 
 @dataclass(frozen=True)
@@ -1511,10 +1512,7 @@ def validate_packages(
                 and canonical_migrations[0].source_environment
                     == canonical_migrations[0].target_environment
                 else None)
-            exact_environment_members = (
-                frozenset(semantic_environment.value.declarations
-                          + semantic_environment.value.bindings)
-                if semantic_environment is not None else frozenset())
+            frozen_environment = _frozen_task_environment_value()
             if (request.abi_version.components != (0,)
                     or semantic_environment is None
                     or source_environment is None or target_environment is None
@@ -1524,44 +1522,7 @@ def validate_packages(
                     or (isinstance(value, MigrationDeclaration)
                         and request.semantic_environment not in {
                             value.source_environment, value.target_environment})
-                    or any(environment.abi_version != request.abi_version
-                           or environment.pair_declarations
-                           or environment.profile_bindings
-                           or environment.pair_bindings
-                           or environment.authority_facts
-                           or environment.semantic_extensions
-                           or environment.lexical_bindings
-                           or environment.choice_bindings
-                           or environment.chi_c
-                           or environment.mechanically_extracted_dependencies
-                                != exact_environment_members
-                           or len(environment.all_references()) != sum(map(len, (
-                               environment.declarations,
-                               environment.pair_declarations,
-                               environment.bindings,
-                               environment.profile_bindings,
-                               environment.pair_bindings,
-                               environment.authority_facts,
-                               environment.semantic_extensions,
-                               environment.lexical_bindings,
-                               environment.choice_bindings,
-                           )))
-                           or any(_resolve(composition, identity) is None
-                                  for identity in environment.all_references())
-                           or any(_resolve(composition, identity) is None
-                                  for identity in environment.mechanically_extracted_dependencies)
-                           or any(identity.kind not in {
-                               RecordKind.TYPE_DECLARATION,
-                               RecordKind.DECLARATION,
-                           } for identity in environment.declarations)
-                           or any(identity.kind is not RecordKind.BINDING
-                                  for identity in environment.bindings)
-                           or any((binding_record := _resolve(
-                                      composition, identity,
-                                      SemanticBinding)) is None
-                                  or binding_record.value.declaration
-                                      not in environment.declarations
-                                  for identity in environment.bindings)
+                    or any(environment != frozen_environment
                            for environment_record_item in (source_environment, target_environment)
                            for environment in (environment_record_item.value,))
                     or request.capability_target != expected_target
@@ -1670,7 +1631,12 @@ def validate_packages(
         if record.identity.key != package.plugin_key or package.owner != package.plugin_key.owner:
             return Judgment("MALFORMED", ("PACKAGE_IDENTITY", record.identity))
         for member in package.members():
-            if member.identity.key.owner != package.owner:
+            if (member.identity.key.owner != package.owner
+                    and not (member.identity.kind is RecordKind.CERTIFICATE
+                             and isinstance(member.value, CertificateEnvelope)
+                             and member.identity.key == member.value.certificate_key
+                             and member.identity.key.owner
+                                 == "PLUGIN_CERTIFICATE_ISSUER(CK)")):
                 return Judgment("MALFORMED", ("PACKAGE_OWNER", member.identity))
             if composition.at(member.identity) != member:
                 return Judgment("MALFORMED", ("PACKAGE_MEMBER_MISMATCH", member.identity))
@@ -1728,6 +1694,10 @@ def validate_packages(
                                           record.identity))
         if any(isinstance(member.value, CapabilityDescriptor) and (member.value.abi_version != package.abi_version or member.value.plugin_key != package.plugin_key) for member in package.services):
             return Judgment("MALFORMED", ("DESCRIPTOR_PACKAGE_ABI_OR_PLUGIN", record.identity))
+        if retained_ck and not allow_finite_omission:
+            exact_status = _validate_retained_ck_exact(package, composition)
+            if exact_status.tag != "WELL_FORMED":
+                return exact_status
     return Judgment("WELL_FORMED")
 
 
@@ -1801,6 +1771,706 @@ def _reachable_closure(roots: frozenset[RecordIdentity], composition: Compositio
                 reached.add(dependency)
                 pending.append(dependency)
     return frozenset(reached)
+
+
+_FROZEN_CALLABLES: dict[str, tuple[str, tuple[str, ...], str,
+                                   tuple[frozenset[str], ...], str, str, str]] = {
+    "snapshot_of": ("FUNCTION", ("State",), "T(RepositorySnapshot)",
+                    (frozenset({"pre", "final"}),), "state_only",
+                    "not_applicable", "none"),
+    "changes_between": ("FUNCTION", ("T(RepositorySnapshot)",
+                                      "T(RepositorySnapshot)"), "T(ChangeSet)",
+                        (frozenset({"pre"}), frozenset({"final"})),
+                        "snapshot_pair", "not_applicable", "none"),
+    "observe": ("FUNCTION", ("T(ObservationSpec)", "T(RepositorySnapshot)"),
+                "T(ObservationResult)", (frozenset(), frozenset({"pre", "final"})),
+                "spec_snapshot", "not_applicable", "none"),
+    "observations_equal": ("PREDICATE", ("T(ObservationResult)",
+                                          "T(ObservationResult)"), "Bool",
+                           (frozenset({"pre"}), frozenset({"final"})),
+                           "result_pair", "never", "none"),
+    "task_accepts": ("PREDICATE", ("T(TaskSpec)", "T(RepositorySnapshot)",
+                                    "EvidenceStore"), "Bool",
+                     (frozenset(), frozenset({"final"}), frozenset({"evidence"})),
+                     "task_final_evidence", "task", "verification"),
+    "dependency_metadata_changed": ("PREDICATE", ("T(ChangeSet)",), "Bool",
+                                    (frozenset({"pre", "final"}),),
+                                    "change_set_only", "never", "none"),
+    "verification_passed": ("PREDICATE", ("T(VerificationSpec)",
+                                           "T(RepositorySnapshot)", "EvidenceStore"),
+                            "Bool", (frozenset(), frozenset({"final"}),
+                                     frozenset({"evidence"})),
+                            "verification_snapshot_evidence", "evidence_pending",
+                            "verification"),
+    "event_matches": ("PREDICATE", ("T(EventPattern)", "EventValue"), "Bool",
+                      (frozenset(), frozenset()), "pattern_event", "never", "none"),
+    "event_occurred": ("PREDICATE", ("T(EventPattern)", "Trace"), "Bool",
+                       (frozenset(), frozenset({"trace"})), "pattern_trace",
+                       "never", "none"),
+    "refresh_scope": ("PREDICATE", ("EventValue",), "Bool", (frozenset(),),
+                      "event_only", "never", "none"),
+    "refresh_occurred": ("PREDICATE", ("Trace",), "Bool",
+                         (frozenset({"trace"}),), "event_only", "never", "none"),
+}
+
+_FROZEN_TYPE_DEPENDENCIES: dict[str, tuple[str, ...]] = {
+    "PathSegment": (), "Path": ("PathSegment",), "PathSet": ("Path",),
+    "ArtifactRole": (), "Format": (), "StorageBackend": (), "ByteSize": (),
+    "ContentIdentity": (), "FieldId": (), "FieldValue": (), "SubjectId": (),
+    "BehaviorValue": ("ContentIdentity", "FieldId", "FieldValue"),
+    "ArtifactBody": ("ContentIdentity", "FieldId", "FieldValue", "SubjectId", "BehaviorValue"),
+    "ArtifactBodyKind": (),
+    "ArtifactContent": ("ArtifactRole", "Format", "ByteSize", "ContentIdentity", "FieldId", "FieldValue", "SubjectId", "BehaviorValue"),
+    "RepositorySnapshot": ("Path", "ArtifactContent"),
+    "SnapshotIdentity": ("RepositorySnapshot",),
+    "ChangeEntry": ("ArtifactContent",), "ChangeSet": ("Path", "ChangeEntry"),
+    "ArtifactSelector": ("PathSet", "ArtifactRole"),
+    "ArtifactProjection": ("FieldId",), "Coverage": ("SubjectId",),
+    "ObservationSpec": ("ArtifactSelector", "ArtifactProjection", "SubjectId", "FieldId"),
+    "ObservationValue": ("ArtifactRole", "ArtifactBodyKind", "ArtifactProjection", "ArtifactContent", "BehaviorValue", "Format", "ByteSize", "FieldId", "FieldValue", "ContentIdentity"),
+    "ObservationResult": ("Path", "SubjectId", "Coverage", "ObservationSpec", "ObservationValue"),
+    "ObservationRelation": ("FieldId",), "VerificationStatus": (),
+    "VerificationSpec": ("ObservationSpec",),
+    "VerificationRecord": ("VerificationSpec", "SnapshotIdentity", "VerificationStatus", "ObservationResult"),
+    "ImplementationEvidence": ("SnapshotIdentity",),
+    "CodingEvidencePayload": ("VerificationRecord", "ImplementationEvidence"),
+    "CodingEvidenceEntry": ("CodingEvidencePayload",),
+    "AbstractCoverageResult": (),
+    "ImplementationCoverageSubject": ("TaskSpec", "RepositorySnapshot", "AbstractCoverageResult"),
+    "PairTraceDomain": (), "PairComparedFields": (), "AuthorityClauseTag": (),
+    "AuthorityAttestationSubjectIdentity": ("AuthorityClauseTag",),
+    "AuthorityAttestationValue": ("AuthorityAttestationSubjectIdentity",),
+    "ServiceAdmissionSubject": ("TaskSpec", "RepositorySnapshot", "ObservationSpec", "ArtifactSelector", "ImplementationCoverageSubject", "PairTraceDomain", "PairComparedFields", "AuthorityAttestationValue"),
+    "EvolutionAdmissionSubject": (),
+    "Criterion": ("ObservationSpec", "ObservationResult", "ArtifactSelector", "ByteSize", "Format", "ObservationRelation"),
+    "TaskSpec": ("Criterion", "VerificationSpec"),
+    "ChangeKind": (), "CommandId": (), "ContactClass": (), "ReleaseId": (),
+    "Purpose": (),
+    "EventPattern": ("PathSet", "VerificationSpec", "VerificationStatus", "ChangeKind", "CommandId", "ContactClass", "ReleaseId", "SnapshotIdentity", "ArtifactSelector"),
+    "CommandEventPayload": ("CommandId", "Purpose"),
+    "TestEventPayload": ("VerificationSpec", "SnapshotIdentity", "VerificationStatus"),
+    "PathChangeEventPayload": ("Path", "ArtifactContent"),
+    "NetworkContactEventPayload": ("ContactClass", "Purpose"),
+    "ReleaseEventPayload": ("ReleaseId", "SnapshotIdentity"),
+    "DependencyRefreshEventPayload": ("ArtifactSelector", "SnapshotIdentity"),
+}
+
+
+def _frozen_key(local: str, namespace: str, *, owner: str = "capknow.semantic") -> ExactKey:
+    return ExactKey(owner, namespace, local, Version((1,)))
+
+
+def _validate_retained_ck_exact(
+    package: PluginPackage, composition: Composition,
+) -> Judgment:
+    from . import coding_plugin as cp
+    from .coding_plugin import admission_type
+    cycle = _resolve(composition, RecordIdentity(
+        RecordKind.CONTRACT_SPEC,
+        _frozen_key("CS(PREDICATE_MEANING,event_matches_cycle)",
+                    "coding.contract")), ContractSpec) is not None
+    if package.abi_version != Version((0,)) or package.plugin_key != _frozen_key(
+            "coding-minimal", "plugin") or package.owner != "capknow.semantic":
+        return Judgment("MALFORMED", ("RETAINED_PACKAGE_IDENTITY",))
+    type_records = {
+        item.identity.key.local[2:-1]: item
+        for item in package.declarations
+        if isinstance(item.value, TypeDeclaration)
+        and item.identity.key.local.startswith("T(")
+    }
+    if frozenset(type_records) != frozenset(_FROZEN_TYPE_DEPENDENCIES):
+        return Judgment("MALFORMED", ("RETAINED_TYPE_DOMAIN",))
+    for name, nested_names in _FROZEN_TYPE_DEPENDENCIES.items():
+        type_record = type_records[name]
+        type_id = RecordIdentity(
+            RecordKind.TYPE_DECLARATION,
+            _frozen_key(f"T({name})", "coding.type"))
+        admission_id = RecordIdentity(
+            RecordKind.CONTRACT_SPEC,
+            _frozen_key(f"CS(TYPE_ADMISSION,type.{name})",
+                        "coding.type-admission"))
+        nested = frozenset(
+            RecordIdentity(RecordKind.TYPE_DECLARATION,
+                           _frozen_key(f"T({item})", "coding.type"))
+            for item in nested_names)
+        admission = _resolve(composition, admission_id, ContractSpec)
+        expected_admission = ContractSpec(
+            admission_id.key, Layer.DELTA, ContractRole.TYPE_ADMISSION,
+            ("Value",), frozenset({"admitted", "not_admitted"}),
+            tuple(ObservationQuery(item, ObservationKind.TYPE_ADMISSION_FACT,
+                                   ("nested_value",))
+                  for item in sorted(nested)),
+            nested, f"admit_{name}", TypeAdmissionRelation(admission_type(name)))
+        if (type_record.identity != type_id
+                or admission is None or admission.value != expected_admission
+                or type_record.value != TypeDeclaration(
+                    type_id.key, expected_admission,
+                    nested | frozenset({admission_id}))):
+            return Judgment("MALFORMED", ("RETAINED_TYPE_VALUE", name))
+    callable_declarations = {
+        item.identity.key.local: item
+        for item in package.declarations
+        if isinstance(item.value, DeclarationShape)
+        and item.value.declaration_kind in {"FUNCTION", "PREDICATE"}
+    }
+    expected_declaration_locals = {
+        f"D{'F' if row[0] == 'FUNCTION' else 'P'}({name})"
+        for name, row in _FROZEN_CALLABLES.items()
+    }
+    if set(callable_declarations) != expected_declaration_locals:
+        return Judgment("MALFORMED", ("RETAINED_CALLABLE_DOMAIN",))
+    bindings_by_local = {item.identity.key.local: item for item in package.bindings}
+    models_by_local = {item.identity.key.local: item for item in package.model_contracts}
+    for name, (kind, argument_names, result_kind, facets,
+               access_name, unknown_name, evidence_name) in _FROZEN_CALLABLES.items():
+        prefix = "DF" if kind == "FUNCTION" else "DP"
+        symbol_prefix = "SF" if kind == "FUNCTION" else "SP"
+        declaration = callable_declarations[f"{prefix}({name})"]
+        expected_argument_types = tuple(
+            _frozen_key(item, "carrier.type")
+            if not item.startswith("T(")
+            else _frozen_key(item, "coding.type")
+            for item in argument_names)
+        expected_declaration = DeclarationShape(
+            declaration.identity.key,
+            _frozen_key(f"{symbol_prefix}({name})", "coding.symbol"),
+            kind, expected_argument_types, result_kind, facets,
+            frozenset(RecordIdentity(RecordKind.TYPE_DECLARATION, item)
+                      for item in expected_argument_types
+                      if item.namespace == "coding.type"))
+        if declaration.value != expected_declaration:
+            return Judgment("MALFORMED", ("RETAINED_DECLARATION_VALUE", name))
+        if name == "refresh_occurred":
+            continue
+        binding = bindings_by_local.get(f"BINDING({prefix}({name}))")
+        model = models_by_local.get(f"MODEL_{name}")
+        if binding is None or model is None:
+            return Judgment("MALFORMED", ("RETAINED_BINDING_MODEL_ABSENT", name))
+        meaning_local = (
+            "CS(PREDICATE_MEANING,event_matches_cycle)"
+            if cycle and name == "event_matches"
+            else f"CS({'FUNCTION_MEANING' if kind == 'FUNCTION' else 'PREDICATE_MEANING'},{name})")
+        meaning_id = RecordIdentity(RecordKind.CONTRACT_SPEC,
+                                    _frozen_key(meaning_local, "coding.contract"))
+        evidence_id = RecordIdentity(RecordKind.CONTRACT_SPEC, _frozen_key(
+            f"CS(EVIDENCE_SCHEMA,{evidence_name})", "coding.contract"))
+        access_id = RecordIdentity(RecordKind.CONTRACT_SPEC, _frozen_key(
+            f"CS(ACCESS_BOUNDARY,{access_name})", "coding.contract"))
+        unknown_id = RecordIdentity(RecordKind.CONTRACT_SPEC, _frozen_key(
+            f"CS(UNKNOWN_BEHAVIOR,{unknown_name})", "coding.contract"))
+        error_id = RecordIdentity(RecordKind.CONTRACT_SPEC, _frozen_key(
+            f"CS(EVALUATION_ERROR_BEHAVIOR,{'term' if kind == 'FUNCTION' else 'predicate'})",
+            "coding.contract"))
+        expected_support = (
+            frozenset({RecordIdentity(RecordKind.TYPE_DECLARATION,
+                                      _frozen_key("T(RepositorySnapshot)", "coding.type"))})
+            if name == "snapshot_of"
+            else frozenset({RecordIdentity(RecordKind.BINDING, _frozen_key(
+                "BINDING(DP(event_matches))", "coding.binding"))})
+            if name == "event_occurred"
+            else frozenset({RecordIdentity(RecordKind.BINDING, _frozen_key(
+                "BINDING(DP(event_occurred))", "coding.binding"))})
+            if cycle and name == "event_matches" else frozenset())
+        meaning = _resolve(composition, meaning_id, ContractSpec)
+        expected_kind = (ObservationKind.TYPE_ADMISSION_FACT
+                         if name == "snapshot_of"
+                         else ObservationKind.EVAL_RESULT
+                         if cycle and name == "event_matches"
+                         else ObservationKind.EVAL_RESULT_SEQUENCE)
+        expected_projection = (("snapshot",) if name == "snapshot_of"
+                               else ("pattern", "trace")
+                               if name == "event_occurred"
+                               else ("pattern", "singleton_trace(event)"))
+        expected_queries = (() if not expected_support else (
+            ObservationQuery(next(iter(expected_support)), expected_kind,
+                             expected_projection),))
+        expected_meaning = ContractSpec(
+            meaning_id.key, Layer.SIGMA,
+            ContractRole.FUNCTION_MEANING if kind == "FUNCTION"
+            else ContractRole.PREDICATE_MEANING,
+            argument_names,
+            frozenset({"TermResult" if kind == "FUNCTION" else "Eval"}),
+            expected_queries, expected_support,
+            "event_matches_cycle" if cycle and name == "event_matches" else name)
+        if meaning is None or meaning.value != expected_meaning:
+            return Judgment("MALFORMED", ("RETAINED_MEANING_VALUE", name))
+        expected_auxiliary = (
+            (evidence_id, ContractRole.EVIDENCE_SCHEMA,
+             ("ExplicitInputs",) if evidence_name == "none" else ("EvidenceStore",),
+             frozenset({"EvidenceSet"}), f"evidence_{evidence_name}"),
+            (access_id, ContractRole.ACCESS_BOUNDARY, argument_names,
+             frozenset({"ADMITTED", "INADMISSIBLE"}), f"access_{access_name}"),
+            (unknown_id, ContractRole.UNKNOWN_BEHAVIOR,
+             ("LiteralOrFunctionInput",) if unknown_name == "not_applicable"
+             else ("PredicateInput",),
+             frozenset({"NOT_APPLICABLE"}) if unknown_name == "not_applicable"
+             else frozenset({"Eval"}), f"unknown_{unknown_name}"),
+            (error_id, ContractRole.EVALUATION_ERROR_BEHAVIOR,
+             ("TermInput",) if kind == "FUNCTION" else ("PredicateInput",),
+             frozenset({"TermResult"}) if kind == "FUNCTION"
+             else frozenset({"Eval"}),
+             f"error_{'term' if kind == 'FUNCTION' else 'predicate'}"),
+        )
+        for identity, aux_role, domain, codomain, relation in expected_auxiliary:
+            auxiliary = _resolve(composition, identity, ContractSpec)
+            if auxiliary is None or auxiliary.value != ContractSpec(
+                    identity.key, Layer.SIGMA, aux_role, domain, codomain,
+                    (), frozenset(), relation):
+                return Judgment("MALFORMED", (
+                    "RETAINED_AUXILIARY_CONTRACT", name, identity))
+        expected_proper = frozenset({declaration.identity, meaning_id, evidence_id,
+                                     access_id, unknown_id, error_id}) | expected_support
+        if (not (cycle and name == "event_occurred")
+                and (not isinstance(binding.value, SemanticBinding)
+                or binding.value != SemanticBinding(
+                    binding.identity.key, declaration.identity, kind, meaning_id,
+                    facets, expected_proper,
+                    _reachable_closure(expected_proper, composition), evidence_id,
+                    access_id, unknown_id, error_id,
+                    "SAME_SEMANTIC_INPUTS_SAME_COMPLETE_RESULT"))):
+            return Judgment("MALFORMED", ("RETAINED_BINDING_VALUE", name))
+        if (not isinstance(model.value, ModelContract)
+                or (model.value.model_key, model.value.target_binding,
+                    model.value.exact_version, model.value.exact_symbol_key,
+                    model.value.exact_argument_types, model.value.exact_result_kind,
+                    model.value.exact_facet_positions, model.value.evidence_contract,
+                    model.value.unknown_contract, model.value.error_contract,
+                    model.value.semantic_contract, model.value.explanatory_text)
+                != (model.identity.key, binding.identity, Version((1,)),
+                    expected_declaration.symbol_key, expected_argument_types,
+                    result_kind, facets, evidence_id, unknown_id, error_id,
+                    meaning_id, None)):
+            return Judgment("MALFORMED", ("RETAINED_MODEL_VALUE", name))
+        if cycle and model.value.capability_summaries:
+            return Judgment("MALFORMED", ("CYCLE_MODEL_CAPABILITY", name))
+    literal_declarations = tuple(
+        item for item in package.declarations
+        if isinstance(item.value, DeclarationShape)
+        and item.value.declaration_kind == "LITERAL")
+    authority_rows = {
+        "b,1": ("C_b", cp.AuthorityClauseTag.BOUNDS),
+        "c,1": ("C_c", cp.AuthorityClauseTag.CONFLUENCE_OBSERVATION),
+        "c,2": ("C_c", cp.AuthorityClauseTag.CONFLUENCE_CHANGE),
+        "w,1": ("C_w", cp.AuthorityClauseTag.ADAPTER_PRESERVATION),
+        "w,2": ("C_w", cp.AuthorityClauseTag.ADAPTER_ACCEPTANCE),
+    }
+    frozen_attestations: dict[str, Any] = {}
+    for row_name, (contract_local, clause_tag) in authority_rows.items():
+        frozen_attestations[row_name] = cp.AuthorityAttestationValue(
+            RecordIdentity(RecordKind.AUTHORITY_REF, _frozen_key(
+                f"AUTH({row_name})", "coding.fixture",
+                owner="PLUGIN_ISSUER(APK)")),
+            RecordIdentity(RecordKind.SOURCE, _frozen_key(
+                f"SRC({row_name})", "authenticated.fixture.source",
+                owner="PLUGIN_ISSUER(APK)")),
+            "fixture_principal", "REQUIRE",
+            cp.AuthorityAttestationSubjectIdentity(
+                cp.AuthoritySubjectTag.CLAUSE,
+                RecordIdentity(RecordKind.OUTCOME, _frozen_key(
+                    contract_local, "coding.contract")),
+                clause_tag=clause_tag))
+    frozen_attestations["choice,1"] = cp.AuthorityAttestationValue(
+        RecordIdentity(RecordKind.AUTHORITY_REF, _frozen_key(
+            "AUTH(choice,1)", "coding.fixture",
+            owner="PLUGIN_ISSUER(APK)")),
+        RecordIdentity(RecordKind.SOURCE, _frozen_key(
+            "SRC(choice,1)", "authenticated.fixture.source",
+            owner="PLUGIN_ISSUER(APK)")),
+        "user", "BIND_CHOICE(storage)",
+        cp.AuthorityAttestationSubjectIdentity(
+            cp.AuthoritySubjectTag.CHOICE,
+            RecordIdentity(RecordKind.OUTCOME, _frozen_key(
+                "C_choice", "coding.contract")), choice_id="storage"))
+    frozen_authority_literals: dict[tuple[str, str], Any] = {}
+    for row_name, attestation in frozen_attestations.items():
+        frozen_authority_literals[("AuthorityAttestationValue",
+                                   f"ATTEST({row_name})")] = attestation
+        frozen_authority_literals[("AuthorityAttestationSubjectIdentity",
+                                   f"attestation_subject_identity({row_name})")] = (
+                                       attestation.subject_identity)
+        frozen_authority_literals[("ServiceAdmissionSubject",
+                                   f"authority_subject({row_name})")] = (
+            cp.ServiceAdmissionSubject(
+                cp.ServiceSubjectTag.AUTHORITY_ATTESTATION,
+                authority_fact_key=RecordIdentity(
+                    RecordKind.AUTHORITY_FACT,
+                    _frozen_key(f"AF({row_name})", "authority.fact")),
+                attestation=attestation,
+                offered_evidence_refs=frozenset({cp.EvidenceRef(
+                    "PLUGIN_ISSUER(ATK)", "coding.authority.attestation",
+                    f"AUTHORITY_EVIDENCE_LOCAL({row_name})", "AREQUIRED")})))
+    for tag in cp.AuthorityClauseTag:
+        frozen_authority_literals[("AuthorityClauseTag", tag.value)] = tag
+    literal_auxiliary = (
+        ("CS(EVIDENCE_SCHEMA,none)", ContractRole.EVIDENCE_SCHEMA,
+         ("ExplicitInputs",), frozenset({"EvidenceSet"}), "evidence_none"),
+        ("CS(ACCESS_BOUNDARY,literal)", ContractRole.ACCESS_BOUNDARY,
+         ("LiteralIdentity",), frozenset({"ADMITTED", "INADMISSIBLE"}),
+         "access_literal"),
+        ("CS(UNKNOWN_BEHAVIOR,not_applicable)", ContractRole.UNKNOWN_BEHAVIOR,
+         ("LiteralOrFunctionInput",), frozenset({"NOT_APPLICABLE"}),
+         "unknown_not_applicable"),
+        ("CS(EVALUATION_ERROR_BEHAVIOR,literal)",
+         ContractRole.EVALUATION_ERROR_BEHAVIOR, ("LiteralIdentity",),
+         frozenset({"TermResult"}), "error_literal"),
+    )
+    for local, role, domain, codomain, relation in literal_auxiliary:
+        identity = RecordIdentity(
+            RecordKind.CONTRACT_SPEC, _frozen_key(local, "coding.contract"))
+        auxiliary = _resolve(composition, identity, ContractSpec)
+        if auxiliary is None or auxiliary.value != ContractSpec(
+                identity.key, Layer.SIGMA, role, domain, codomain, (),
+                frozenset(), relation):
+            return Judgment("MALFORMED", ("RETAINED_LITERAL_AUXILIARY", local))
+    for declaration in literal_declarations:
+        local = declaration.identity.key.local
+        binding_local = f"BINDING({local})"
+        model_local = f"MODEL_LITERAL({local[2:] if local.startswith('L(') else local}"
+        binding = bindings_by_local.get(binding_local)
+        model = models_by_local.get(model_local)
+        if (declaration.value.symbol_key
+                != _frozen_key("NO_SYMBOL_LITERAL", "coding.symbol")
+                or binding is None or model is None
+                or not isinstance(binding.value, SemanticBinding)
+                or not isinstance(model.value, ModelContract)
+                or model.value.exact_symbol_key
+                    != _frozen_key("NO_SYMBOL_LITERAL", "coding.symbol")
+                or model.value.capability_summaries):
+            return Judgment("MALFORMED", ("RETAINED_LITERAL_VALUE", local))
+        type_name, literal_name = local.removeprefix("L(T(").split("),", 1)
+        literal_name = literal_name[:-1]
+        expected_meaning = RecordIdentity(RecordKind.CONTRACT_SPEC, _frozen_key(
+            f"CS(LITERAL_MEANING,literal.T({type_name}).{literal_name})",
+            "coding.contract"))
+        type_identity = RecordIdentity(
+            RecordKind.TYPE_DECLARATION,
+            _frozen_key(f"T({type_name})", "coding.type"))
+        evidence_identity = RecordIdentity(
+            RecordKind.CONTRACT_SPEC,
+            _frozen_key("CS(EVIDENCE_SCHEMA,none)", "coding.contract"))
+        access_identity = RecordIdentity(
+            RecordKind.CONTRACT_SPEC,
+            _frozen_key("CS(ACCESS_BOUNDARY,literal)", "coding.contract"))
+        unknown_identity = RecordIdentity(
+            RecordKind.CONTRACT_SPEC,
+            _frozen_key("CS(UNKNOWN_BEHAVIOR,not_applicable)",
+                        "coding.contract"))
+        error_identity = RecordIdentity(
+            RecordKind.CONTRACT_SPEC,
+            _frozen_key("CS(EVALUATION_ERROR_BEHAVIOR,literal)",
+                        "coding.contract"))
+        meaning_record = _resolve(composition, expected_meaning, ContractSpec)
+        expected_literal_meaning = ContractSpec(
+            expected_meaning.key, Layer.SIGMA, ContractRole.LITERAL_MEANING,
+            ("LiteralIdentity",), frozenset({"TERM_VALUE"}), (), frozenset(),
+            f"literal_meaning_{literal_name}")
+        expected_proper = frozenset({
+            declaration.identity, expected_meaning, evidence_identity,
+            access_identity, unknown_identity, error_identity})
+        expected_binding = SemanticBinding(
+            binding.identity.key, declaration.identity, "LITERAL",
+            expected_meaning, (), expected_proper,
+            _reachable_closure(expected_proper, composition),
+            evidence_identity, access_identity, unknown_identity,
+            error_identity, "SAME_SEMANTIC_INPUTS_SAME_COMPLETE_RESULT")
+        expected_model = ModelContract(
+            model.identity.key, binding.identity, Version((1,)),
+            _frozen_key("NO_SYMBOL_LITERAL", "coding.symbol"), (),
+            f"T({type_name})", (), evidence_identity, unknown_identity,
+            error_identity, expected_meaning, frozenset())
+        frozen_literal = frozen_authority_literals.get(
+            (type_name, literal_name))
+        if (declaration.value.declaration_key != declaration.identity.key
+                or declaration.value.declaration_kind != "LITERAL"
+                or declaration.value.argument_types
+                or declaration.value.result_kind != f"T({type_name})"
+                or declaration.value.facet_positions
+                or declaration.value.proper_type_dependencies
+                    != frozenset({type_identity})
+                or (frozen_literal is not None
+                    and declaration.value.literal_value != frozen_literal)
+                or meaning_record is None
+                or meaning_record.value != expected_literal_meaning
+                or binding.value != expected_binding
+                or model.value != expected_model):
+            return Judgment("MALFORMED", ("RETAINED_LITERAL_MEANING", local))
+    expected_bcert = _frozen_key(
+        "bundle_bounds_unsat", "coding.certificate",
+        owner="PLUGIN_CERTIFICATE_ISSUER(CK)")
+    if cycle:
+        if package.services or package.certificates:
+            return Judgment("MALFORMED", ("CYCLE_SERVICE_CERTIFICATE_SET",))
+    else:
+        expected_envelope = CertificateEnvelope(
+            expected_bcert, "CONTRADICTION_PROOF",
+            RecordIdentity(RecordKind.REQUEST, _frozen_key("R_b", "bounds.request")),
+            (RecordIdentity(RecordKind.OUTCOME, _frozen_key("C_b", "bounds.contract")),),
+            RecordIdentity(RecordKind.SEMANTIC_ENVIRONMENT, _frozen_key("E_b", "bounds.environment")),
+            RecordIdentity(RecordKind.CAPABILITY, _frozen_key("CAP(bounds)", "coding.capability")),
+            RecordIdentity(RecordKind.CONTRACT_SPEC, _frozen_key("BSOUND", "coding.service.contract")),
+            RecordIdentity(RecordKind.DEPENDENCY_ENVIRONMENT, _frozen_key("D_b", "bounds.environment")),
+            "CONSISTENCY_UNSAT",
+            RecordIdentity(RecordKind.CAPABILITY, _frozen_key("CAP(validate_bounds)", "coding.capability")),
+            RecordIdentity(RecordKind.TRUST_ROOT, _frozen_key("TRB", "bounds.trust")),
+            "SYMBOLIC",
+            RecordIdentity(RecordKind.EVIDENCE, _frozen_key("BundleBoundsProof", "bounds.proof")),
+            frozenset({RecordIdentity(RecordKind.EVIDENCE, _frozen_key(
+                "BPROOF_REF", "bounds.evidence"))}))
+        if (len(package.certificates) != 1
+                or package.certificates[0].identity
+                    != RecordIdentity(RecordKind.CERTIFICATE, expected_bcert)
+                or package.certificates[0].value != expected_envelope):
+            return Judgment("MALFORMED", ("BENV_BCERT_VALUE",))
+    if not cycle:
+        descriptors = {item.identity.key.local: item for item in package.services}
+        full_descriptor_domain = {
+                "CAP(functions)", "CAP(predicates)", "CAP(profile)",
+                "CAP(bounds)", "CAP(confluence)", "LEX_CAP"}
+        if frozenset(descriptors) not in {
+                frozenset(full_descriptor_domain),
+                frozenset(full_descriptor_domain - {"CAP(predicates)"})}:
+            return Judgment("MALFORMED", ("RETAINED_DESCRIPTOR_DOMAIN",))
+        descriptor_rows = {
+            "CAP(functions)": (
+                "SK(functions)", "FUNCTION_EVALUATION",
+                "CONCRETE_EVALUATION_ONLY", frozenset({"FUNCTION_EVALUATION"}),
+                "FSOUND", None, "FREQ", "FFAIL", "TR"),
+            "CAP(predicates)": (
+                "SK(predicates)", "PREDICATE_EVALUATION",
+                "CONCRETE_EVALUATION_ONLY", frozenset({"PREDICATE_EVALUATION"}),
+                "QSOUND", None, "QREQ", "QFAIL", "TR"),
+            "CAP(profile)": (
+                "SK(profile)", "PROFILE_CONCRETE",
+                "CONCRETE_EVALUATION_ONLY", frozenset({"PROFILE_COVERAGE"}),
+                "PROFSOUND", None, "PROFREQ", "PROFFAIL", "TR"),
+            "CAP(bounds)": (
+                "SK(bounds)", "REASONING", "COMPLETE_FOR_DECLARED_FRAGMENT",
+                frozenset({"CONSISTENCY"}), "BSOUND", "BCOMPLETE", "BREQ",
+                "BFAIL", "TRB"),
+            "CAP(confluence)": (
+                "SK(confluence)", "REASONING", "PARTIAL_SYMBOLIC_REASONING",
+                frozenset({"CONSISTENCY"}), "CSOUND", None, "CREQ", "CFAIL",
+                "ROOT_TR_c"),
+            "LEX_CAP": (
+                "LEXSK", "REASONING", "PARTIAL_SYMBOLIC_REASONING",
+                frozenset({"FORMULA_ENTAILMENT"}), "LEX_SOUND", None,
+                "LEX_REQ", "LEX_FAIL", "TR"),
+        }
+        declaration_id = lambda local: RecordIdentity(
+            RecordKind.DECLARATION,
+            _frozen_key(local, "coding.declaration"))
+        binding_id = lambda local: RecordIdentity(
+            RecordKind.BINDING,
+            _frozen_key(f"BINDING({local})", "coding.binding"))
+        function_targets = frozenset(
+            declaration_id(f"DF({name})")
+            for name in ("snapshot_of", "changes_between", "observe"))
+        predicate_targets = frozenset(
+            declaration_id(f"DP({name})")
+            for name in (
+                "observations_equal", "task_accepts",
+                "dependency_metadata_changed", "verification_passed",
+                "event_matches", "event_occurred", "refresh_scope",
+                "refresh_occurred",
+            ))
+        profile_target = RecordIdentity(
+            RecordKind.PROFILE_BINDING,
+            _frozen_key("PROFILE_BINDING(PK(implementation_evidence))",
+                        "coding.binding"))
+        profile_proper = frozenset({
+            declaration_id("DP(task_accepts)"),
+            RecordIdentity(RecordKind.CONTRACT_SPEC, _frozen_key(
+                "CS(PREDICATE_MEANING,task_accepts)", "coding.contract")),
+            RecordIdentity(RecordKind.CONTRACT_SPEC, _frozen_key(
+                "CS(EVIDENCE_SCHEMA,verification)", "coding.contract")),
+            RecordIdentity(RecordKind.CONTRACT_SPEC, _frozen_key(
+                "CS(ACCESS_BOUNDARY,task_final_evidence)", "coding.contract")),
+            RecordIdentity(RecordKind.CONTRACT_SPEC, _frozen_key(
+                "CS(UNKNOWN_BEHAVIOR,predicate)", "coding.contract")),
+            RecordIdentity(RecordKind.CONTRACT_SPEC, _frozen_key(
+                "CS(EVALUATION_ERROR_BEHAVIOR,predicate)", "coding.contract")),
+        })
+        profile_closure = profile_proper | frozenset({
+            RecordIdentity(RecordKind.TYPE_DECLARATION,
+                           _frozen_key("TaskSpec", "coding.type")),
+            RecordIdentity(RecordKind.TYPE_DECLARATION,
+                           _frozen_key("RepositorySnapshot", "coding.type")),
+            RecordIdentity(RecordKind.CONTRACT_SPEC,
+                           _frozen_key("ADMIT(TaskSpec)",
+                                       "coding.type.contract")),
+            RecordIdentity(RecordKind.CONTRACT_SPEC,
+                           _frozen_key("ADMIT(RepositorySnapshot)",
+                                       "coding.type.contract")),
+        })
+        expected_profile = SemanticBinding(
+            profile_target.key, declaration_id("DP(task_accepts)"), "PROFILE",
+            RecordIdentity(RecordKind.CONTRACT_SPEC, _frozen_key(
+                "CS(PREDICATE_MEANING,task_accepts)", "coding.contract")),
+            (frozenset(), frozenset({"final"}), frozenset({"evidence"})),
+            profile_proper, profile_closure,
+            RecordIdentity(RecordKind.CONTRACT_SPEC, _frozen_key(
+                "CS(EVIDENCE_SCHEMA,verification)", "coding.contract")),
+            RecordIdentity(RecordKind.CONTRACT_SPEC, _frozen_key(
+                "CS(ACCESS_BOUNDARY,task_final_evidence)", "coding.contract")),
+            RecordIdentity(RecordKind.CONTRACT_SPEC, _frozen_key(
+                "CS(UNKNOWN_BEHAVIOR,predicate)", "coding.contract")),
+            RecordIdentity(RecordKind.CONTRACT_SPEC, _frozen_key(
+                "CS(EVALUATION_ERROR_BEHAVIOR,predicate)", "coding.contract")),
+            "SAME_SEMANTIC_INPUTS_SAME_COMPLETE_RESULT")
+        profile_record = _resolve(composition, profile_target, SemanticBinding)
+        if profile_record is None or profile_record.value != expected_profile:
+            return Judgment("MALFORMED", ("RETAINED_PROFILE_VALUE",))
+        bounds_target = ReasoningTarget(
+            "CONSISTENCY",
+            (RecordIdentity(RecordKind.OUTCOME,
+                            _frozen_key("C_b", "bounds.contract")),),
+            RecordIdentity(RecordKind.SEMANTIC_ENVIRONMENT,
+                           _frozen_key("E_b", "bounds.environment")))
+        confluence_path = cp.Path((cp.PathSegment("dependency"),
+                                   cp.PathSegment("lock")))
+        confluence_artifact = cp.ArtifactContent(
+            cp.ArtifactTag.TEXT, cp.ArtifactRole.DEPENDENCY_LOCK,
+            cp.Format.TEXT, cp.ByteSize(150), cp.ContentIdentity("lock_v1"))
+        confluence_target = ReasoningTarget(
+            "CONSISTENCY",
+            (ConfluenceSubject(
+                RecordIdentity(RecordKind.OUTCOME,
+                               _frozen_key("C_c", "confluence.contract")),
+                cp.ObservationSpec(
+                    cp.ObservationSpecTag.ARTIFACT_VIEW,
+                    cp.ArtifactSelector(cp.SelectorTag.PATHS,
+                                        frozenset({confluence_path})),
+                    cp.ArtifactProjection(cp.ProjectionTag.CONTENT)),
+                cp.RepositorySnapshot(()),
+                cp.RepositorySnapshot(((confluence_path,
+                                        confluence_artifact),))),),
+            RecordIdentity(RecordKind.SEMANTIC_ENVIRONMENT,
+                           _frozen_key("E_c", "confluence.environment")))
+        lexical_target = ReasoningTarget(
+            "FORMULA_ENTAILMENT", ("f_lex", "g_lex"),
+            RecordIdentity(RecordKind.SEMANTIC_ENVIRONMENT,
+                           _frozen_key("E_lex", "lexical.environment")))
+        expected_targets = {
+            "CAP(functions)": function_targets,
+            "CAP(predicates)": predicate_targets,
+            "CAP(profile)": frozenset({profile_target}),
+            "CAP(bounds)": frozenset({bounds_target}),
+            "CAP(confluence)": frozenset({confluence_target}),
+            "LEX_CAP": frozenset({lexical_target}),
+        }
+
+        def frozen_binding_scope(locals_: tuple[str, ...]) -> frozenset[RecordIdentity]:
+            records = tuple(_resolve(composition, binding_id(local))
+                            for local in locals_)
+            if any(item is None or not isinstance(
+                    item.value, (SemanticBinding,
+                                 OccurrenceSemanticContractBundle))
+                   for item in records):
+                return frozenset()
+            return frozenset().union(*(
+                item.value.dependency_closure for item in records
+                if item is not None))
+
+        expected_scopes = {
+            "CAP(functions)": frozen_binding_scope(tuple(
+                f"DF({name})" for name in
+                ("snapshot_of", "changes_between", "observe"))),
+            "CAP(predicates)": frozen_binding_scope(tuple(
+                f"DP({name})" for name in (
+                    "observations_equal", "task_accepts",
+                    "dependency_metadata_changed", "verification_passed",
+                    "event_matches", "event_occurred", "refresh_scope",
+                    "refresh_occurred"))),
+            "CAP(profile)": profile_closure,
+            "CAP(bounds)": frozen_binding_scope((
+                "DF(snapshot_of)", "DP(task_accepts)",
+                "L(T(TaskSpec),ts_nonempty)",
+                "L(T(TaskSpec),ts_lt_100)",
+                "L(T(TaskSpec),ts_ge_200)")),
+            "CAP(confluence)": frozen_binding_scope((
+                "DF(observe)", "DF(changes_between)")),
+            "LEX_CAP": frozen_binding_scope(("DP(task_accepts)",)),
+        }
+        for local, row in descriptor_rows.items():
+            if local not in descriptors:
+                continue
+            descriptor_record = descriptors[local]
+            descriptor = descriptor_record.value
+            assert isinstance(descriptor, CapabilityDescriptor)
+            (service_local, role, capability_class, judgments, sound_local,
+             complete_local, required_local, failure_local, root_local) = row
+            expected_service = RecordIdentity(
+                RecordKind.SERVICE,
+                _frozen_key(service_local, "coding.service"))
+            expected_sound = RecordIdentity(
+                RecordKind.CONTRACT_SPEC,
+                _frozen_key(sound_local, "coding.service.contract"))
+            expected_complete = (None if complete_local is None else RecordIdentity(
+                RecordKind.CONTRACT_SPEC,
+                _frozen_key(complete_local, "coding.service.contract")))
+            expected_required = RecordIdentity(
+                RecordKind.CONTRACT_SPEC,
+                _frozen_key(required_local, "coding.service.contract"))
+            expected_failure = RecordIdentity(
+                RecordKind.CONTRACT_SPEC,
+                _frozen_key(failure_local, "coding.service.contract"))
+            root_namespace = (
+                "bounds.trust" if local == "CAP(bounds)"
+                else "confluence.trust" if local == "CAP(confluence)"
+                else "trust")
+            expected_root = RecordIdentity(
+                RecordKind.TRUST_ROOT,
+                _frozen_key(root_local, root_namespace))
+            if ((descriptor.capability_key, descriptor.service,
+                 descriptor.abi_version, descriptor.plugin_key,
+                 descriptor.service_role, descriptor.capability_class,
+                 descriptor.supported_judgments, descriptor.supported_targets,
+                 descriptor.sound_fragment,
+                 descriptor.complete_fragment, descriptor.required_evidence,
+                 descriptor.required_trust_roots, descriptor.failure_contract,
+                 descriptor.dependency_scope)
+                    != (descriptor_record.identity.key, expected_service,
+                        Version((0,)), package.plugin_key, role,
+                        capability_class, judgments, expected_targets[local],
+                        expected_sound,
+                        expected_complete, expected_required,
+                        frozenset({expected_root}), expected_failure,
+                        expected_scopes[local])):
+                return Judgment("MALFORMED", ("RETAINED_DESCRIPTOR_VALUE", local))
+            expected_proper = frozenset({
+                expected_service, expected_sound, expected_required,
+                expected_failure,
+                *(tuple() if expected_complete is None else (expected_complete,)),
+                *(target for target in expected_targets[local]
+                  if isinstance(target, RecordIdentity)),
+            })
+            expected_descriptor_closure = _reachable_closure(
+                expected_proper, composition)
+            if local == "CAP(profile)":
+                expected_descriptor_closure = expected_proper | profile_closure
+            if (descriptor.proper_semantic_dependencies != expected_proper
+                    or descriptor.dependency_closure
+                        != expected_descriptor_closure):
+                return Judgment("MALFORMED", ("RETAINED_DESCRIPTOR_DEPENDENCY", local))
+        for model_record in package.model_contracts:
+            if (not isinstance(model_record.value, ModelContract)
+                    or not model_record.value.capability_summaries
+                    or model_record.identity.key.local
+                        == "MODEL_refresh_occurred"):
+                continue
+            if len(model_record.value.capability_summaries) != 1:
+                return Judgment("MALFORMED", ("RETAINED_MODEL_SUMMARY",))
+            summary = next(iter(model_record.value.capability_summaries))
+            descriptor_record = composition.at(summary.capability_key)
+            if descriptor_record is None:
+                continue
+            if (not isinstance(descriptor_record.value,
+                                      CapabilityDescriptor)
+                    or validate_model_descriptor(
+                        model_record.value, descriptor_record.value,
+                        composition).tag != "WELL_FORMED"):
+                return Judgment("MALFORMED", ("RETAINED_MODEL_SUMMARY",))
+    return Judgment("WELL_FORMED")
 
 
 def validate_model_descriptor(model: ModelContract, descriptor: CapabilityDescriptor, composition: Composition) -> Judgment:
@@ -1955,8 +2625,11 @@ def _environment(request: InvocationRequest, composition: Composition) -> tuple[
         return None
     if semantic.value.abi_version != request.requested_version and semantic.value.abi_version.components != (0,):
         return None
-    expected_syntax = frozenset(semantic.value.declarations + semantic.value.pair_declarations)
-    expected_subjects = frozenset(semantic.value.bindings + semantic.value.profile_bindings + semantic.value.pair_bindings)
+    expected_syntax = frozenset({request.target})
+    expected_subjects = frozenset(
+        identity for identity in semantic.value.bindings
+        if (bound := _resolve(composition, identity, SemanticBinding)) is not None
+        and bound.value.declaration == request.target)
     expected_associations = frozenset(
         (declaration, binding)
         for declaration in semantic.value.declarations
@@ -1985,6 +2658,49 @@ def _environment(request: InvocationRequest, composition: Composition) -> tuple[
     return semantic.value, dependency.value
 
 
+_FROZEN_TASK_TYPE_NAMES = (
+    "ArtifactBodyKind", "ArtifactContent", "ArtifactProjection",
+    "ArtifactRole", "ArtifactSelector", "BehaviorValue", "ByteSize",
+    "ContentIdentity", "Coverage", "Criterion", "FieldId", "FieldValue",
+    "Format", "ObservationRelation", "ObservationResult", "ObservationSpec",
+    "ObservationValue", "Path", "PathSegment", "PathSet",
+    "RepositorySnapshot", "SubjectId", "TaskSpec", "VerificationSpec",
+)
+
+
+def _frozen_task_environment_value() -> SemanticEnvironment:
+    declaration = RecordIdentity(RecordKind.DECLARATION, ExactKey(
+        "capknow.semantic", "coding.declaration", "DP(task_accepts)", Version((1,))))
+    binding = RecordIdentity(RecordKind.BINDING, ExactKey(
+        "capknow.semantic", "coding.binding", "BINDING(DP(task_accepts))",
+        Version((1,))))
+    types = tuple(RecordIdentity(RecordKind.TYPE_DECLARATION, ExactKey(
+        "capknow.semantic", "coding.type", f"T({name})", Version((1,))))
+        for name in _FROZEN_TASK_TYPE_NAMES)
+    return SemanticEnvironment(
+        Version((0,)), tuple(sorted((declaration, *types))), (), (binding,),
+        mechanically_extracted_dependencies=frozenset({declaration, binding}))
+
+
+def _frozen_task_values() -> tuple[Any, Any, frozenset[Any]]:
+    from . import coding_plugin as cp
+    path = cp.Path((cp.PathSegment("dependency"), cp.PathSegment("lock")))
+    artifact = cp.ArtifactContent(
+        cp.ArtifactTag.TEXT, cp.ArtifactRole.DEPENDENCY_LOCK, cp.Format.TEXT,
+        cp.ByteSize(150), cp.ContentIdentity("lock_v1"))
+    snapshot = cp.RepositorySnapshot(((path, artifact),))
+    spec = cp.ObservationSpec(
+        cp.ObservationSpecTag.ARTIFACT_VIEW,
+        cp.ArtifactSelector(cp.SelectorTag.PATHS, frozenset({path})),
+        cp.ArtifactProjection(cp.ProjectionTag.CONTENT))
+    result = cp.ObservationResult(
+        cp.ObservationResultTag.ARTIFACT, spec,
+        cp.Coverage(cp.CoverageTag.COMPLETE),
+        ((path, cp.ObservationValue(
+            cp.ObservationValueTag.PRESENT_CONTENT, (artifact,))),))
+    return cp.TaskSpec(frozenset({cp.ObservationEquals(spec, result)})), snapshot, frozenset()
+
+
 def _trust(request: InvocationRequest, descriptor: CapabilityDescriptor, composition: Composition) -> Judgment:
     environment_record = _resolve(composition, request.trust_environment, TrustEnvironment)
     if environment_record is None:
@@ -1996,6 +2712,18 @@ def _trust(request: InvocationRequest, descriptor: CapabilityDescriptor, composi
     if policy is None or environment.policy_owner != policy.value.policy_owner:
         return Judgment("TRUST_ROOT_ABSENT")
     states = dict(environment.root_judgments)
+    semantic_record = _resolve(
+        composition, request.semantic_environment, SemanticEnvironment)
+    semantic_bindings = () if semantic_record is None else semantic_record.value.bindings
+    expected_use = ServiceUseTrustTarget(
+        RecordIdentity(RecordKind.CAPABILITY, descriptor.capability_key),
+        descriptor.service_role, request.target if request.target.kind is RecordKind.BINDING
+        else next((identity for identity in semantic_bindings
+                   if (bound := _resolve(composition, identity, SemanticBinding))
+                   is not None and bound.value.declaration == request.target),
+                  request.target),
+        request.semantic_environment,
+    )
     for required in descriptor.required_trust_roots:
         root_record = _resolve(composition, required, TrustRootRecord)
         if root_record is None or required not in environment.roots or required not in states:
@@ -2003,7 +2731,9 @@ def _trust(request: InvocationRequest, descriptor: CapabilityDescriptor, composi
         root = root_record.value
         if (root.owner != policy.value.policy_owner
                 or RecordIdentity(RecordKind.CAPABILITY, descriptor.capability_key) not in root.trusted_validators
-                or descriptor.service not in root.permitted_targets
+                or root.permitted_targets != frozenset({expected_use})
+                or root.permitted_certificate_kinds
+                    != frozenset({"CONTRADICTION_PROOF"})
                 or root.adoption != "V0_EXTERNAL_TRUST_PREMISE"):
             return Judgment("TRUST_ROOT_INCOMPATIBLE", (required,))
         judgment = states[required]
@@ -2029,7 +2759,44 @@ def evaluate_invocation(request_identity: RecordIdentity, composition: Compositi
     environment_pair = _environment(request, composition)
     if environment_pair is None:
         return ContractReplay(Formation.MALFORMED, Closure.NOT_APPLICABLE, Evaluability.UNKNOWN, "MALFORMED_REQUEST", None)
-    environment, _ = environment_pair
+    environment, dependency_environment = environment_pair
+    if request.target.key.local == "DP(task_accepts)":
+        frozen_environment = _frozen_task_environment_value()
+        frozen_binding = frozen_environment.bindings[0]
+        frozen_declaration = next(
+            item for item in frozen_environment.declarations
+            if item.key.local == "DP(task_accepts)")
+        frozen_contracts = frozenset(
+            RecordIdentity(RecordKind.CONTRACT_SPEC, ExactKey(
+                "capknow.semantic", "coding.contract", local, Version((1,))))
+            for local in (
+                "CS(PREDICATE_MEANING,task_accepts)",
+                "CS(EVIDENCE_SCHEMA,verification)",
+                "CS(ACCESS_BOUNDARY,task_final_evidence)",
+                "CS(UNKNOWN_BEHAVIOR,task)",
+                "CS(EVALUATION_ERROR_BEHAVIOR,predicate)",
+            ))
+        frozen_proper = frozenset({frozen_declaration}) | frozen_contracts
+        frozen_type_closure = frozenset(
+            RecordIdentity(kind, ExactKey(
+                "capknow.semantic", namespace, local, Version((1,))))
+            for name in _FROZEN_TASK_TYPE_NAMES
+            for kind, namespace, local in (
+                (RecordKind.TYPE_DECLARATION, "coding.type", f"T({name})"),
+                (RecordKind.CONTRACT_SPEC, "coding.type-admission",
+                 f"CS(TYPE_ADMISSION,type.{name})"),
+            ))
+        frozen_dependency = DependencyEnvironment(
+            frozenset({frozen_declaration}), frozenset({frozen_binding}),
+            frozenset({(frozen_declaration, frozen_binding)}),
+            frozenset({frozen_declaration, frozen_binding}), frozen_proper,
+            frozen_proper | frozen_type_closure, frozenset())
+        if (environment != frozen_environment
+                or dependency_environment != frozen_dependency
+                or request.arguments != _frozen_task_values()):
+            return ContractReplay(
+                Formation.MALFORMED, Closure.NOT_APPLICABLE,
+                Evaluability.UNKNOWN, "MALFORMED_REQUEST", None)
     if request.target not in environment.declarations or _resolve(composition, request.target, DeclarationShape) is None:
         return ContractReplay(Formation.MALFORMED, Closure.NOT_APPLICABLE, Evaluability.UNKNOWN, "DECLARATION_ABSENT", None)
     binding_records = tuple(_resolve(composition, identity, SemanticBinding) for identity in environment.bindings)
@@ -2508,6 +3275,7 @@ def validate_pair(request_identity: RecordIdentity, composition: Composition) ->
 
 
 def evaluate_observation_graph(request: GraphEvaluationRequest, composition: Composition) -> ObservationEvaluation:
+    from . import coding_plugin as cp
     from .coding_plugin import (
         AuthorityAttestationSubjectIdentity, AuthorityAttestationValue,
         AuthorityClauseTag, AuthoritySubjectTag, changes_between, observe,
@@ -2529,21 +3297,44 @@ def evaluate_observation_graph(request: GraphEvaluationRequest, composition: Com
         raise ValueError("malformed confluence reasoning subject")
     subject = rr.subjects[0]
     contract = _resolve(composition, subject.contract_identity, OutcomeRecord)
+    frozen_path = cp.Path((cp.PathSegment("dependency"), cp.PathSegment("lock")))
+    frozen_artifact = cp.ArtifactContent(
+        cp.ArtifactTag.TEXT, cp.ArtifactRole.DEPENDENCY_LOCK,
+        cp.Format.TEXT, cp.ByteSize(150), cp.ContentIdentity("lock_v1"))
+    frozen_prior = cp.RepositorySnapshot(())
+    frozen_final = cp.RepositorySnapshot(((frozen_path, frozen_artifact),))
+    frozen_spec = cp.ObservationSpec(
+        cp.ObservationSpecTag.ARTIFACT_VIEW,
+        cp.ArtifactSelector(cp.SelectorTag.PATHS, frozenset({frozen_path})),
+        cp.ArtifactProjection(cp.ProjectionTag.CONTENT))
+    frozen_result = cp.ObservationResult(
+        cp.ObservationResultTag.ARTIFACT, frozen_spec,
+        cp.Coverage(cp.CoverageTag.COMPLETE),
+        ((frozen_path, cp.ObservationValue(
+            cp.ObservationValueTag.PRESENT_CONTENT, (frozen_artifact,))),))
+    expected_subject = ConfluenceSubject(
+        RecordIdentity(RecordKind.OUTCOME, ExactKey(
+            "capknow.semantic", "confluence.contract", "C_c", Version((1,)))),
+        frozen_spec, frozen_prior, frozen_final)
+    if subject != expected_subject:
+        raise ValueError("malformed confluence frozen subject")
     source_one_id = RecordIdentity(
         RecordKind.SOURCE,
-        ExactKey("capknow.semantic", "confluence.source", "SRC(c,1)", Version((1,))),
+        ExactKey("PLUGIN_ISSUER(APK)", "authenticated.fixture.source",
+                 "SRC(c,1)", Version((1,))),
     )
     source_two_id = RecordIdentity(
         RecordKind.SOURCE,
-        ExactKey("capknow.semantic", "confluence.source", "SRC(c,2)", Version((1,))),
+        ExactKey("PLUGIN_ISSUER(APK)", "authenticated.fixture.source",
+                 "SRC(c,2)", Version((1,))),
     )
     authority_one_id = RecordIdentity(
         RecordKind.AUTHORITY_REF,
-        ExactKey("capknow.semantic", "confluence.authority", "AUTH(c,1)", Version((1,))),
+        ExactKey("PLUGIN_ISSUER(APK)", "coding.fixture", "AUTH(c,1)", Version((1,))),
     )
     authority_two_id = RecordIdentity(
         RecordKind.AUTHORITY_REF,
-        ExactKey("capknow.semantic", "confluence.authority", "AUTH(c,2)", Version((1,))),
+        ExactKey("PLUGIN_ISSUER(APK)", "coding.fixture", "AUTH(c,2)", Version((1,))),
     )
     authority_fact_one_id = RecordIdentity(
         RecordKind.AUTHORITY_FACT,
@@ -2608,10 +3399,14 @@ def evaluate_observation_graph(request: GraphEvaluationRequest, composition: Com
             "AUTHORITY_EVIDENCE_LOCAL(c,2)", Version((1,))))
     if (source_one is None or source_one.value != SourceRecord(
             "PLUGIN_ISSUER(APK)", "AUTHENTICATED_FIXTURE_INSTRUCTION",
-            "CODING_SOURCE(c,1)")
+            "CODING_SOURCE(c,1)", frozenset({
+                "AUTHENTICATED_BY(APK)",
+                "CLAUSE_LOCAL_IDENTITY(coding.confluence.observation)"}))
             or source_two is None or source_two.value != SourceRecord(
                 "PLUGIN_ISSUER(APK)", "AUTHENTICATED_FIXTURE_INSTRUCTION",
-                "CODING_SOURCE(c,2)")
+                "CODING_SOURCE(c,2)", frozenset({
+                    "AUTHENTICATED_BY(APK)",
+                    "CLAUSE_LOCAL_IDENTITY(coding.confluence.change)"}))
             or authority_one is None or authority_one.value != AuthorityRefRecord(
                 "PLUGIN_ISSUER(APK)", "coding.fixture", "CODING_AUTHORITY(c,1)")
             or authority_two is None or authority_two.value != AuthorityRefRecord(
@@ -2670,8 +3465,53 @@ def evaluate_observation_graph(request: GraphEvaluationRequest, composition: Com
     package_declarations = frozenset(
         item.identity for item in retained_package.declarations)
     package_bindings = frozenset(item.identity for item in retained_package.bindings)
-    expected_semantic_bindings = frozenset(semantic.value.bindings)
-    expected_semantic_declarations = frozenset(semantic.value.declarations)
+    expected_callable_locals = (
+        "DF(observe)", "DF(changes_between)",
+        "DP(observations_equal)", "DP(dependency_metadata_changed)",
+    )
+    expected_callable_bindings = frozenset(
+        RecordIdentity(RecordKind.BINDING, ExactKey(
+            "capknow.semantic", "coding.binding", f"BINDING({local})",
+            Version((1,))))
+        for local in expected_callable_locals)
+    expected_callable_declarations = frozenset(
+        RecordIdentity(RecordKind.DECLARATION, ExactKey(
+            "capknow.semantic", "coding.declaration", local, Version((1,))))
+        for local in expected_callable_locals)
+    expected_type_names = frozenset({
+        "PathSegment", "Path", "PathSet", "ArtifactRole", "Format",
+        "ByteSize", "ContentIdentity", "FieldId", "FieldValue",
+        "SubjectId", "BehaviorValue", "ArtifactContent",
+        "RepositorySnapshot", "ChangeEntry", "ChangeSet",
+        "ArtifactSelector", "ArtifactProjection", "Coverage",
+        "ObservationSpec", "ObservationValue", "ObservationResult",
+        "ArtifactBodyKind",
+    })
+    expected_type_declarations = frozenset(
+        RecordIdentity(RecordKind.TYPE_DECLARATION, ExactKey(
+            "capknow.semantic", "coding.type", f"T({name})", Version((1,))))
+        for name in expected_type_names)
+    expected_literal_locals = (
+        ("ObservationSpec", "s_c"),
+        ("RepositorySnapshot", "P_c"),
+        ("RepositorySnapshot", "F_c"),
+        ("ObservationResult", "O_c"),
+    )
+    expected_literal_declarations = frozenset(
+        RecordIdentity(RecordKind.DECLARATION, ExactKey(
+            "capknow.semantic", "coding.declaration",
+            f"L(T({type_name}),{local})", Version((1,))))
+        for type_name, local in expected_literal_locals)
+    expected_literal_bindings = frozenset(
+        RecordIdentity(RecordKind.BINDING, ExactKey(
+            "capknow.semantic", "coding.binding",
+            f"BINDING(L(T({type_name}),{local}))", Version((1,))))
+        for type_name, local in expected_literal_locals)
+    expected_semantic_bindings = (
+        expected_callable_bindings | expected_literal_bindings)
+    expected_semantic_declarations = (
+        expected_callable_declarations | expected_type_declarations
+        | expected_literal_declarations)
     resolved_bindings = tuple(
         _resolve(composition, identity, SemanticBinding)
         for identity in expected_semantic_bindings)
@@ -2690,7 +3530,10 @@ def evaluate_observation_graph(request: GraphEvaluationRequest, composition: Com
         observe(subject.observation_spec, subject.final_snapshot).value,
     })
     if (semantic.value.abi_version != rr.abi_version
+            or frozenset(semantic.value.declarations)
+                != expected_semantic_declarations
             or len(semantic.value.declarations) != len(expected_semantic_declarations)
+            or frozenset(semantic.value.bindings) != expected_semantic_bindings
             or len(semantic.value.bindings) != len(expected_semantic_bindings)
             or not expected_semantic_declarations <= package_declarations
             or not expected_semantic_bindings <= package_bindings
@@ -2710,7 +3553,7 @@ def evaluate_observation_graph(request: GraphEvaluationRequest, composition: Com
             or semantic.value.choice_bindings
             or semantic.value.chi_c
             or semantic.value.mechanically_extracted_dependencies
-                != frozenset(request.nodes)
+                != expected_callable_bindings
             or semantic.value.authority_facts != (
             authority_fact_one_id, authority_fact_two_id)
             ):

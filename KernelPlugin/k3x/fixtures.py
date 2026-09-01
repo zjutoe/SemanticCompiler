@@ -2692,7 +2692,10 @@ def _literal_missing_rows() -> tuple[LiteralMissingRow, ...]:
     source = record(
         RecordKind.SOURCE,
         "SRC(choice,1)",
-        SourceRecord("capknow.semantic", "coding.authority", "choice:1"),
+        SourceRecord(
+            "capknow.semantic", "coding.authority", "choice:1",
+            frozenset({"AUTHENTICATED_BY(capknow.semantic)",
+                       "CLAUSE_LOCAL_IDENTITY(choice:1)"})),
         namespace="authority.source",
     )
     authority_ref = record(
@@ -4001,11 +4004,7 @@ def _confluence_construction_local(order: OrderTag) -> ConfluenceConstruction:
     )
     old = RepositorySnapshot(())
     new = RepositorySnapshot(((path, new_artifact),))
-    selector = ArtifactSelector(
-        SelectorTag.PATHS_WITH_ROLE,
-        frozenset({path}),
-        ArtifactRole.DEPENDENCY_LOCK,
-    )
+    selector = ArtifactSelector(SelectorTag.PATHS, frozenset({path}))
     observed_spec = ObservationSpec(
         ObservationSpecTag.ARTIFACT_VIEW,
         selector,
@@ -4015,26 +4014,30 @@ def _confluence_construction_local(order: OrderTag) -> ConfluenceConstruction:
     source_one = record(
         RecordKind.SOURCE, "SRC(c,1)",
         SourceRecord("PLUGIN_ISSUER(APK)",
-                     "AUTHENTICATED_FIXTURE_INSTRUCTION", "CODING_SOURCE(c,1)"),
-        namespace="confluence.source",
+                     "AUTHENTICATED_FIXTURE_INSTRUCTION", "CODING_SOURCE(c,1)",
+                     frozenset({"AUTHENTICATED_BY(APK)",
+                                "CLAUSE_LOCAL_IDENTITY(coding.confluence.observation)"})),
+        owner="PLUGIN_ISSUER(APK)", namespace="authenticated.fixture.source",
     )
     source_two = record(
         RecordKind.SOURCE, "SRC(c,2)",
         SourceRecord("PLUGIN_ISSUER(APK)",
-                     "AUTHENTICATED_FIXTURE_INSTRUCTION", "CODING_SOURCE(c,2)"),
-        namespace="confluence.source",
+                     "AUTHENTICATED_FIXTURE_INSTRUCTION", "CODING_SOURCE(c,2)",
+                     frozenset({"AUTHENTICATED_BY(APK)",
+                                "CLAUSE_LOCAL_IDENTITY(coding.confluence.change)"})),
+        owner="PLUGIN_ISSUER(APK)", namespace="authenticated.fixture.source",
     )
     authority_one = record(
         RecordKind.AUTHORITY_REF, "AUTH(c,1)",
         AuthorityRefRecord(
             "PLUGIN_ISSUER(APK)", "coding.fixture", "CODING_AUTHORITY(c,1)"),
-        namespace="confluence.authority",
+        owner="PLUGIN_ISSUER(APK)", namespace="coding.fixture",
     )
     authority_two = record(
         RecordKind.AUTHORITY_REF, "AUTH(c,2)",
         AuthorityRefRecord(
             "PLUGIN_ISSUER(APK)", "coding.fixture", "CODING_AUTHORITY(c,2)"),
-        namespace="confluence.authority",
+        owner="PLUGIN_ISSUER(APK)", namespace="coding.fixture",
     )
     attestation_one = cp.AuthorityAttestationValue(
         authority_one.identity, source_one.identity, "fixture_principal", "REQUIRE",
@@ -4972,8 +4975,7 @@ def _retained_literal_values() -> tuple[tuple[str, str, Any], ...]:
     # host path, and is shared literally by the bounds and confluence values.
     path = cp.Path((cp.PathSegment("dependency"), cp.PathSegment("lock")))
     selector = cp.ArtifactSelector(
-        cp.SelectorTag.PATHS_WITH_ROLE, frozenset({path}),
-        cp.ArtifactRole.DEPENDENCY_LOCK)
+        cp.SelectorTag.PATHS, frozenset({path}))
     artifact = cp.ArtifactContent(
         cp.ArtifactTag.TEXT, cp.ArtifactRole.DEPENDENCY_LOCK, cp.Format.TEXT,
         cp.ByteSize(150), cp.ContentIdentity("lock_v1"))
@@ -5029,11 +5031,11 @@ def _retained_literal_values() -> tuple[tuple[str, str, Any], ...]:
     attestations = tuple(
         cp.AuthorityAttestationValue(
             rid(RecordKind.AUTHORITY_REF, f"AUTH({name})",
-                owner="capknow.authority.coding-fixture-source",
+                owner="PLUGIN_ISSUER(APK)",
                 namespace="coding.fixture"),
             rid(RecordKind.SOURCE, f"SRC({name})",
-                owner="capknow.authority.coding-fixture-source",
-                namespace="coding.source"),
+                owner="PLUGIN_ISSUER(APK)",
+                namespace="authenticated.fixture.source"),
             ("user" if name == "choice,1" else "fixture_principal"),
             ("BIND_CHOICE(storage)" if name == "choice,1" else "REQUIRE"),
             subject)
@@ -5077,7 +5079,7 @@ def _retained_literal_values() -> tuple[tuple[str, str, Any], ...]:
                 f"AUTHORITY_EVIDENCE_LOCAL({name})", "AREQUIRED")})))
           for (name, _, _), attestation in zip(authority_rows, attestations, strict=True)),
     )
-    environment_one = rid(RecordKind.SEMANTIC_ENVIRONMENT, "E_t", namespace="coding.environment")
+    environment_one = rid(RecordKind.SEMANTIC_ENVIRONMENT, "E_t", namespace="environment")
     evolution_owner = "capknow.fixture.evolution-owner"
     candidate_ids = (
         rid(RecordKind.MIGRATION, "MK0", owner=evolution_owner,
@@ -5168,10 +5170,10 @@ def _retained_literal_rows(
     unknown_id = rid(RecordKind.CONTRACT_SPEC, "CS(UNKNOWN_BEHAVIOR,not_applicable)", namespace="coding.contract")
     error_id = rid(RecordKind.CONTRACT_SPEC, "CS(EVALUATION_ERROR_BEHAVIOR,literal)", namespace="coding.contract")
     shared_specs = (
-        LogicalRecord(evidence_id, ContractSpec(evidence_id.key, Layer.SIGMA, ContractRole.EVIDENCE_SCHEMA, ("EvidenceStore",), frozenset({"EvidenceSet"}), (), frozenset(), "literal_no_evidence")),
-        LogicalRecord(access_id, ContractSpec(access_id.key, Layer.SIGMA, ContractRole.ACCESS_BOUNDARY, ("Value",), frozenset({"ADMITTED", "INADMISSIBLE"}), (), frozenset(), "literal_access")),
-        LogicalRecord(unknown_id, ContractSpec(unknown_id.key, Layer.SIGMA, ContractRole.UNKNOWN_BEHAVIOR, ("Value",), frozenset({"NOT_APPLICABLE"}), (), frozenset(), "literal_not_applicable")),
-        LogicalRecord(error_id, ContractSpec(error_id.key, Layer.SIGMA, ContractRole.EVALUATION_ERROR_BEHAVIOR, ("FailureReasonSet",), frozenset({"VALUE"}), (), frozenset(), "literal_error")),
+        LogicalRecord(evidence_id, ContractSpec(evidence_id.key, Layer.SIGMA, ContractRole.EVIDENCE_SCHEMA, ("ExplicitInputs",), frozenset({"EvidenceSet"}), (), frozenset(), "evidence_none")),
+        LogicalRecord(access_id, ContractSpec(access_id.key, Layer.SIGMA, ContractRole.ACCESS_BOUNDARY, ("LiteralIdentity",), frozenset({"ADMITTED", "INADMISSIBLE"}), (), frozenset(), "access_literal")),
+        LogicalRecord(unknown_id, ContractSpec(unknown_id.key, Layer.SIGMA, ContractRole.UNKNOWN_BEHAVIOR, ("LiteralOrFunctionInput",), frozenset({"NOT_APPLICABLE"}), (), frozenset(), "unknown_not_applicable")),
+        LogicalRecord(error_id, ContractSpec(error_id.key, Layer.SIGMA, ContractRole.EVALUATION_ERROR_BEHAVIOR, ("LiteralIdentity",), frozenset({"TermResult"}), (), frozenset(), "error_literal")),
     )
     declarations: list[LogicalRecord] = []
     bindings: list[LogicalRecord] = []
@@ -5180,10 +5182,14 @@ def _retained_literal_rows(
     for type_name, local, literal_value in _retained_literal_values():
         declaration_id = rid(RecordKind.DECLARATION, f"L(T({type_name}),{local})", namespace="coding.declaration")
         declaration = LogicalRecord(declaration_id, DeclarationShape(
-            declaration_id.key, key(f"SL(T({type_name}),{local})", namespace="coding.symbol"),
+            declaration_id.key, key("NO_SYMBOL_LITERAL", namespace="coding.symbol"),
             "LITERAL", (), f"T({type_name})", (),
             frozenset({type_by_name[type_name].identity}), literal_value))
-        meaning_id = rid(RecordKind.CONTRACT_SPEC, f"CS(LITERAL_MEANING,{local})", namespace="coding.contract")
+        meaning_id = rid(
+            RecordKind.CONTRACT_SPEC,
+            f"CS(LITERAL_MEANING,literal.T({type_name}).{local})",
+            namespace="coding.contract",
+        )
         meaning = LogicalRecord(meaning_id, ContractSpec(
             meaning_id.key, Layer.SIGMA, ContractRole.LITERAL_MEANING,
             ("LiteralIdentity",), frozenset({"TERM_VALUE"}), (), frozenset(),
@@ -5282,10 +5288,26 @@ def _retained_symbol_rows(
         existing = specs.get(identity)
         if existing is not None:
             return existing
+        codomain = (
+            frozenset({"TermResult"})
+            if role is ContractRole.FUNCTION_MEANING
+            else frozenset({"Eval"})
+            if role is ContractRole.PREDICATE_MEANING
+            else frozenset({"EvidenceSet"})
+            if role is ContractRole.EVIDENCE_SCHEMA
+            else frozenset({"ADMITTED", "INADMISSIBLE"})
+            if role is ContractRole.ACCESS_BOUNDARY
+            else frozenset({"NOT_APPLICABLE"})
+            if role is ContractRole.UNKNOWN_BEHAVIOR and local == "not_applicable"
+            else frozenset({"Eval"})
+            if role is ContractRole.UNKNOWN_BEHAVIOR
+            else frozenset({"TermResult"})
+            if role is ContractRole.EVALUATION_ERROR_BEHAVIOR and local == "term"
+            else frozenset({"Eval"})
+        )
         result = LogicalRecord(identity, ContractSpec(
-            identity.key, Layer.SIGMA, role, domain,
-            frozenset({"Eval"}) if role in {ContractRole.FUNCTION_MEANING, ContractRole.PREDICATE_MEANING}
-            else frozenset({"VALUE"}), queries, support, relation))
+            identity.key, Layer.SIGMA, role, domain, codomain,
+            queries, support, relation))
         specs[identity] = result
         return result
 
@@ -5311,22 +5333,41 @@ def _retained_symbol_rows(
                                              "BINDING(DP(event_matches))",
                                              namespace="coding.binding")})
                            if name == "event_occurred" else frozenset())
-        queries = ((ObservationQuery(next(iter(meaning_support)),
-                                     ObservationKind.EVAL_RESULT_SEQUENCE,
-                                     ("pattern", "trace")),)
-                   if meaning_support else ())
+        if name == "snapshot_of":
+            meaning_support = frozenset({type_by_name["RepositorySnapshot"].identity})
+        queries = (
+            (ObservationQuery(
+                next(iter(meaning_support)),
+                ObservationKind.TYPE_ADMISSION_FACT,
+                ("snapshot",)),)
+            if name == "snapshot_of"
+            else (ObservationQuery(
+                next(iter(meaning_support)),
+                ObservationKind.EVAL_RESULT_SEQUENCE,
+                ("pattern", "trace")),)
+            if meaning_support else ()
+        )
+        meaning_domain = tuple(
+            f"T({item})" if item in type_by_name else item
+            for item in argument_types)
         meaning = contract(
             ContractRole.FUNCTION_MEANING if kind == "FUNCTION" else ContractRole.PREDICATE_MEANING,
-            name, argument_types, name, meaning_support, queries)
+            name, meaning_domain, name, meaning_support, queries)
         evidence = contract(ContractRole.EVIDENCE_SCHEMA, evidence_name,
-                            ("EvidenceStore",), f"evidence_{evidence_name}")
+                            (("ExplicitInputs",) if evidence_name == "none"
+                             else ("EvidenceStore",)),
+                            f"evidence_{evidence_name}")
         access = contract(ContractRole.ACCESS_BOUNDARY, access_name,
-                          argument_types or ("Trace",), f"access_{access_name}")
+                          meaning_domain or ("Trace",), f"access_{access_name}")
         unknown = contract(ContractRole.UNKNOWN_BEHAVIOR, unknown_name,
-                           ("UnknownReasonSet",), f"unknown_{unknown_name}")
+                           (("LiteralOrFunctionInput",)
+                            if unknown_name == "not_applicable"
+                            else ("PredicateInput",)),
+                           f"unknown_{unknown_name}")
         error_name = "term" if kind == "FUNCTION" else "predicate"
         error = contract(ContractRole.EVALUATION_ERROR_BEHAVIOR, error_name,
-                         ("FailureReasonSet",), f"error_{error_name}")
+                         (("TermInput",) if kind == "FUNCTION"
+                          else ("PredicateInput",)), f"error_{error_name}")
         binding_id = rid(RecordKind.BINDING,
                          f"BINDING(D{'F' if kind == 'FUNCTION' else 'P'}({name}))",
                          namespace="coding.binding")
@@ -5334,6 +5375,8 @@ def _retained_symbol_rows(
                             evidence.identity, access.identity,
                             unknown.identity, error.identity}) | meaning_support
         closure = proper | type_closure(*(item for item in argument_types if item in type_by_name))
+        if name == "snapshot_of":
+            closure |= type_closure("RepositorySnapshot")
         if name == "event_occurred":
             lower = binding_by_name["event_matches"]
             closure |= lower.value.dependency_closure | frozenset({lower.identity})
@@ -5575,9 +5618,18 @@ def _retained_ck() -> tuple[LogicalRecord, tuple[LogicalRecord, ...]]:
                 (rid(RecordKind.OUTCOME, "C_b", namespace="bounds.contract"),),
                 rid(RecordKind.SEMANTIC_ENVIRONMENT, "E_b",
                     namespace="bounds.environment"))})
-            dependency_scope = frozenset({
-                rid(RecordKind.DEPENDENCY_ENVIRONMENT, "D_b",
-                    namespace="bounds.environment")})
+            bounds_subjects = tuple(
+                item for item in (*ordinary_bindings,
+                                  *retained_literal_bindings)
+                if item.identity.key.local in {
+                    "BINDING(DF(snapshot_of))",
+                    "BINDING(DP(task_accepts))",
+                    "BINDING(L(T(TaskSpec),ts_nonempty))",
+                    "BINDING(L(T(TaskSpec),ts_lt_100))",
+                    "BINDING(L(T(TaskSpec),ts_ge_200))",
+                })
+            dependency_scope = frozenset().union(*(
+                item.value.dependency_closure for item in bounds_subjects))
             roots = frozenset({rid(RecordKind.TRUST_ROOT, "TRB",
                                    namespace="bounds.trust")})
         descriptor_proper = proper | frozenset(
@@ -5586,6 +5638,8 @@ def _retained_ck() -> tuple[LogicalRecord, tuple[LogicalRecord, ...]]:
             declaration_dependency_closure(target)
             for target in targets if isinstance(target, RecordIdentity)
             and target.kind is RecordKind.DECLARATION))
+        if name == "profile":
+            descriptor_closure |= profile.value.dependency_closure
         service_capabilities.append(LogicalRecord(capability_id, CapabilityDescriptor(
             capability_id.key, service_id, ABI0, package.value.plugin_key,
             service_role, capability_class, judgments,
@@ -5661,10 +5715,12 @@ def _retained_ck() -> tuple[LogicalRecord, tuple[LogicalRecord, ...]]:
         if model.value.target_binding in function_targets | predicate_binding_targets
         else model
         for model in ordinary_models)
-    benv_id = rid(RecordKind.CERTIFICATE, "BENV", namespace="coding.certificate")
     bcert_key = key("bundle_bounds_unsat",
                     owner="PLUGIN_CERTIFICATE_ISSUER(CK)",
                     namespace="coding.certificate")
+    # A CertificateEnvelope is stored at its certificate key.  BENV is the
+    # specification name of this value, not a second record identity.
+    benv_id = RecordIdentity(RecordKind.CERTIFICATE, bcert_key)
     benv = LogicalRecord(benv_id, CertificateEnvelope(
         bcert_key, "CONTRADICTION_PROOF",
         rid(RecordKind.REQUEST, "R_b", namespace="bounds.request"),
@@ -5770,25 +5826,61 @@ def core_construction(
     package, support = _retained_ck()
     universe = _install_retained_package(local.universe, package, support)
     composition = compose_records(universe.records)
+    frozen_values = {
+        local_name: value
+        for _, local_name, value in _retained_literal_values()
+    }
+    frozen_task = frozen_values["t_t"]
+    frozen_snapshot = frozen_values["F_c"]
+    frozen_evidence: frozenset[CodingEvidenceEntry] = frozenset()
+    frozen_observation_spec = next(iter(frozen_task.criteria)).spec
+    frozen_observation = cp.observe(
+        frozen_observation_spec, frozen_snapshot).value
+    diagnostic_verification_spec = cp.VerificationSpec(
+        "v_final", frozen_observation_spec, cp.VERIFICATION_SCHEMA)
+    diagnostic_evidence_ref = cp.EvidenceRef(
+        "auditor", "coding", "verification/final", cp.VERIFICATION_SCHEMA)
+    diagnostic_verification = cp.VerificationRecord(
+        diagnostic_verification_spec, cp.SnapshotIdentity(frozen_snapshot),
+        cp.VerificationStatus.PASS, frozen_observation,
+        frozenset({diagnostic_evidence_ref}))
+    diagnostic_evidence = frozenset({cp.CodingEvidenceEntry(
+        diagnostic_evidence_ref, cp.CodingEvidencePayload(
+            cp.EvidencePayloadTag.VERIFICATION, diagnostic_verification))})
     semantic_record = composition.at(local.semantic_environment)
     dependency_record = composition.at(local.dependency_environment)
     assert semantic_record is not None and dependency_record is not None
-    semantic_value = semantic_record.value
-    syntax = frozenset(semantic_value.declarations + semantic_value.pair_declarations)
-    subjects = frozenset(semantic_value.bindings + semantic_value.profile_bindings
-                         + semantic_value.pair_bindings)
-    associations = frozenset(
-        (declaration, binding_identity)
-        for declaration in semantic_value.declarations
-        for binding_identity in semantic_value.bindings
-        if ((bound := composition.at(binding_identity)) is not None
-            and isinstance(bound.value, SemanticBinding)
-            and bound.value.declaration == declaration))
-    proper = frozenset().union(*(
-        record.value.proper_semantic_dependencies
-        for identity in subjects
-        if ((record := composition.at(identity)) is not None
-            and isinstance(record.value, SemanticBinding))))
+    binding_record = next(
+        item for item in package.value.bindings
+        if item.identity.key.local == "BINDING(DP(task_accepts))")
+    declaration_record = next(
+        item for item in package.value.declarations
+        if item.identity.key.local == "DP(task_accepts)")
+    required_type_names = {"TaskSpec", "RepositorySnapshot"}
+    pending = list(required_type_names)
+    while pending:
+        for name in _RETAINED_TYPE_DEPENDENCIES[pending.pop()]:
+            if name not in required_type_names:
+                required_type_names.add(name)
+                pending.append(name)
+    delta_declarations = tuple(sorted((
+        *(item.identity for item in package.value.declarations
+          if item.identity.kind is RecordKind.TYPE_DECLARATION
+          and item.identity.key.local[2:-1] in required_type_names),
+        declaration_record.identity,
+    )))
+    frozen_required = frozenset({declaration_record.identity,
+                                 binding_record.identity})
+    rebuilt_semantic = replace(
+        semantic_record,
+        value=SemanticEnvironment(
+            ABI0, delta_declarations, (), (binding_record.identity,),
+            mechanically_extracted_dependencies=frozen_required))
+    syntax = frozenset({declaration_record.identity})
+    subjects = frozenset({binding_record.identity})
+    associations = frozenset({(declaration_record.identity,
+                                binding_record.identity)})
+    proper = binding_record.value.proper_semantic_dependencies
     from .reference import _reachable_closure
     rebuilt_dependency = replace(
         dependency_record,
@@ -5796,12 +5888,51 @@ def core_construction(
             syntax, subjects, associations, syntax | subjects, proper,
             _reachable_closure(proper, composition),
             dependency_record.value.validation_references))
+    request_record = composition.at(local.request)
+    assert request_record is not None and isinstance(request_record.value, InvocationRequest)
+    rebuilt_request = replace(
+        request_record,
+        value=replace(request_record.value,
+                      target=declaration_record.identity,
+                      arguments=(frozen_task, frozen_snapshot, frozen_evidence)))
+    result_record = composition.at(local.result)
+    rebuilt_result = None if result_record is None else replace(
+        result_record,
+        value=ResultRecord(local.request, "Eval", Eval(Truth.TRUE)))
+    capability_record = composition.at(local.capability)
+    root_record = composition.at(local.trust_root)
+    trust_record = composition.at(local.trust_environment)
+    assert capability_record is not None and root_record is not None and trust_record is not None
+    frozen_use = ServiceUseTrustTarget(
+        capability_record.identity, "PREDICATE_EVALUATION",
+        binding_record.identity, rebuilt_semantic.identity)
+    rebuilt_root = replace(
+        root_record,
+        value=replace(root_record.value, permitted_targets=frozenset({frozen_use})))
+    judgments = tuple(
+        (root, TrustRootJudgment(judgment.state,
+             rebuilt_root.value if judgment.state is TrustState.ADMITTED else None,
+             judgment.reasons))
+        for root, judgment in trust_record.value.root_judgments)
+    rebuilt_trust = replace(
+        trust_record, value=replace(trust_record.value, root_judgments=judgments))
+    replacements = {
+        rebuilt_semantic.identity: rebuilt_semantic,
+        rebuilt_dependency.identity: rebuilt_dependency,
+        rebuilt_request.identity: rebuilt_request,
+        rebuilt_root.identity: rebuilt_root,
+        rebuilt_trust.identity: rebuilt_trust,
+    }
+    if rebuilt_result is not None:
+        replacements[rebuilt_result.identity] = rebuilt_result
     universe = replace(
         universe,
-        records=tuple(rebuilt_dependency if item.identity == rebuilt_dependency.identity
-                      else item for item in universe.records))
+        records=tuple(replacements.get(item.identity, item)
+                      for item in universe.records))
     manifest = frozenset(compose_records(universe.records).records)
-    return replace(local, universe=universe, manifest=manifest)
+    return replace(
+        local, universe=universe, manifest=manifest,
+        snapshot=frozen_snapshot, task=frozen_task, evidence=diagnostic_evidence)
 
 
 def confluence_construction(order: OrderTag) -> ConfluenceConstruction:
@@ -5813,6 +5944,14 @@ def confluence_construction(order: OrderTag) -> ConfluenceConstruction:
         next(item.identity for item in package.value.bindings
              if item.identity.key.local == local_id.key.local)
         for local_id in (local.node_one, local.node_two))
+    retained_predicates = tuple(
+        next(item.identity for item in package.value.bindings
+             if item.identity.key.local == local)
+        for local in (
+            "BINDING(DP(observations_equal))",
+            "BINDING(DP(dependency_metadata_changed))",
+        ))
+    retained_subjects = retained_nodes + retained_predicates
     graph_request = universe.request
     assert isinstance(graph_request, GraphEvaluationRequest)
     reasoning = composition.at(graph_request.reasoning_request)
@@ -5830,7 +5969,7 @@ def confluence_construction(order: OrderTag) -> ConfluenceConstruction:
         and any(item.value.literal_value == value for value in literal_values))
     selected_declaration_ids = {
         item.value.declaration for item in package.value.bindings
-        if item.identity in retained_nodes
+        if item.identity in retained_subjects
     } | {item.identity for item in literal_declarations}
     pending = list(selected_declaration_ids)
     while pending:
@@ -5853,7 +5992,7 @@ def confluence_construction(order: OrderTag) -> ConfluenceConstruction:
                 pending.append(dependency_identity)
     selected_bindings = tuple(
         item for item in package.value.bindings
-        if item.identity in retained_nodes
+        if item.identity in retained_subjects
         or (isinstance(item.value, SemanticBinding)
             and item.value.declaration in {row.identity for row in literal_declarations}))
     selected_binding_ids = tuple(item.identity for item in selected_bindings)
@@ -5869,7 +6008,7 @@ def confluence_construction(order: OrderTag) -> ConfluenceConstruction:
         value=SemanticEnvironment(
             ABI0, selected_declarations, (), selected_binding_ids,
             authority_facts=semantic_value.authority_facts,
-            mechanically_extracted_dependencies=frozenset(retained_nodes)))
+            mechanically_extracted_dependencies=frozenset(retained_subjects)))
     associations = frozenset(
         (item.value.declaration, item.identity) for item in selected_bindings)
     proper = frozenset().union(*(
@@ -5929,7 +6068,7 @@ def cycle_universe(cyclic: bool = True) -> Universe:
             namespace="coding.contract")
         cycle_spec = LogicalRecord(cycle_spec_id, ContractSpec(
             cycle_spec_id.key, Layer.SIGMA, ContractRole.PREDICATE_MEANING,
-            ("EventPattern", "EventValue"), frozenset({"Eval"}),
+            ("T(EventPattern)", "EventValue"), frozenset({"Eval"}),
             (ObservationQuery(occurred.identity, ObservationKind.EVAL_RESULT,
                               ("pattern", "singleton_trace(event)")),),
             frozenset({occurred.identity}), "event_matches_cycle"))
@@ -5950,9 +6089,15 @@ def cycle_universe(cyclic: bool = True) -> Universe:
                 model,
                 value=replace(
                     model.value,
-                    semantic_contract=cycle_spec_id,
+                    semantic_contract=(
+                        cycle_spec_id
+                        if model.value.target_binding == matches.identity
+                        else model.value.semantic_contract),
                     capability_summaries=frozenset()))
-            if model.value.target_binding == matches.identity else model
+            if (model.value.target_binding == matches.identity
+                or (model.identity.key.namespace == "coding.model"
+                    and not model.identity.key.local.startswith("MODEL_LITERAL(")))
+            else model
             for model in retained_package.value.model_contracts)
         package = replace(
             retained_package,
@@ -6614,8 +6759,7 @@ _EXPECTED_C_NEW = ArtifactContent(
     ByteSize(150), ContentIdentity("lock_v1"),
 )
 _EXPECTED_C_SELECTOR = ArtifactSelector(
-    SelectorTag.PATHS_WITH_ROLE, frozenset({_EXPECTED_C_PATH}),
-    ArtifactRole.DEPENDENCY_LOCK,
+    SelectorTag.PATHS, frozenset({_EXPECTED_C_PATH}),
 )
 _EXPECTED_C_SPEC = ObservationSpec(
     ObservationSpecTag.ARTIFACT_VIEW, _EXPECTED_C_SELECTOR,
@@ -6739,10 +6883,10 @@ _EXPECTED_CONFLUENCE_DECLARATIONS: tuple[IdentityLiteral, ...] = (
     ('PRODUCER_RECORD', 'capknow.semantic', 'confluence.producer', 'producer.confluence.trust_environment', (1,)),
 )
 _EXPECTED_CONFLUENCE_AUTHORITY_ADDITIONS: tuple[IdentityLiteral, ...] = (
-    ('SOURCE_RECORD', 'capknow.semantic', 'confluence.source', 'SRC(c,1)', (1,)),
-    ('SOURCE_RECORD', 'capknow.semantic', 'confluence.source', 'SRC(c,2)', (1,)),
-    ('AUTHORITY_REF_RECORD', 'capknow.semantic', 'confluence.authority', 'AUTH(c,1)', (1,)),
-    ('AUTHORITY_REF_RECORD', 'capknow.semantic', 'confluence.authority', 'AUTH(c,2)', (1,)),
+    ('SOURCE_RECORD', 'PLUGIN_ISSUER(APK)', 'authenticated.fixture.source', 'SRC(c,1)', (1,)),
+    ('SOURCE_RECORD', 'PLUGIN_ISSUER(APK)', 'authenticated.fixture.source', 'SRC(c,2)', (1,)),
+    ('AUTHORITY_REF_RECORD', 'PLUGIN_ISSUER(APK)', 'coding.fixture', 'AUTH(c,1)', (1,)),
+    ('AUTHORITY_REF_RECORD', 'PLUGIN_ISSUER(APK)', 'coding.fixture', 'AUTH(c,2)', (1,)),
     ('AUTHORITY_FACT_RECORD', 'capknow.semantic', 'confluence.authority.binding', 'AFB(c,1)', (1,)),
     ('AUTHORITY_FACT_RECORD', 'capknow.semantic', 'confluence.authority.binding', 'AFB(c,2)', (1,)),
 )
@@ -6892,7 +7036,8 @@ _EXPECTED_RETAINED_LITERAL_IDENTITIES: tuple[IdentityLiteral, ...] = (
             ("DECLARATION_RECORD", "capknow.semantic", "coding.declaration", f"L(T({type_name}),{local})", (1,)),
             ("BINDING_RECORD", "capknow.semantic", "coding.binding", f"BINDING(L(T({type_name}),{local}))", (1,)),
             ("MODEL_CONTRACT_RECORD", "capknow.semantic", "coding.model", f"MODEL_LITERAL(T({type_name}),{local})", (1,)),
-            ("CONTRACT_SPEC_RECORD", "capknow.semantic", "coding.contract", f"CS(LITERAL_MEANING,{local})", (1,)),
+            ("CONTRACT_SPEC_RECORD", "capknow.semantic", "coding.contract",
+             f"CS(LITERAL_MEANING,literal.T({type_name}).{local})", (1,)),
         )
     ) + (
         ("CONTRACT_SPEC_RECORD", "capknow.semantic", "coding.contract", "CS(EVIDENCE_SCHEMA,none)", (1,)),
@@ -6956,7 +7101,6 @@ _EXPECTED_RETAINED_SERVICE_MEMBERS: tuple[IdentityLiteral, ...] = tuple(
         *(("SERVICE_RECORD", "coding.service", f"SK({name})")
           for name in ("functions", "predicates", "profile", "bounds", "confluence")),
         ("SERVICE_RECORD", "coding.service", "LEXSK"),
-        ("CERTIFICATE_RECORD", "coding.certificate", "BENV"),
         *(("CONTRACT_SPEC_RECORD", "coding.service.contract", local)
           for local in ("FSOUND", "FREQ", "FFAIL",
                         "PROFSOUND", "PROFREQ", "PROFFAIL",
@@ -6969,6 +7113,9 @@ _EXPECTED_RETAINED_SERVICE_MEMBERS: tuple[IdentityLiteral, ...] = tuple(
                         "CS(EVALUATION_ERROR_BEHAVIOR,term)",
                         "CS(EVIDENCE_SCHEMA,none)", "CS(UNKNOWN_BEHAVIOR,never)")),
     )
+) + (
+    ("CERTIFICATE_RECORD", "PLUGIN_CERTIFICATE_ISSUER(CK)",
+     "coding.certificate", "bundle_bounds_unsat", (1,)),
 )
 _EXPECTED_RETAINED_CONFLUENCE_MEMBERS = (
     _EXPECTED_RETAINED_SYMBOL_IDENTITIES + _EXPECTED_RETAINED_SERVICE_MEMBERS)
@@ -7005,7 +7152,8 @@ _EXPECTED_REPLAY_ASSERTIONS_LITERAL: dict[FixtureId, ReplayAssertion] = {
     FixtureId(FixtureFamily.CORE_DEFINITIONAL): ReplayAssertion(
         (_EI_000_ABI0, _EI_005_BINDING_DP_task_accepts, _EI_014_CAP_predicates, _EI_028_CS_ACCESS_BOUNDARY_task_final_evidence, _EI_029_CS_EVALUATION_ERROR_BEHAVIOR_predicate, _EI_030_CS_EVIDENCE_SCHEMA_verification, _EI_034_CS_PREDICATE_MEANING_task_accepts, _EI_035_CS_UNKNOWN_BEHAVIOR_predicate, _EI_044_QFAIL, _EI_045_QREQ, _EI_046_QSOUND, _EI_071_ADMIT_RepositorySnapshot, _EI_072_ADMIT_TaskSpec, _EI_087_DP_task_accepts, _EI_091_D_t, _EI_097_DE_dependency_refresh, _EI_107_MODEL_task_accepts, _EI_124_coding_minimal, _EI_134_PROFILE_BINDING_PK_implementation_evidence, _EI_140_Q_t_ADMITTED, _EI_146_RES_t_ADMITTED, _EI_150_E_t, _EI_159_SK_predicates, _EI_165_T_admitted, _EI_171_TP, _EI_174_TR, _EI_179_RepositorySnapshot, _EI_204_TaskSpec),
         (),
-        ("CORE", Formation.WELL_FORMED, Closure.CLOSED, Evaluability.AVAILABLE, 'INVOCABLE_FOR(Q_t[ADMITTED])', Eval(Truth.TRUE, frozenset({EvidenceRef("auditor", "coding", "verification/final", "CS(EVIDENCE_SCHEMA,verification)" )}))),
+        ("CORE", Formation.WELL_FORMED, Closure.CLOSED, Evaluability.AVAILABLE,
+         'INVOCABLE_FOR(Q_t[ADMITTED])', Eval(Truth.TRUE)),
     ),
     FixtureId(FixtureFamily.PAIR_INDEPENDENT): ReplayAssertion(
         (_EI_000_ABI0, _EI_006_B_alt_refresh_occurred, _EI_007_B_alt_refresh_scope, _EI_012_PVC, _EI_015_PCERT, _EI_020_PCOMPLETE, _EI_021_PEVIDENCE, _EI_022_PFAILURE, _EI_023_PSOUND, _EI_032_CS_PREDICATE_MEANING_refresh_occurred, _EI_033_CS_PREDICATE_MEANING_refresh_scope, _EI_036_T3_A1_ACCESS_LIFT, _EI_037_T3_A1_ERROR_LIFT, _EI_038_T3_A1_EVIDENCE_LIFT, _EI_039_T3_A1_UNKNOWN_LIFT, _EI_085_DP_refresh_occurred, _EI_086_DP_refresh_scope, _EI_096_D_p, _EI_097_DE_dependency_refresh, _EI_099_PAIR_PROOF_REF, _EI_100_PairFullEvalProof, _EI_108_MODEL_refresh_occurred_pair, _EI_109_MODEL_refresh_scope_pair, _EI_118_pair_validator, _EI_119_pair_proof, _EI_124_coding_minimal, _EI_125_PB_alt, _EI_126_PAIR_refresh, _EI_127_producer_certificate, _EI_128_producer_pair, _EI_129_producer_trust_environment, _EI_130_producer_trust_policy, _EI_131_producer_trust_root, _EI_132_producer_validation_capability, _EI_133_producer_validation_proof, _EI_138_R_p, _EI_154_E_p, _EI_157_PVSK, _EI_163_T_p, _EI_170_TP, _EI_173_TRP),
@@ -7015,7 +7163,8 @@ _EXPECTED_REPLAY_ASSERTIONS_LITERAL: dict[FixtureId, ReplayAssertion] = {
     FixtureId(FixtureFamily.TRUST_BRANCH, (TrustFixtureTag.ADMITTED,)): ReplayAssertion(
         (_EI_000_ABI0, _EI_005_BINDING_DP_task_accepts, _EI_014_CAP_predicates, _EI_028_CS_ACCESS_BOUNDARY_task_final_evidence, _EI_029_CS_EVALUATION_ERROR_BEHAVIOR_predicate, _EI_030_CS_EVIDENCE_SCHEMA_verification, _EI_034_CS_PREDICATE_MEANING_task_accepts, _EI_035_CS_UNKNOWN_BEHAVIOR_predicate, _EI_044_QFAIL, _EI_045_QREQ, _EI_046_QSOUND, _EI_071_ADMIT_RepositorySnapshot, _EI_072_ADMIT_TaskSpec, _EI_087_DP_task_accepts, _EI_091_D_t, _EI_097_DE_dependency_refresh, _EI_107_MODEL_task_accepts, _EI_124_coding_minimal, _EI_134_PROFILE_BINDING_PK_implementation_evidence, _EI_140_Q_t_ADMITTED, _EI_146_RES_t_ADMITTED, _EI_150_E_t, _EI_159_SK_predicates, _EI_165_T_admitted, _EI_171_TP, _EI_174_TR, _EI_179_RepositorySnapshot, _EI_204_TaskSpec),
         (),
-        ("CORE", Formation.WELL_FORMED, Closure.CLOSED, Evaluability.AVAILABLE, 'INVOCABLE_FOR(Q_t[ADMITTED])', Eval(Truth.TRUE, frozenset({EvidenceRef("auditor", "coding", "verification/final", "CS(EVIDENCE_SCHEMA,verification)" )}))),
+        ("CORE", Formation.WELL_FORMED, Closure.CLOSED, Evaluability.AVAILABLE,
+         'INVOCABLE_FOR(Q_t[ADMITTED])', Eval(Truth.TRUE)),
     ),
     FixtureId(FixtureFamily.TRUST_BRANCH, (TrustFixtureTag.ABSENT,)): ReplayAssertion(
         (_EI_000_ABI0, _EI_005_BINDING_DP_task_accepts, _EI_014_CAP_predicates, _EI_028_CS_ACCESS_BOUNDARY_task_final_evidence, _EI_029_CS_EVALUATION_ERROR_BEHAVIOR_predicate, _EI_030_CS_EVIDENCE_SCHEMA_verification, _EI_034_CS_PREDICATE_MEANING_task_accepts, _EI_035_CS_UNKNOWN_BEHAVIOR_predicate, _EI_044_QFAIL, _EI_045_QREQ, _EI_046_QSOUND, _EI_071_ADMIT_RepositorySnapshot, _EI_072_ADMIT_TaskSpec, _EI_087_DP_task_accepts, _EI_091_D_t, _EI_097_DE_dependency_refresh, _EI_107_MODEL_task_accepts, _EI_124_coding_minimal, _EI_134_PROFILE_BINDING_PK_implementation_evidence, _EI_139_Q_t_ABSENT, _EI_150_E_t, _EI_159_SK_predicates, _EI_164_T_absent, _EI_171_TP, _EI_174_TR, _EI_179_RepositorySnapshot, _EI_204_TaskSpec),
@@ -7580,7 +7729,8 @@ def _build_expected_assertions() -> dict[FixtureId, ReplayAssertion]:
             _EI_150_E_t, _EI_165_T_admitted, _EI_171_TP, _EI_174_TR,
             _EI_179_RepositorySnapshot, _EI_204_TaskSpec,
             _EI_071_ADMIT_RepositorySnapshot, _EI_072_ADMIT_TaskSpec,
-            ("CERTIFICATE_RECORD", "capknow.semantic", "coding.certificate", "BENV", (1,)),
+            ("CERTIFICATE_RECORD", "PLUGIN_CERTIFICATE_ISSUER(CK)",
+             "coding.certificate", "bundle_bounds_unsat", (1,)),
             ("CONTRACT_SPEC_RECORD", "capknow.semantic", "coding.contract", "CS(PREDICATE_MEANING,event_matches)", (1,)),
         })
     cycle_exact_additions: frozenset[IdentityLiteral] = frozenset({
