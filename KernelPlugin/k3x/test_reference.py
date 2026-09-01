@@ -2,6 +2,8 @@
 
 import ast
 from dataclasses import fields, is_dataclass, replace
+from enum import Enum
+from hashlib import sha256
 import inspect
 import unittest
 
@@ -136,6 +138,9 @@ def _asserted_dependency_environment(
             and isinstance(pair_declaration.value, ref.PairDeclaration)
             and pair_declaration.value.occurrence_symbol
                 == declaration.value.symbol_key
+            and pair_binding.value.occurrence_binding_key
+                == ref.RecordIdentity(
+                    ref.RecordKind.BINDING, declaration.identity.key)
             and (occurrence := composition.at(
                 pair_binding.value.occurrence_bundle)) is not None
             and isinstance(occurrence.value,
@@ -306,6 +311,43 @@ def _conflict_literal(value: ref.ConflictRef) -> tuple[object, ...]:
     )
 
 
+def _complete_value_literal(
+    value: object, nodes: dict[str, object],
+) -> object:
+    """Intern one immutable value into a canonical, lossless value graph."""
+    if isinstance(value, Enum):
+        kind = type(value)
+        return ("ENUM", kind.__module__, kind.__qualname__, value.value)
+    if value is None or isinstance(value, (bool, int, str, bytes)):
+        return ("ATOM", value)
+    if is_dataclass(value) and not isinstance(value, type):
+        kind = type(value)
+        descriptor = (
+            "DATACLASS", kind.__module__, kind.__qualname__,
+            tuple((field.name, _complete_value_literal(
+                      getattr(value, field.name), nodes))
+                  for field in fields(value)),
+        )
+    elif isinstance(value, tuple):
+        descriptor = ("TUPLE", tuple(
+            _complete_value_literal(item, nodes) for item in value))
+    elif isinstance(value, frozenset):
+        items = tuple(_complete_value_literal(item, nodes) for item in value)
+        descriptor = ("FROZENSET", tuple(sorted(items, key=repr)))
+    elif isinstance(value, dict):
+        items = tuple((_complete_value_literal(key, nodes),
+                       _complete_value_literal(item, nodes))
+                      for key, item in value.items())
+        descriptor = ("DICT", tuple(sorted(items, key=repr)))
+    else:
+        descriptor = ("OPAQUE", type(value).__module__, type(value).__qualname__)
+    identity = sha256(repr(descriptor).encode("utf-8")).hexdigest()
+    previous = nodes.setdefault(identity, descriptor)
+    if previous != descriptor:
+        raise AssertionError("canonical assertion-node collision")
+    return ("REF", identity)
+
+
 def _replay_assertion(universe: ref.Universe, replayed: object) -> fx.ReplayAssertion:
     if isinstance(replayed, (ref.CoreReplay, ref.PairReplay, ref.LookupReplay)):
         composition = replayed.authoritative
@@ -314,6 +356,15 @@ def _replay_assertion(universe: ref.Universe, replayed: object) -> fx.ReplayAsse
     else:
         composition = ref.compose_records(universe.records)
     identities = tuple(sorted(_identity_literal(item.identity) for item in composition.records))
+    authoritative_nodes: dict[str, object] = {}
+    authoritative_roots = tuple(sorted(
+        ((_identity_literal(item.identity),
+          _complete_value_literal(item.value, authoritative_nodes))
+         for item in composition.records),
+        key=lambda item: item[0],
+    ))
+    authoritative_map = (
+        tuple(sorted(authoritative_nodes.items())), authoritative_roots)
     conflicts = tuple(_conflict_literal(item) for item in composition.conflicts)
     if isinstance(replayed, ref.CoreReplay):
         outcome = (
@@ -342,7 +393,7 @@ def _replay_assertion(universe: ref.Universe, replayed: object) -> fx.ReplayAsse
         outcome = ("FORMATION", replayed)
     else:
         raise AssertionError(f"unsupported test replay projection: {type(replayed).__name__}")
-    return fx.ReplayAssertion(identities, conflicts, outcome)
+    return fx.ReplayAssertion(identities, conflicts, outcome, authoritative_map)
 
 
 def _contains_fixture_id(value: object) -> bool:
@@ -652,7 +703,7 @@ class K3XReferenceTests(unittest.TestCase):
                 "BINDING(DP(event_matches))",
                 "BINDING(DP(event_occurred))",
                 "BINDING(DP(refresh_scope))",
-                "BINDING(DP(refresh_occurred))",
+                "DP(refresh_occurred)",
                 "BINDING(DP(dependency_metadata_changed))"},
         }
         for local, expected in asserted_binding_targets.items():
@@ -823,7 +874,9 @@ class K3XReferenceTests(unittest.TestCase):
         def combined_scope(*locals_: str) -> frozenset[ref.DependencyKey]:
             return frozenset().union(*(
                 frozenset(_asserted_dependency_key(root)
-                          for root in binding_closures[local])
+                          for root in binding_closures[
+                              "BINDING(DP(refresh_occurred))"
+                              if local == "DP(refresh_occurred)" else local])
                 for local in locals_))
         self.assertEqual(
             {local: descriptor.dependency_scope
@@ -1390,6 +1443,24 @@ class K3XReferenceTests(unittest.TestCase):
                     ref.dependency_reachability(
                         descriptors[local].proper_semantic_dependencies,
                         missing)
+            empty = replace(
+                carrier,
+                value=ref.SemanticEnvironment(fx.ABI0, (), (), ()))
+            with self.subTest(empty_authoritative_environment=identity.key.local):
+                replayed = ref.replay(_rewrite(
+                    construction.universe, {identity: empty}))
+                self.assertIsInstance(replayed, ref.CompositionReplay)
+                self.assertEqual(replayed.formation, ref.Formation.MALFORMED)
+            altered = replace(
+                carrier,
+                value=replace(
+                    carrier.value,
+                    declarations=carrier.value.declarations[1:]))
+            with self.subTest(altered_authoritative_environment=identity.key.local):
+                replayed = ref.replay(_rewrite(
+                    construction.universe, {identity: altered}))
+                self.assertIsInstance(replayed, ref.CompositionReplay)
+                self.assertEqual(replayed.formation, ref.Formation.MALFORMED)
         for local, identity in (
             ("CAP(bounds)", ref.RecordIdentity(
                 ref.RecordKind.TRUST_ROOT,
@@ -1408,6 +1479,28 @@ class K3XReferenceTests(unittest.TestCase):
                     ref.dependency_reachability(
                         descriptors[local].proper_semantic_dependencies,
                         missing)
+            root_record = composition.at(identity)
+            assert root_record is not None
+            root_mutations = (
+                replace(root_record.value, root_key=ref.ExactKey(
+                    "foreign.owner", "foreign.trust", identity.key.local,
+                    ref.Version((1,)))),
+                replace(root_record.value, owner="foreign.owner"),
+                replace(root_record.value, trusted_validators=frozenset()),
+                replace(root_record.value,
+                        permitted_certificate_kinds=frozenset({"WRONG"})),
+                replace(root_record.value, permitted_targets=frozenset()),
+                replace(root_record.value, adoption="FOREIGN_ADOPTION"),
+            )
+            for mutation in root_mutations:
+                with self.subTest(authoritative_root_value=(
+                        identity.key.local, mutation)):
+                    replayed = ref.replay(_rewrite(
+                        construction.universe, {
+                            identity: replace(root_record, value=mutation)}))
+                    self.assertIsInstance(replayed, ref.CompositionReplay)
+                    self.assertEqual(
+                        replayed.formation, ref.Formation.MALFORMED)
         foreign_root = ref.DependencyKey(
             ref.DependencyTag.TRUST_ROOT,
             ref.ExactKey("foreign.owner", "foreign.trust", "TR",
@@ -1504,6 +1597,57 @@ class K3XReferenceTests(unittest.TestCase):
         self.assertIn(
             _asserted_dependency_key(occurrence_bundle.identity),
             derived_occurrence.expanded_root_keys)
+        occurrence_model = _at(
+            construction.universe,
+            binding.value.occurrence_model_contract_key)
+        foreign_occurrence_binding = ref.RecordIdentity(
+            ref.RecordKind.BINDING,
+            ref.ExactKey("foreign.owner", "foreign.occurrence",
+                         "DP(refresh_occurred)", ref.Version((1,))))
+        foreign_binding = replace(
+            binding, value=replace(
+                binding.value,
+                occurrence_binding_key=foreign_occurrence_binding))
+        foreign_model = replace(
+            occurrence_model, value=replace(
+                occurrence_model.value,
+                target_binding=foreign_occurrence_binding))
+        foreign_owned = _rewrite(construction.universe, {
+            binding.identity: foreign_binding,
+            occurrence_model.identity: foreign_model,
+        })
+        foreign_composition = ref.compose_records(foreign_owned.records)
+        with self.assertRaisesRegex(
+                ValueError, "missing or ambiguous exact symbol binding"):
+            ref.derive_dependency_environment(
+                occurrence_syntax, frozenset({binding.identity}),
+                foreign_composition)
+        with self.assertRaisesRegex(
+                AssertionError, "independent symbol binding is not unique"):
+            _asserted_dependency_environment(
+                occurrence_syntax, frozenset({binding.identity}),
+                foreign_composition)
+        self.assertNotIsInstance(ref.replay(foreign_owned), ref.PairReplay)
+
+        missing_owner_composition = ref.compose_records(
+            without_pair_binding.records)
+        with self.assertRaisesRegex(
+                ValueError, "missing or ambiguous exact symbol binding"):
+            ref.derive_dependency_environment(
+                occurrence_syntax, frozenset(), missing_owner_composition)
+        duplicate_binding = replace(
+            binding,
+            identity=fx.rid(
+                ref.RecordKind.PAIR_BINDING, "PB_alt_duplicate",
+                namespace="pair.binding"))
+        ambiguous_universe = replace(
+            construction.universe,
+            records=(*construction.universe.records, duplicate_binding))
+        with self.assertRaisesRegex(
+                ValueError, "missing or ambiguous exact symbol binding"):
+            ref.derive_dependency_environment(
+                occurrence_syntax, frozenset(),
+                ref.compose_records(ambiguous_universe.records))
         self.assertEqual(len(binding.value.validation_references), 2)
         self.assertFalse(binding.value.validation_references & binding.value.proper_semantic_dependencies)
         manifest = construction.manifest
@@ -2033,10 +2177,11 @@ class K3XReferenceTests(unittest.TestCase):
                 syntax_root_keys=dependency.value.syntax_root_keys | {rogue_root},
                 expanded_root_keys=dependency.value.expanded_root_keys
                 | {rogue_dependency}))
-        with self.assertRaises(ValueError):
-            ref.replay(_rewrite(forward.universe, {
-                semantic.identity: coherent_semantic,
-                dependency.identity: coherent_dependency}))
+        coherent_result = ref.replay(_rewrite(forward.universe, {
+            semantic.identity: coherent_semantic,
+            dependency.identity: coherent_dependency}))
+        self.assertIsInstance(coherent_result, ref.CompositionReplay)
+        self.assertEqual(coherent_result.formation, ref.Formation.MALFORMED)
         foreign = fx.rid(ref.RecordKind.DECLARATION, "foreign", namespace="confluence")
         foreign_dependency = ref.dependency_key(foreign)
         with self.assertRaises(TypeError):
@@ -2185,9 +2330,11 @@ class K3XReferenceTests(unittest.TestCase):
             replace(semantic.value, chi_c=(("foreign", "foreign"),)),
         )
         for mutation in semantic_mutations:
-            with self.assertRaises(ValueError):
-                ref.replay(_rewrite(
-                    forward.universe, {semantic.identity: replace(semantic, value=mutation)}))
+            replayed = ref.replay(_rewrite(
+                forward.universe,
+                {semantic.identity: replace(semantic, value=mutation)}))
+            self.assertIsInstance(replayed, ref.CompositionReplay)
+            self.assertEqual(replayed.formation, ref.Formation.MALFORMED)
         bad_inputs = replace(
             forward.universe.request,
             observation_inputs=((forward.node_one, forward.universe.request.observation_inputs[1][1]),
@@ -2584,6 +2731,40 @@ class K3XReferenceTests(unittest.TestCase):
         self.assertNotEqual(
             _replay_assertion(changed_result, ref.replay(changed_result)), frozen
         )
+
+        bounds_environment_identity = ref.RecordIdentity(
+            ref.RecordKind.SEMANTIC_ENVIRONMENT,
+            ref.ExactKey(
+                "capknow.semantic", "bounds.environment", "E_b",
+                ref.Version((1,))))
+        bounds_environment = _at(core, bounds_environment_identity)
+        emptied_environment = replace(
+            bounds_environment,
+            value=ref.SemanticEnvironment(fx.ABI0, (), (), ()))
+        changed_environment = _rewrite(
+            core, {bounds_environment_identity: emptied_environment})
+        self.assertNotEqual(
+            _replay_assertion(
+                changed_environment, ref.replay(changed_environment)),
+            frozen)
+
+        bounds_root_identity = ref.RecordIdentity(
+            ref.RecordKind.TRUST_ROOT,
+            ref.ExactKey(
+                "capknow.semantic", "bounds.trust", "TRB",
+                ref.Version((1,))))
+        bounds_root = _at(core, bounds_root_identity)
+        foreign_scoped_root = replace(
+            bounds_root,
+            value=replace(
+                bounds_root.value,
+                root_key=ref.ExactKey(
+                    "foreign.owner", "foreign.trust", "TRB",
+                    ref.Version((1,)))))
+        changed_root = _rewrite(
+            core, {bounds_root_identity: foreign_scoped_root})
+        self.assertNotEqual(
+            _replay_assertion(changed_root, ref.replay(changed_root)), frozen)
 
     def test_k3x_13_declared_access_and_static_oracle_exclusions(self) -> None:
         for requested in (frozenset({"repository"}), frozenset({"evidence"}), frozenset({"hidden_assertion"})):

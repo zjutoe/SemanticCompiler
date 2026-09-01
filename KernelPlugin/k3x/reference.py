@@ -1931,7 +1931,7 @@ def validate_packages(
             item.value.target_binding for item in package.model_contracts
             if isinstance(item.value, ModelContract))
         package_occurrence_targets = frozenset(
-            item.value.occurrence_bundle
+            item.value.occurrence_binding_key
             for item in package.pair_bindings
             if isinstance(item.value, PairBinding))
         literal_declarations = frozenset(
@@ -2118,6 +2118,17 @@ def _record_for_dependency(
     direct = composition.at(RecordIdentity(key.record_kind, key.exact_key))
     if direct is not None:
         return direct
+    if key.tag is DependencyTag.BINDING:
+        owned_occurrences = tuple(
+            item.value.occurrence_bundle
+            for item in composition.records
+            if isinstance(item.value, PairBinding)
+            and item.value.occurrence_binding_key
+                == RecordIdentity(RecordKind.BINDING, key.exact_key))
+        if len(owned_occurrences) > 1:
+            raise ValueError("ambiguous pair-owned occurrence binding")
+        if owned_occurrences:
+            return composition.at(owned_occurrences[0])
     if key.tag is DependencyTag.DECLARATION:
         return composition.at(RecordIdentity(
             RecordKind.TYPE_DECLARATION, key.exact_key))
@@ -2231,9 +2242,13 @@ def _bindings_for_declaration(
         occurrence = _resolve(
             composition, pair_binding.value.occurrence_bundle,
             OccurrenceSemanticContractBundle)
+        exact_occurrence_binding = RecordIdentity(
+            RecordKind.BINDING, declaration.identity.key)
         if (pair_declaration is not None and occurrence is not None
                 and pair_declaration.value.occurrence_symbol
-                    == declaration.value.symbol_key):
+                    == declaration.value.symbol_key
+                and pair_binding.value.occurrence_binding_key
+                    == exact_occurrence_binding):
             pair_owned.append(occurrence)
     return ordinary + tuple(pair_owned)
 
@@ -2266,7 +2281,8 @@ def _dependency_associations(
                 "LITERAL", "FUNCTION", "PREDICATE"}):
         bindings = _bindings_for_declaration(record, composition)
         if len(bindings) != 1:
-            raise ValueError("missing or ambiguous declaration binding")
+            raise ValueError(("missing or ambiguous declaration binding",
+                              record.identity, bindings))
         return frozenset({dependency_key(bindings[0].identity)})
     return frozenset()
 
@@ -2740,6 +2756,176 @@ def typed_dependency_environment(
         validation_references)
 
 
+_AUTHORITATIVE_ENVIRONMENT_TYPES = (
+    "ArtifactBodyKind", "ArtifactContent", "ArtifactProjection",
+    "ArtifactRole", "ArtifactSelector", "BehaviorValue", "ByteSize",
+    "ContentIdentity", "Coverage", "Criterion", "FieldId", "FieldValue",
+    "Format", "ObservationRelation", "ObservationResult", "ObservationSpec",
+    "ObservationValue", "Path", "PathSegment", "PathSet",
+    "RepositorySnapshot", "SubjectId", "TaskSpec", "VerificationSpec",
+)
+
+_AUTHORITATIVE_CONFLUENCE_TYPES = (
+    "ArtifactBodyKind", "ArtifactContent", "ArtifactProjection",
+    "ArtifactRole", "ArtifactSelector", "BehaviorValue", "ByteSize",
+    "ChangeEntry", "ChangeSet", "ContentIdentity", "Coverage", "FieldId",
+    "FieldValue", "Format", "ObservationResult", "ObservationSpec",
+    "ObservationValue", "Path", "PathSegment", "PathSet",
+    "RepositorySnapshot", "SubjectId",
+)
+
+
+def _frozen_record_identity(
+    kind: RecordKind, local: str, namespace: str,
+) -> RecordIdentity:
+    return RecordIdentity(kind, _frozen_key(local, namespace))
+
+
+def _frozen_semantic_environment(
+    declaration_locals: tuple[str, ...], type_names: tuple[str, ...],
+    binding_locals: tuple[str, ...], syntax_roots: frozenset[K1SyntaxKey],
+    *, authority_locals: tuple[str, ...] = (),
+    lexical_locals: tuple[str, ...] = (),
+) -> SemanticEnvironment:
+    """Independent finite equations for the three retained environments."""
+    declarations = tuple(sorted((
+        *(_frozen_record_identity(RecordKind.DECLARATION, local,
+                                  "coding.declaration")
+          for local in declaration_locals),
+        *(_frozen_record_identity(RecordKind.TYPE_DECLARATION, f"T({name})",
+                                  "coding.type")
+          for name in type_names),
+    )))
+    bindings = tuple(sorted(
+        _frozen_record_identity(RecordKind.BINDING, f"BINDING({local})",
+                                "coding.binding")
+        for local in binding_locals))
+    return SemanticEnvironment(
+        Version((0,)), declarations, (), bindings,
+        authority_facts=tuple(sorted(
+            _frozen_record_identity(
+                RecordKind.AUTHORITY_FACT, local,
+                "bounds.authority.binding" if local == "AFB(b,1)"
+                else "confluence.authority.binding")
+            for local in authority_locals)),
+        lexical_bindings=tuple(sorted(
+            _frozen_record_identity(RecordKind.LEXICAL_BINDING, local,
+                                    "lexical")
+            for local in lexical_locals)),
+        mechanically_extracted_dependencies=syntax_roots,
+    )
+
+
+def _frozen_authoritative_values() -> tuple[
+    tuple[RecordIdentity, SemanticEnvironment | TrustRootRecord], ...
+]:
+    """Complete authoritative values, specified without consulting a candidate."""
+    bounds_environment_id = _frozen_record_identity(
+        RecordKind.SEMANTIC_ENVIRONMENT, "E_b", "bounds.environment")
+    confluence_environment_id = _frozen_record_identity(
+        RecordKind.SEMANTIC_ENVIRONMENT, "E_c", "confluence.environment")
+    lexical_environment_id = _frozen_record_identity(
+        RecordKind.SEMANTIC_ENVIRONMENT, "E_lex", "lexical.environment")
+    bounds_capability = _frozen_record_identity(
+        RecordKind.CAPABILITY, "CAP(bounds)", "coding.capability")
+    bounds_validator = _frozen_record_identity(
+        RecordKind.CAPABILITY, "CAP(validate_bounds)", "coding.capability")
+    confluence_capability = _frozen_record_identity(
+        RecordKind.CAPABILITY, "CAP(confluence)", "coding.capability")
+    predicate_capability = _frozen_record_identity(
+        RecordKind.CAPABILITY, "CAP(predicates)", "coding.capability")
+    task_binding = _frozen_record_identity(
+        RecordKind.BINDING, "BINDING(DP(task_accepts))", "coding.binding")
+    ordinary_environment = _frozen_record_identity(
+        RecordKind.SEMANTIC_ENVIRONMENT, "E_t", "environment")
+    bounds_subjects = (ContractSubject(frozen_bounds_contract()),)
+    confluence_subjects = (ContractSubject(frozen_confluence_contract()),)
+
+    bounds_environment = _frozen_semantic_environment(
+        ("DF(snapshot_of)", "DP(task_accepts)",
+         "L(T(TaskSpec),ts_ge_200)", "L(T(TaskSpec),ts_lt_100)",
+         "L(T(TaskSpec),ts_nonempty)"),
+        _AUTHORITATIVE_ENVIRONMENT_TYPES,
+        ("DF(snapshot_of)", "DP(task_accepts)",
+         "L(T(TaskSpec),ts_ge_200)", "L(T(TaskSpec),ts_lt_100)",
+         "L(T(TaskSpec),ts_nonempty)"),
+        frozen_bounds_syntax_roots(), authority_locals=("AFB(b,1)",))
+    confluence_environment = _frozen_semantic_environment(
+        ("DF(changes_between)", "DF(observe)",
+         "DP(dependency_metadata_changed)", "DP(observations_equal)",
+         "L(T(ObservationResult),O_c)", "L(T(ObservationSpec),s_c)",
+         "L(T(RepositorySnapshot),F_c)",
+         "L(T(RepositorySnapshot),P_c)"),
+        _AUTHORITATIVE_CONFLUENCE_TYPES,
+        ("DF(changes_between)", "DF(observe)",
+         "DP(dependency_metadata_changed)", "DP(observations_equal)",
+         "L(T(ObservationResult),O_c)", "L(T(ObservationSpec),s_c)",
+         "L(T(RepositorySnapshot),F_c)",
+         "L(T(RepositorySnapshot),P_c)"),
+        frozen_confluence_syntax_roots(),
+        authority_locals=("AFB(c,1)", "AFB(c,2)"))
+    lexical_environment = _frozen_semantic_environment(
+        ("DF(snapshot_of)", "DP(task_accepts)", "L(T(TaskSpec),t_t)"),
+        _AUTHORITATIVE_ENVIRONMENT_TYPES,
+        ("DF(snapshot_of)", "DP(task_accepts)", "L(T(TaskSpec),t_t)"),
+        frozen_lexical_syntax_roots(), lexical_locals=("lk0",))
+
+    ordinary_root_id = _frozen_record_identity(
+        RecordKind.TRUST_ROOT, "TR", "trust")
+    bounds_root_id = _frozen_record_identity(
+        RecordKind.TRUST_ROOT, "TRB", "bounds.trust")
+    confluence_root_id = _frozen_record_identity(
+        RecordKind.TRUST_ROOT, "ROOT_TR_c", "confluence.trust")
+    ordinary_root = TrustRootRecord(
+        ordinary_root_id.key, "embedding-policy",
+        frozenset({predicate_capability}), frozenset({"CONTRADICTION_PROOF"}),
+        frozenset({ServiceUseTrustTarget(
+            predicate_capability, "PREDICATE_EVALUATION", task_binding,
+            ordinary_environment)}), "V0_EXTERNAL_TRUST_PREMISE")
+    bounds_root = TrustRootRecord(
+        bounds_root_id.key, "EMBEDDING_POLICY_PRODUCER(TP)",
+        frozenset({bounds_capability, bounds_validator}),
+        frozenset({"CONTRADICTION_PROOF"}), frozenset({
+            ServiceUseTrustTarget(
+                bounds_capability, "CONSISTENCY",
+                EnvironmentUse("CONSISTENCY", bounds_subjects),
+                bounds_environment_id),
+            ServiceUseTrustTarget(
+                bounds_validator, "CONSISTENCY",
+                EnvironmentUse("CONSISTENCY", bounds_subjects),
+                bounds_environment_id),
+            JudgmentTrustTarget("CONSISTENCY", bounds_subjects),
+        }), "V0_EXTERNAL_TRUST_PREMISE")
+    confluence_root = TrustRootRecord(
+        confluence_root_id.key, "embedding-policy",
+        frozenset({confluence_capability}),
+        frozenset({"CONTRADICTION_PROOF"}), frozenset({
+            ServiceUseTrustTarget(
+                confluence_capability, "CONSISTENCY",
+                EnvironmentUse("CONSISTENCY", confluence_subjects),
+                confluence_environment_id),
+        }), "V0_EXTERNAL_TRUST_PREMISE")
+    return (
+        (bounds_environment_id, bounds_environment),
+        (confluence_environment_id, confluence_environment),
+        (lexical_environment_id, lexical_environment),
+        (ordinary_root_id, ordinary_root),
+        (bounds_root_id, bounds_root),
+        (confluence_root_id, confluence_root),
+    )
+
+
+def _validate_retained_authoritative_values(
+    composition: Composition,
+) -> Judgment:
+    for identity, expected in _frozen_authoritative_values():
+        record = composition.at(identity)
+        if record is None or record.value != expected:
+            return Judgment(
+                "MALFORMED", ("RETAINED_AUTHORITATIVE_VALUE", identity))
+    return Judgment("WELL_FORMED")
+
+
 def _validate_retained_ck_exact(
     package: PluginPackage, composition: Composition,
 ) -> Judgment:
@@ -2752,6 +2938,9 @@ def _validate_retained_ck_exact(
     if package.abi_version != Version((0,)) or package.plugin_key != _frozen_key(
             "coding-minimal", "plugin") or package.owner != "capknow.semantic":
         return Judgment("MALFORMED", ("RETAINED_PACKAGE_IDENTITY",))
+    authoritative_status = _validate_retained_authoritative_values(composition)
+    if authoritative_status.tag != "WELL_FORMED":
+        return authoritative_status
     type_records = {
         item.identity.key.local[2:-1]: item
         for item in package.declarations
@@ -3166,7 +3355,13 @@ def _validate_retained_ck_exact(
             BindingTarget(binding_id(f"DF({name})"))
             for name in ("snapshot_of", "changes_between", "observe"))
         predicate_targets = frozenset(
-            BindingTarget(binding_id(f"DP({name})"))
+            BindingTarget(
+                RecordIdentity(
+                    RecordKind.BINDING,
+                    _frozen_key("DP(refresh_occurred)",
+                                "coding.declaration"))
+                if name == "refresh_occurred"
+                else binding_id(f"DP({name})"))
             for name in (
                 "observations_equal", "task_accepts",
                 "dependency_metadata_changed", "verification_passed",
@@ -4002,9 +4197,11 @@ def validate_pair(request_identity: RecordIdentity, composition: Composition) ->
             or scope_model.error_contract != scope_record.value.evaluation_error_contract
             or scope_model.capability_summaries != frozenset({expected_pair_summary})):
         return Judgment("MALFORMED", ("PAIR_SCOPE_MODEL",))
+    exact_occurrence_binding = RecordIdentity(
+        RecordKind.BINDING, occurrence_declaration.identity.key)
     if (model.model_key != occurrence_model.identity.key
             or model.target_binding != binding.occurrence_binding_key
-            or binding.occurrence_binding_key == binding.occurrence_bundle
+            or binding.occurrence_binding_key != exact_occurrence_binding
             or model.exact_version != model.model_key.version
             or model.exact_symbol_key != declaration_record.value.occurrence_symbol
             or model.exact_argument_types != occurrence_declaration.value.argument_types
