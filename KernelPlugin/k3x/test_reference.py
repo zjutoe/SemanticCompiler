@@ -153,6 +153,7 @@ class K3XReferenceTests(unittest.TestCase):
         result_record = _at(construction.universe, construction.result)
         self.assertEqual((result_record.value.request, result_record.value.result_kind, result_record.value.result), (construction.request, "Eval", replayed.result))
         package = _at(construction.universe, construction.package).value
+        composition = ref.compose_records(construction.universe.records)
         self.assertEqual(
             (len(package.declarations), len(package.pair_declarations),
              len(package.bindings), len(package.pair_bindings),
@@ -377,11 +378,239 @@ class K3XReferenceTests(unittest.TestCase):
             "CAP(confluence)": ("REASONING", "PARTIAL_SYMBOLIC_REASONING", frozenset({"CONSISTENCY"}), "CSOUND", None, "CREQ", "CFAIL"),
             "LEX_CAP": ("REASONING", "PARTIAL_SYMBOLIC_REASONING", frozenset({"FORMULA_ENTAILMENT"}), "LEX_SOUND", None, "LEX_REQ", "LEX_FAIL"),
         })
+        def asserted_target_roots(target: object) -> frozenset[ref.RecordIdentity]:
+            if isinstance(target, ref.BindingTarget):
+                return frozenset({target.binding})
+            if isinstance(target, ref.ProfileTarget):
+                return frozenset(
+                    item.identity for item in package.profile_bindings
+                    if item.value.profile_key == target.profile_key)
+            if isinstance(target, ref.ReasoningTarget):
+                roots = {target.semantic_environment}
+                for subject in target.subjects:
+                    if isinstance(subject, ref.RecordIdentity):
+                        roots.add(subject)
+                    elif isinstance(subject, ref.ConfluenceSubject):
+                        roots.add(subject.contract_identity)
+                return frozenset(roots)
+            self.fail(f"unexpected typed capability target: {target!r}")
         for descriptor_record in package.services:
             with self.subTest(exact_descriptor=descriptor_record.identity.key.local):
                 self.assertTrue(descriptor_record.value.supported_targets)
                 self.assertTrue(descriptor_record.value.dependency_scope)
                 self.assertTrue(descriptor_record.value.required_trust_roots)
+                self.assertTrue(
+                    descriptor_record.value.required_trust_roots
+                    <= descriptor_record.value.proper_semantic_dependencies)
+                self.assertEqual(
+                    descriptor_record.value.proper_semantic_dependencies,
+                    frozenset({
+                        descriptor_record.value.service,
+                        descriptor_record.value.sound_fragment,
+                        descriptor_record.value.required_evidence,
+                        descriptor_record.value.failure_contract,
+                        *descriptor_record.value.required_trust_roots,
+                        *(tuple() if descriptor_record.value.complete_fragment is None
+                          else (descriptor_record.value.complete_fragment,)),
+                    }) | frozenset().union(*(
+                        asserted_target_roots(target)
+                        for target in descriptor_record.value.supported_targets)))
+        descriptors = {
+            item.identity.key.local: item.value for item in package.services}
+        asserted_binding_targets = {
+            "CAP(functions)": {
+                "BINDING(DF(snapshot_of))", "BINDING(DF(changes_between))",
+                "BINDING(DF(observe))"},
+            "CAP(predicates)": {
+                "BINDING(DP(task_accepts))",
+                "BINDING(DP(observations_equal))",
+                "BINDING(DP(verification_passed))",
+                "BINDING(DP(event_matches))",
+                "BINDING(DP(event_occurred))",
+                "BINDING(DP(refresh_scope))",
+                "BINDING(DP(refresh_occurred))",
+                "BINDING(DP(dependency_metadata_changed))"},
+        }
+        for local, expected in asserted_binding_targets.items():
+            self.assertEqual(
+                {target.binding.key.local
+                 for target in descriptors[local].supported_targets
+                 if isinstance(target, ref.BindingTarget)},
+                expected)
+            self.assertTrue(all(
+                isinstance(target, ref.BindingTarget)
+                for target in descriptors[local].supported_targets))
+        self.assertEqual(
+            descriptors["CAP(profile)"].supported_targets,
+            frozenset({ref.ProfileTarget(fx.key(
+                "PK(implementation_evidence)", namespace="coding.profile"))}))
+        asserted_reasoning_targets = {
+            "CAP(bounds)": ("CONSISTENCY", ("C_b",), "E_b"),
+            "CAP(confluence)": ("CONSISTENCY", ("C_c",), "E_c"),
+            "LEX_CAP": ("FORMULA_ENTAILMENT", ("f_lex", "g_lex"), "E_lex"),
+        }
+        for local, (judgment, subjects, environment) in asserted_reasoning_targets.items():
+            self.assertEqual(len(descriptors[local].supported_targets), 1)
+            target = next(iter(descriptors[local].supported_targets))
+            self.assertIsInstance(target, ref.ReasoningTarget)
+            self.assertEqual(target.judgment, judgment)
+            self.assertEqual(target.semantic_environment.key.local, environment)
+            self.assertEqual(tuple(
+                subject.contract_identity.key.local
+                if isinstance(subject, ref.ConfluenceSubject)
+                else subject.key.local
+                if isinstance(subject, ref.RecordIdentity)
+                else subject
+                for subject in target.subjects), subjects)
+        self.assertEqual(
+            {local: (descriptor.service.key.local,
+                     {root.key.local for root in descriptor.required_trust_roots})
+             for local, descriptor in descriptors.items()},
+            {
+                "CAP(functions)": ("SK(functions)", {"TR"}),
+                "CAP(predicates)": ("SK(predicates)", {"TR"}),
+                "CAP(profile)": ("SK(profile)", {"TR"}),
+                "CAP(bounds)": ("SK(bounds)", {"TRB"}),
+                "CAP(confluence)": ("SK(confluence)", {"ROOT_TR_c"}),
+                "LEX_CAP": ("LEXSK", {"TR"}),
+            })
+
+        profile_record = next(
+            item for item in package.profile_bindings
+            if item.identity.key.local
+            == "PROFILE_BINDING(PK(implementation_evidence))")
+        self.assertIsInstance(profile_record.value, ref.ProfileBinding)
+        self.assertEqual(
+            {item.dimension for item in profile_record.value.dimensions},
+            {"abstract_acceptance_evidence",
+             "concrete_implementation_evidence"})
+        self.assertEqual(
+            profile_record.value.coverage_meaning.key.local,
+            "CS(PROFILE_COVERAGE,implementation_evidence)")
+        self.assertEqual(
+            profile_record.value.evidence_schema.key.local,
+            "CS(EVIDENCE_SCHEMA,implementation_profile)")
+        self.assertEqual(
+            profile_record.value.unknown_contract.key.local,
+            "CS(UNKNOWN_BEHAVIOR,evidence_pending)")
+        self.assertEqual(
+            profile_record.value.evaluation_error_contract.key.local,
+            "CS(EVALUATION_ERROR_BEHAVIOR,profile)")
+        self.assertEqual(
+            profile_record.value.reasoning_error_contract.key.local,
+            "CS(REASONING_ERROR_BEHAVIOR,profile)")
+        self.assertEqual(
+            ref.validate_profile_binding(profile_record.value, composition).tag,
+            "CLOSED")
+        binding_closures = {
+            item.identity.key.local: item.value.dependency_closure
+            for item in composition.records
+            if item.identity.kind is ref.RecordKind.BINDING
+            and hasattr(item.value, "dependency_closure")}
+        def combined_scope(*locals_: str) -> frozenset[ref.RecordIdentity]:
+            return frozenset().union(*(binding_closures[local]
+                                       for local in locals_))
+        self.assertEqual(
+            {local: descriptor.dependency_scope
+             for local, descriptor in descriptors.items()},
+            {
+                "CAP(functions)": combined_scope(
+                    "BINDING(DF(snapshot_of))",
+                    "BINDING(DF(changes_between))",
+                    "BINDING(DF(observe))"),
+                "CAP(predicates)": combined_scope(
+                    *sorted(asserted_binding_targets["CAP(predicates)"])),
+                "CAP(profile)": profile_record.value.dependency_closure,
+                "CAP(bounds)": combined_scope(
+                    "BINDING(DF(snapshot_of))",
+                    "BINDING(DP(task_accepts))",
+                    "BINDING(L(T(TaskSpec),ts_nonempty))",
+                    "BINDING(L(T(TaskSpec),ts_lt_100))",
+                    "BINDING(L(T(TaskSpec),ts_ge_200))"),
+                "CAP(confluence)": combined_scope(
+                    "BINDING(DF(observe))",
+                    "BINDING(DF(changes_between))"),
+                "LEX_CAP": combined_scope("BINDING(DP(task_accepts))"),
+            })
+
+        spec_by_local = {
+            item.identity.key.local: item for item in composition.records
+            if isinstance(item.value, ref.ContractSpec)}
+        snapshot_meaning = spec_by_local[
+            "CS(FUNCTION_MEANING,snapshot_of)"].value
+        state_access = spec_by_local["CS(ACCESS_BOUNDARY,state_only)"].value
+        occurred_meaning = spec_by_local[
+            "CS(PREDICATE_MEANING,event_occurred)"].value
+        trace_access = spec_by_local["CS(ACCESS_BOUNDARY,pattern_trace)"].value
+        self.assertEqual(
+            (state_access.support, state_access.observation_queries),
+            (snapshot_meaning.support, snapshot_meaning.observation_queries))
+        self.assertEqual(
+            (trace_access.support, trace_access.observation_queries),
+            (occurred_meaning.support, occurred_meaning.observation_queries))
+        verification_schema = spec_by_local[
+            "CS(EVIDENCE_SCHEMA,verification)"].value
+        self.assertEqual(
+            {item.key.local for item in verification_schema.support},
+            {"T(CodingEvidenceEntry)"})
+
+        expected_task_syntax = frozenset({
+            ref.K1SyntaxRoot("K1_PLUGIN", "CK@1"),
+            ref.K1SyntaxRoot("K1_SYMBOL", "SP(task_accepts)@1"),
+            ref.K1SyntaxRoot("K1_DECLARATION", "DP(task_accepts)@1"),
+            ref.K1SyntaxRoot(
+                "K1_SIGNATURE",
+                "(T(TaskSpec),T(RepositorySnapshot),EvidenceStore)->Bool"),
+            ref.K1SyntaxRoot("K1_FACETS", "({}, {final}, {evidence})"),
+            ref.K1SyntaxRoot("K1_DECLARATION", "T(TaskSpec)@1"),
+            ref.K1SyntaxRoot(
+                "K1_DECLARATION", "T(RepositorySnapshot)@1"),
+            ref.K1SyntaxRoot("K1_LITERAL", "t_t:T(TaskSpec)"),
+            ref.K1SyntaxRoot(
+                "K1_LITERAL", "F_t:T(RepositorySnapshot)"),
+        })
+        task_environment = _at(
+            construction.universe, construction.semantic_environment).value
+        task_dependencies = _at(
+            construction.universe, construction.dependency_environment).value
+        self.assertEqual(
+            task_environment.mechanically_extracted_dependencies,
+            expected_task_syntax)
+        self.assertEqual(task_dependencies.syntax_root_keys,
+                         expected_task_syntax)
+        rogue_syntax = ref.K1SyntaxRoot("K1_LITERAL", "rogue")
+        changed_environment = replace(
+            _at(construction.universe, construction.semantic_environment),
+            value=replace(task_environment,
+                          mechanically_extracted_dependencies=
+                          expected_task_syntax | {rogue_syntax}))
+        changed_dependencies = replace(
+            _at(construction.universe, construction.dependency_environment),
+            value=replace(task_dependencies,
+                          syntax_root_keys=expected_task_syntax | {rogue_syntax},
+                          expanded_root_keys=(task_dependencies.expanded_root_keys
+                                              | {rogue_syntax})))
+        changed_syntax = _rewrite(construction.universe, {
+            construction.semantic_environment: changed_environment,
+            construction.dependency_environment: changed_dependencies})
+        self.assertEqual(ref.replay(changed_syntax).formation,
+                         ref.Formation.MALFORMED)
+
+        emptied_access = replace(
+            spec_by_local["CS(ACCESS_BOUNDARY,state_only)"],
+            value=replace(state_access, observation_queries=(),
+                          support=frozenset()))
+        self.assertIsInstance(ref.replay(_rewrite(
+            construction.universe,
+            {emptied_access.identity: emptied_access})),
+            ref.CompositionReplay)
+        empty_profile = replace(
+            profile_record, value=replace(profile_record.value,
+                                          dimensions=frozenset()))
+        self.assertIsInstance(ref.replay(_rewrite(
+            construction.universe,
+            {profile_record.identity: empty_profile})),
+            ref.CompositionReplay)
         # Every field of every retained descriptor is executable data.  These
         # mutations are compared with the separately frozen packet assertion;
         # no expected value is obtained from replay.
@@ -775,6 +1004,10 @@ class K3XReferenceTests(unittest.TestCase):
             replace(descriptor, proper_semantic_dependencies=frozenset({construction.binding}), dependency_closure=frozenset()),
             replace(descriptor, required_evidence=construction.binding),
             replace(descriptor, required_trust_roots=frozenset({construction.binding})),
+            replace(descriptor, supported_targets=frozenset({
+                ref.BindingTarget(fx.rid(
+                    ref.RecordKind.BINDING, "rogue",
+                    namespace="assertion.falsifier"))})),
         )
         for mutation in mutations:
             with self.subTest(mutation=mutation):
@@ -1127,6 +1360,7 @@ class K3XReferenceTests(unittest.TestCase):
         self.assertEqual(
             {identity.key.local for identity in changed},
             {"coding-minimal", "BINDING(DP(event_matches))",
+             "CS(ACCESS_BOUNDARY,pattern_event)",
              "MODEL_snapshot_of", "MODEL_changes_between", "MODEL_observe",
              "MODEL_observations_equal", "MODEL_task_accepts",
              "MODEL_dependency_metadata_changed", "MODEL_verification_passed",
@@ -1334,6 +1568,61 @@ class K3XReferenceTests(unittest.TestCase):
         duplicate_query = replace(service_bad_kind, observation_queries=service_bad_kind.observation_queries * 2)
         self.assertEqual(ref.validate_contract_spec(duplicate_query).details[0], "DUPLICATE_OBSERVATION_QUERY")
         dependency = _at(forward.universe, forward.universe.request.dependency_environment)
+        expected_confluence_syntax = {
+            ("K1_PLUGIN", "CK@1"),
+            ("K1_FORMULA", "f_c_o"), ("K1_FORMULA", "f_c_d"),
+            ("K1_LITERAL", "s_c:T(ObservationSpec)"),
+            ("K1_LITERAL", "P_c:T(RepositorySnapshot)"),
+            ("K1_LITERAL", "F_c:T(RepositorySnapshot)"),
+            ("K1_LITERAL", "O_c:T(ObservationResult)"),
+            ("K1_AUTHORITY", "SRC(c,1)/AUTH(c,1)/AF(c,1)"),
+            ("K1_AUTHORITY", "SRC(c,2)/AUTH(c,2)/AF(c,2)"),
+            ("K1_SYMBOL", "SF(observe)@1"),
+            ("K1_DECLARATION", "DF(observe)@1"),
+            ("K1_SIGNATURE",
+             "(T(ObservationSpec),T(RepositorySnapshot))->T(ObservationResult)"),
+            ("K1_FACETS", "({}, {pre,final})"),
+            ("K1_SYMBOL", "SF(changes_between)@1"),
+            ("K1_DECLARATION", "DF(changes_between)@1"),
+            ("K1_SIGNATURE",
+             "(T(RepositorySnapshot),T(RepositorySnapshot))->T(ChangeSet)"),
+            ("K1_FACETS", "({pre}, {final})"),
+            ("K1_SYMBOL", "SP(observations_equal)@1"),
+            ("K1_DECLARATION", "DP(observations_equal)@1"),
+            ("K1_SIGNATURE",
+             "(T(ObservationResult),T(ObservationResult))->Bool"),
+            ("K1_FACETS", "({pre}, {final})"),
+            ("K1_SYMBOL", "SP(dependency_metadata_changed)@1"),
+            ("K1_DECLARATION", "DP(dependency_metadata_changed)@1"),
+            ("K1_SIGNATURE", "(T(ChangeSet))->Bool"),
+            ("K1_FACETS", "({pre,final})"),
+        }
+        self.assertEqual(
+            {(item.tag, item.local) for item in dependency.value.syntax_root_keys},
+            expected_confluence_syntax)
+        semantic = _at(
+            forward.universe, forward.universe.request.semantic_environment)
+        self.assertEqual(
+            {(item.tag, item.local)
+             for item in semantic.value.mechanically_extracted_dependencies},
+            expected_confluence_syntax)
+        rogue_root = ref.K1SyntaxRoot("K1_FORMULA", "rogue")
+        coherent_semantic = replace(
+            semantic, value=replace(
+                semantic.value,
+                mechanically_extracted_dependencies=(
+                    semantic.value.mechanically_extracted_dependencies
+                    | {rogue_root})))
+        coherent_dependency = replace(
+            dependency, value=replace(
+                dependency.value,
+                syntax_root_keys=dependency.value.syntax_root_keys | {rogue_root},
+                expanded_root_keys=dependency.value.expanded_root_keys
+                | {rogue_root}))
+        with self.assertRaises(ValueError):
+            ref.replay(_rewrite(forward.universe, {
+                semantic.identity: coherent_semantic,
+                dependency.identity: coherent_dependency}))
         foreign = fx.rid(ref.RecordKind.DECLARATION, "foreign", namespace="confluence")
         dependency_mutations = {
             "syntax_root_keys": dependency.value.syntax_root_keys | frozenset({foreign}),
@@ -1667,6 +1956,13 @@ class K3XReferenceTests(unittest.TestCase):
         evolution_envelope = next(item for item in evolution_composition.records if isinstance(item.value, ref.CertificateEnvelope) and item.identity.key.local == "EC_m")
         assert_evolution_rejected(replace(evolution_envelope, value=replace(evolution_envelope.value, fragment=evolution_envelope.value.dependencies)))
         assert_evolution_rejected(replace(evolution_envelope, value=replace(evolution_envelope.value, abstraction_class="CONCRETE")))
+        assert_evolution_rejected(replace(
+            evolution_envelope,
+            value=replace(
+                evolution_envelope.value,
+                certificate_key=fx.key(
+                    "EC_wrong", owner="capknow.audit.evolution-proof",
+                    namespace="evolution.certificate"))))
         evolution_evidence = next(item for item in evolution_composition.records if isinstance(item.value, ref.EvidenceRecord) and item.identity.key.local == "ER_m")
         for mutation in (
             replace(evolution_evidence.value, issuer="foreign"),

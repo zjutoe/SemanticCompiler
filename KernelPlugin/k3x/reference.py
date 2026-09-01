@@ -188,6 +188,16 @@ class RecordIdentity:
     key: ExactKey
 
 
+@dataclass(frozen=True, order=True)
+class K1SyntaxRoot:
+    tag: str
+    local: str
+
+    def __post_init__(self) -> None:
+        if not self.tag.startswith("K1_") or not self.local:
+            raise ValueError("frozen K1 syntax roots are explicitly tagged")
+
+
 @dataclass(frozen=True)
 class AbiRecord:
     version: Version
@@ -272,6 +282,43 @@ class SemanticBinding:
     @property
     def proper_dependencies(self) -> frozenset[RecordIdentity]:
         return self.proper_semantic_dependencies
+
+
+@dataclass(frozen=True)
+class ProfileDimensionKey:
+    profile_key: ExactKey
+    dimension: str
+
+
+@dataclass(frozen=True)
+class ProfileBinding:
+    profile_key: ExactKey
+    dimensions: frozenset[ProfileDimensionKey]
+    coverage_meaning: RecordIdentity
+    evidence_schema: RecordIdentity
+    proper_semantic_dependencies: frozenset[RecordIdentity]
+    dependency_closure: frozenset[RecordIdentity]
+    unknown_contract: RecordIdentity
+    evaluation_error_contract: RecordIdentity
+    reasoning_error_contract: RecordIdentity
+
+    @property
+    def proper_dependencies(self) -> frozenset[RecordIdentity]:
+        return self.proper_semantic_dependencies
+
+
+@dataclass(frozen=True)
+class BindingTarget:
+    binding: RecordIdentity
+
+    def __post_init__(self) -> None:
+        if self.binding.kind is not RecordKind.BINDING:
+            raise ValueError("BINDING_TARGET carries an ordinary binding key")
+
+
+@dataclass(frozen=True)
+class ProfileTarget:
+    profile_key: ExactKey
 
 
 @dataclass(frozen=True)
@@ -410,7 +457,7 @@ class SemanticEnvironment:
     semantic_extensions: tuple[RecordIdentity, ...] = ()
     lexical_bindings: tuple[RecordIdentity, ...] = ()
     choice_bindings: tuple[RecordIdentity, ...] = ()
-    mechanically_extracted_dependencies: frozenset[RecordIdentity] = frozenset()
+    mechanically_extracted_dependencies: frozenset[K1SyntaxRoot] = frozenset()
     chi_c: tuple[tuple[str, Any], ...] = ()
 
     def all_references(self) -> frozenset[RecordIdentity]:
@@ -429,7 +476,7 @@ class SemanticEnvironment:
 
 @dataclass(frozen=True)
 class DependencyEnvironment:
-    syntax_root_keys: frozenset[RecordIdentity]
+    syntax_root_keys: frozenset[K1SyntaxRoot]
     subject_root_keys: frozenset[RecordIdentity]
     binding_association_edges: frozenset[tuple[RecordIdentity, RecordIdentity]]
     expanded_root_keys: frozenset[RecordIdentity]
@@ -960,7 +1007,7 @@ class PluginPackage:
                 + self.semantic_extensions)
 
 
-RecordValue = AbiRecord | TypeDeclaration | TypedValue | DeclarationShape | ContractSpec | SemanticBinding | ModelContract | ServiceIdentity | CapabilityDescriptor | CertificateRecord | ProducerRecord | TrustPolicyRecord | TrustRootRecord | TrustEnvironment | SemanticEnvironment | DependencyEnvironment | InvocationRequest | ReasoningRequest | EvolutionAdmissionRequest | ResultRecord | LifecycleRecord | ObservationEnvironment | PairDeclaration | OccurrenceSemanticContractBundle | PairBinding | PairAdmissionRequest | PairFullEvalProof | EvolutionProof | CertificateAdmission | EvolutionAdmissionResult | EvidenceRecord | CertificateEnvelope | ChoiceBinding | LexicalBinding | MigrationDeclaration | CompatibilityClaim | SemanticExtension | AliasBinding | OutcomeRecord | AuthorityFactRecord | SourceRecord | AuthorityRefRecord | EventValueRecord | TraceEventRecord | ReasonRecord | ConflictRecord | NamedCarrier | PluginPackage
+RecordValue = AbiRecord | TypeDeclaration | TypedValue | DeclarationShape | ContractSpec | SemanticBinding | ProfileBinding | ModelContract | ServiceIdentity | CapabilityDescriptor | CertificateRecord | ProducerRecord | TrustPolicyRecord | TrustRootRecord | TrustEnvironment | SemanticEnvironment | DependencyEnvironment | InvocationRequest | ReasoningRequest | EvolutionAdmissionRequest | ResultRecord | LifecycleRecord | ObservationEnvironment | PairDeclaration | OccurrenceSemanticContractBundle | PairBinding | PairAdmissionRequest | PairFullEvalProof | EvolutionProof | CertificateAdmission | EvolutionAdmissionResult | EvidenceRecord | CertificateEnvelope | ChoiceBinding | LexicalBinding | MigrationDeclaration | CompatibilityClaim | SemanticExtension | AliasBinding | OutcomeRecord | AuthorityFactRecord | SourceRecord | AuthorityRefRecord | EventValueRecord | TraceEventRecord | ReasonRecord | ConflictRecord | NamedCarrier | PluginPackage
 
 
 @dataclass(frozen=True)
@@ -1138,7 +1185,8 @@ _VALUE_KIND = {
     TypeDeclaration: {RecordKind.TYPE_DECLARATION},
     DeclarationShape: {RecordKind.DECLARATION, RecordKind.SYMBOL, RecordKind.EVENT},
     ContractSpec: {RecordKind.CONTRACT_SPEC},
-    SemanticBinding: {RecordKind.BINDING, RecordKind.PROFILE_BINDING},
+    SemanticBinding: {RecordKind.BINDING},
+    ProfileBinding: {RecordKind.PROFILE_BINDING},
     ModelContract: {RecordKind.MODEL_CONTRACT},
     ServiceIdentity: {RecordKind.SERVICE},
     CapabilityDescriptor: {RecordKind.CAPABILITY},
@@ -1335,6 +1383,11 @@ def validate_packages(
                 return Judgment("MALFORMED", ("RECORD_FIELD_IDENTITY", record.identity))
         if isinstance(record.value, CertificateRecord) and record.value.issuer != record.value.certificate_key.owner:
             return Judgment("MALFORMED", ("CERTIFICATE_ISSUER_OWNER", record.identity))
+        if (isinstance(record.value, CertificateEnvelope)
+                and record.value.certificate_key != record.identity.key):
+            return Judgment("MALFORMED", (
+                "CERTIFICATE_ENVELOPE_IDENTITY", record.identity,
+                record.value.certificate_key))
         if isinstance(record.value, MigrationDeclaration):
             value = record.value
             if (value.source_environment.kind is not RecordKind.SEMANTIC_ENVIRONMENT
@@ -1730,7 +1783,10 @@ def validate_binding(binding: SemanticBinding, composition: Composition) -> Judg
         return Judgment("MALFORMED", ("BINDING_CONTRACT_ROLE",))
     if binding.determinism_rule != "SAME_SEMANTIC_INPUTS_SAME_COMPLETE_RESULT":
         return Judgment("MALFORMED", ("BINDING_DETERMINISM",))
-    expected = frozenset({binding.declaration, *(identity for identity, _ in fields)}) | resolved[0][0].value.support
+    expected = frozenset({
+        binding.declaration, *(identity for identity, _ in fields)
+    }) | frozenset().union(*(
+        record.value.support for record, _ in resolved if record is not None))
     if binding.proper_semantic_dependencies != expected:
         return Judgment("MALFORMED", ("BINDING_SUPPORT_PROJECTION", expected, binding.proper_semantic_dependencies))
     expected_closure = _reachable_closure(expected, composition)
@@ -1738,6 +1794,40 @@ def validate_binding(binding: SemanticBinding, composition: Composition) -> Judg
         return Judgment("MALFORMED", ("DEPENDENCY_CLOSURE", expected_closure, binding.dependency_closure))
     if any(_resolve(composition, item) is None for item in binding.dependency_closure):
         return Judgment("OPEN_BINDINGS", tuple(item for item in binding.dependency_closure if _resolve(composition, item) is None))
+    return Judgment("CLOSED")
+
+
+def validate_profile_binding(
+    binding: ProfileBinding, composition: Composition,
+) -> Judgment:
+    fields = (
+        (binding.coverage_meaning, ContractRole.PROFILE_COVERAGE),
+        (binding.evidence_schema, ContractRole.EVIDENCE_SCHEMA),
+        (binding.unknown_contract, ContractRole.UNKNOWN_BEHAVIOR),
+        (binding.evaluation_error_contract,
+         ContractRole.EVALUATION_ERROR_BEHAVIOR),
+        (binding.reasoning_error_contract,
+         ContractRole.REASONING_ERROR_BEHAVIOR),
+    )
+    resolved = tuple(
+        (_resolve(composition, identity, ContractSpec), role)
+        for identity, role in fields)
+    if any(record is None for record, _ in resolved):
+        return Judgment("OPEN_BINDINGS")
+    if (not binding.dimensions
+            or any(item.profile_key != binding.profile_key
+                   for item in binding.dimensions)
+            or any(record.value.owner_layer is not Layer.SIGMA
+                   or record.value.role is not role
+                   or validate_contract_spec(record.value).tag != "WELL_FORMED"
+                   for record, role in resolved if record is not None)):
+        return Judgment("MALFORMED", ("PROFILE_FIELDS",))
+    expected = frozenset(identity for identity, _ in fields)
+    if binding.proper_semantic_dependencies != expected:
+        return Judgment("MALFORMED", ("PROFILE_SUPPORT_PROJECTION",))
+    closure = _reachable_closure(expected, composition)
+    if binding.dependency_closure != closure:
+        return Judgment("MALFORMED", ("PROFILE_DEPENDENCY_CLOSURE",))
     return Judgment("CLOSED")
 
 
@@ -1756,9 +1846,45 @@ def _direct_dependencies(identity: RecordIdentity, composition: Composition) -> 
         return value.support
     if isinstance(value, SemanticBinding):
         return value.proper_semantic_dependencies
+    if isinstance(value, ProfileBinding):
+        return value.proper_semantic_dependencies
     if isinstance(value, OccurrenceSemanticContractBundle):
         return value.proper_semantic_dependencies
     return frozenset()
+
+
+def _record_identities_in(value: Any) -> frozenset[RecordIdentity]:
+    if isinstance(value, RecordIdentity):
+        return frozenset({value})
+    if isinstance(value, tuple):
+        return frozenset().union(*(_record_identities_in(item)
+                                   for item in value))
+    if hasattr(value, "__dataclass_fields__"):
+        return frozenset().union(*(
+            _record_identities_in(getattr(value, name))
+            for name in value.__dataclass_fields__))
+    return frozenset()
+
+
+def _capability_target_roots(
+    target: Any, composition: Composition,
+) -> frozenset[RecordIdentity]:
+    if isinstance(target, BindingTarget):
+        return frozenset({target.binding})
+    if isinstance(target, ProfileTarget):
+        matches = tuple(
+            item.identity for item in composition.records
+            if isinstance(item.value, ProfileBinding)
+            and item.value.profile_key == target.profile_key)
+        return frozenset(matches)
+    if isinstance(target, PairTarget):
+        return frozenset({target.pair})
+    if isinstance(target, (ReasoningTarget, EvolutionTarget)):
+        return (_record_identities_in(target.subjects)
+                if isinstance(target, ReasoningTarget)
+                else _record_identities_in(target.subject)) | frozenset({
+                    target.semantic_environment})
+    raise FiniteProfileError("unsupported finite capability target")
 
 
 def _reachable_closure(roots: frozenset[RecordIdentity], composition: Composition) -> frozenset[RecordIdentity]:
@@ -1858,6 +1984,59 @@ _FROZEN_TYPE_DEPENDENCIES: dict[str, tuple[str, ...]] = {
 
 def _frozen_key(local: str, namespace: str, *, owner: str = "capknow.semantic") -> ExactKey:
     return ExactKey(owner, namespace, local, Version((1,)))
+
+
+def frozen_task_syntax_roots() -> frozenset[K1SyntaxRoot]:
+    """K3-S §9.3's literal `required(S_t)`, independent of E_t/D_t."""
+    return frozenset({
+        K1SyntaxRoot("K1_PLUGIN", "CK@1"),
+        K1SyntaxRoot("K1_SYMBOL", "SP(task_accepts)@1"),
+        K1SyntaxRoot("K1_DECLARATION", "DP(task_accepts)@1"),
+        K1SyntaxRoot("K1_SIGNATURE",
+                     "(T(TaskSpec),T(RepositorySnapshot),EvidenceStore)->Bool"),
+        K1SyntaxRoot("K1_FACETS", "({}, {final}, {evidence})"),
+        K1SyntaxRoot("K1_DECLARATION", "T(TaskSpec)@1"),
+        K1SyntaxRoot("K1_DECLARATION", "T(RepositorySnapshot)@1"),
+        K1SyntaxRoot("K1_LITERAL", "t_t:T(TaskSpec)"),
+        K1SyntaxRoot("K1_LITERAL", "F_t:T(RepositorySnapshot)"),
+    })
+
+
+def frozen_confluence_syntax_roots() -> frozenset[K1SyntaxRoot]:
+    """K3-S §8.2's literal `Dependencies(C_c)`, independent of E_c/D_c."""
+    callables = (
+        ("SF(observe)@1", "DF(observe)@1",
+         "(T(ObservationSpec),T(RepositorySnapshot))->T(ObservationResult)",
+         "({}, {pre,final})"),
+        ("SF(changes_between)@1", "DF(changes_between)@1",
+         "(T(RepositorySnapshot),T(RepositorySnapshot))->T(ChangeSet)",
+         "({pre}, {final})"),
+        ("SP(observations_equal)@1", "DP(observations_equal)@1",
+         "(T(ObservationResult),T(ObservationResult))->Bool",
+         "({pre}, {final})"),
+        ("SP(dependency_metadata_changed)@1",
+         "DP(dependency_metadata_changed)@1", "(T(ChangeSet))->Bool",
+         "({pre,final})"),
+    )
+    roots = {
+        K1SyntaxRoot("K1_PLUGIN", "CK@1"),
+        K1SyntaxRoot("K1_FORMULA", "f_c_o"),
+        K1SyntaxRoot("K1_FORMULA", "f_c_d"),
+        K1SyntaxRoot("K1_LITERAL", "s_c:T(ObservationSpec)"),
+        K1SyntaxRoot("K1_LITERAL", "P_c:T(RepositorySnapshot)"),
+        K1SyntaxRoot("K1_LITERAL", "F_c:T(RepositorySnapshot)"),
+        K1SyntaxRoot("K1_LITERAL", "O_c:T(ObservationResult)"),
+        K1SyntaxRoot("K1_AUTHORITY", "SRC(c,1)/AUTH(c,1)/AF(c,1)"),
+        K1SyntaxRoot("K1_AUTHORITY", "SRC(c,2)/AUTH(c,2)/AF(c,2)"),
+    }
+    for symbol, declaration, signature, facets in callables:
+        roots.update({
+            K1SyntaxRoot("K1_SYMBOL", symbol),
+            K1SyntaxRoot("K1_DECLARATION", declaration),
+            K1SyntaxRoot("K1_SIGNATURE", signature),
+            K1SyntaxRoot("K1_FACETS", facets),
+        })
+    return frozenset(roots)
 
 
 def _validate_retained_ck_exact(
@@ -2013,13 +2192,33 @@ def _validate_retained_ck_exact(
         )
         for identity, aux_role, domain, codomain, relation in expected_auxiliary:
             auxiliary = _resolve(composition, identity, ContractSpec)
+            auxiliary_support = (
+                expected_support if aux_role is ContractRole.ACCESS_BOUNDARY
+                else frozenset({RecordIdentity(
+                    RecordKind.TYPE_DECLARATION,
+                    _frozen_key("T(CodingEvidenceEntry)", "coding.type"))})
+                if (aux_role is ContractRole.EVIDENCE_SCHEMA
+                    and evidence_name == "verification")
+                else frozenset())
+            auxiliary_queries = (() if not auxiliary_support else (
+                ObservationQuery(
+                    next(iter(auxiliary_support)),
+                    expected_kind if aux_role is ContractRole.ACCESS_BOUNDARY
+                    else ObservationKind.TYPE_ADMISSION_FACT,
+                    expected_projection if aux_role is ContractRole.ACCESS_BOUNDARY
+                    else ("evidence_entry",)),))
             if auxiliary is None or auxiliary.value != ContractSpec(
                     identity.key, Layer.SIGMA, aux_role, domain, codomain,
-                    (), frozenset(), relation):
+                    auxiliary_queries, auxiliary_support, relation):
                 return Judgment("MALFORMED", (
                     "RETAINED_AUXILIARY_CONTRACT", name, identity))
+        expected_evidence_support = (
+            frozenset({RecordIdentity(
+                RecordKind.TYPE_DECLARATION,
+                _frozen_key("T(CodingEvidenceEntry)", "coding.type"))})
+            if evidence_name == "verification" else frozenset())
         expected_proper = frozenset({declaration.identity, meaning_id, evidence_id,
-                                     access_id, unknown_id, error_id}) | expected_support
+                                     access_id, unknown_id, error_id}) | expected_support | expected_evidence_support
         if (not (cycle and name == "event_occurred")
                 and (not isinstance(binding.value, SemanticBinding)
                 or binding.value != SemanticBinding(
@@ -2263,62 +2462,61 @@ def _validate_retained_ck_exact(
             RecordKind.BINDING,
             _frozen_key(f"BINDING({local})", "coding.binding"))
         function_targets = frozenset(
-            declaration_id(f"DF({name})")
+            BindingTarget(binding_id(f"DF({name})"))
             for name in ("snapshot_of", "changes_between", "observe"))
         predicate_targets = frozenset(
-            declaration_id(f"DP({name})")
+            BindingTarget(binding_id(f"DP({name})"))
             for name in (
                 "observations_equal", "task_accepts",
                 "dependency_metadata_changed", "verification_passed",
                 "event_matches", "event_occurred", "refresh_scope",
                 "refresh_occurred",
             ))
-        profile_target = RecordIdentity(
+        profile_identity = RecordIdentity(
             RecordKind.PROFILE_BINDING,
             _frozen_key("PROFILE_BINDING(PK(implementation_evidence))",
                         "coding.binding"))
+        profile_key = _frozen_key(
+            "PK(implementation_evidence)", "coding.profile")
+        profile_target = ProfileTarget(profile_key)
         profile_proper = frozenset({
-            declaration_id("DP(task_accepts)"),
             RecordIdentity(RecordKind.CONTRACT_SPEC, _frozen_key(
-                "CS(PREDICATE_MEANING,task_accepts)", "coding.contract")),
+                "CS(PROFILE_COVERAGE,implementation_evidence)", "coding.contract")),
             RecordIdentity(RecordKind.CONTRACT_SPEC, _frozen_key(
-                "CS(EVIDENCE_SCHEMA,verification)", "coding.contract")),
+                "CS(EVIDENCE_SCHEMA,implementation_profile)", "coding.contract")),
             RecordIdentity(RecordKind.CONTRACT_SPEC, _frozen_key(
-                "CS(ACCESS_BOUNDARY,task_final_evidence)", "coding.contract")),
+                "CS(UNKNOWN_BEHAVIOR,evidence_pending)", "coding.contract")),
             RecordIdentity(RecordKind.CONTRACT_SPEC, _frozen_key(
-                "CS(UNKNOWN_BEHAVIOR,predicate)", "coding.contract")),
+                "CS(EVALUATION_ERROR_BEHAVIOR,profile)", "coding.contract")),
             RecordIdentity(RecordKind.CONTRACT_SPEC, _frozen_key(
-                "CS(EVALUATION_ERROR_BEHAVIOR,predicate)", "coding.contract")),
+                "CS(REASONING_ERROR_BEHAVIOR,profile)", "coding.contract")),
         })
-        profile_closure = profile_proper | frozenset({
-            RecordIdentity(RecordKind.TYPE_DECLARATION,
-                           _frozen_key("TaskSpec", "coding.type")),
-            RecordIdentity(RecordKind.TYPE_DECLARATION,
-                           _frozen_key("RepositorySnapshot", "coding.type")),
-            RecordIdentity(RecordKind.CONTRACT_SPEC,
-                           _frozen_key("ADMIT(TaskSpec)",
-                                       "coding.type.contract")),
-            RecordIdentity(RecordKind.CONTRACT_SPEC,
-                           _frozen_key("ADMIT(RepositorySnapshot)",
-                                       "coding.type.contract")),
-        })
-        expected_profile = SemanticBinding(
-            profile_target.key, declaration_id("DP(task_accepts)"), "PROFILE",
+        profile_closure = _reachable_closure(profile_proper, composition)
+        expected_profile = ProfileBinding(
+            profile_key,
+            frozenset({
+                ProfileDimensionKey(profile_key,
+                                    "abstract_acceptance_evidence"),
+                ProfileDimensionKey(profile_key,
+                                    "concrete_implementation_evidence"),
+            }),
             RecordIdentity(RecordKind.CONTRACT_SPEC, _frozen_key(
-                "CS(PREDICATE_MEANING,task_accepts)", "coding.contract")),
-            (frozenset(), frozenset({"final"}), frozenset({"evidence"})),
+                "CS(PROFILE_COVERAGE,implementation_evidence)",
+                "coding.contract")),
+            RecordIdentity(RecordKind.CONTRACT_SPEC, _frozen_key(
+                "CS(EVIDENCE_SCHEMA,implementation_profile)",
+                "coding.contract")),
             profile_proper, profile_closure,
             RecordIdentity(RecordKind.CONTRACT_SPEC, _frozen_key(
-                "CS(EVIDENCE_SCHEMA,verification)", "coding.contract")),
+                "CS(UNKNOWN_BEHAVIOR,evidence_pending)", "coding.contract")),
             RecordIdentity(RecordKind.CONTRACT_SPEC, _frozen_key(
-                "CS(ACCESS_BOUNDARY,task_final_evidence)", "coding.contract")),
+                "CS(EVALUATION_ERROR_BEHAVIOR,profile)", "coding.contract")),
             RecordIdentity(RecordKind.CONTRACT_SPEC, _frozen_key(
-                "CS(UNKNOWN_BEHAVIOR,predicate)", "coding.contract")),
-            RecordIdentity(RecordKind.CONTRACT_SPEC, _frozen_key(
-                "CS(EVALUATION_ERROR_BEHAVIOR,predicate)", "coding.contract")),
-            "SAME_SEMANTIC_INPUTS_SAME_COMPLETE_RESULT")
-        profile_record = _resolve(composition, profile_target, SemanticBinding)
-        if profile_record is None or profile_record.value != expected_profile:
+                "CS(REASONING_ERROR_BEHAVIOR,profile)", "coding.contract")))
+        profile_record = _resolve(composition, profile_identity, ProfileBinding)
+        if (profile_record is None or profile_record.value != expected_profile
+                or validate_profile_binding(
+                    profile_record.value, composition).tag != "CLOSED"):
             return Judgment("MALFORMED", ("RETAINED_PROFILE_VALUE",))
         bounds_target = ReasoningTarget(
             "CONSISTENCY",
@@ -2437,17 +2635,16 @@ def _validate_retained_ck_exact(
                         frozenset({expected_root}), expected_failure,
                         expected_scopes[local])):
                 return Judgment("MALFORMED", ("RETAINED_DESCRIPTOR_VALUE", local))
+            expected_target_roots = frozenset().union(*(
+                _capability_target_roots(target, composition)
+                for target in expected_targets[local]))
             expected_proper = frozenset({
                 expected_service, expected_sound, expected_required,
-                expected_failure,
+                expected_failure, expected_root,
                 *(tuple() if expected_complete is None else (expected_complete,)),
-                *(target for target in expected_targets[local]
-                  if isinstance(target, RecordIdentity)),
-            })
+            }) | expected_target_roots
             expected_descriptor_closure = _reachable_closure(
                 expected_proper, composition)
-            if local == "CAP(profile)":
-                expected_descriptor_closure = expected_proper | profile_closure
             if (descriptor.proper_semantic_dependencies != expected_proper
                     or descriptor.dependency_closure
                         != expected_descriptor_closure):
@@ -2523,7 +2720,14 @@ def validate_model_descriptor(model: ModelContract, descriptor: CapabilityDescri
     failure = _resolve(composition, descriptor.failure_contract, ContractSpec)
     if evidence is None or evidence.value.role is not ContractRole.REQUIRED_EVIDENCE or failure is None or failure.value.role is not ContractRole.SERVICE_FAILURE_BEHAVIOR:
         return Judgment("MALFORMED", ("DESCRIPTOR_EVIDENCE_OR_FAILURE",))
-    expected_dependencies = frozenset({descriptor.service, *descriptor.supported_targets, descriptor.sound_fragment, descriptor.required_evidence, descriptor.failure_contract})
+    target_roots = frozenset().union(*(
+        _capability_target_roots(target, composition)
+        for target in descriptor.supported_targets))
+    expected_dependencies = frozenset({
+        descriptor.service, descriptor.sound_fragment,
+        descriptor.required_evidence, descriptor.failure_contract,
+        *descriptor.required_trust_roots,
+    }) | target_roots
     if descriptor.complete_fragment is not None:
         expected_dependencies |= frozenset({descriptor.complete_fragment})
     if descriptor.proper_semantic_dependencies != expected_dependencies:
@@ -2532,9 +2736,11 @@ def validate_model_descriptor(model: ModelContract, descriptor: CapabilityDescri
         return Judgment("MALFORMED", ("DESCRIPTOR_DEPENDENCY_CLOSURE",))
     if any(item.kind is not RecordKind.TRUST_ROOT for item in descriptor.required_trust_roots):
         return Judgment("MALFORMED", ("DESCRIPTOR_TRUST_ROOT_KIND",))
-    if any(_resolve(composition, item) is None for item in descriptor.dependency_closure):
+    if any(_resolve(composition, item) is None
+           for item in descriptor.dependency_closure
+           if item not in descriptor.required_trust_roots):
         return Judgment("MALFORMED", ("DESCRIPTOR_DANGLING_REFERENCE",))
-    if target_binding.value.declaration not in descriptor.supported_targets:
+    if BindingTarget(model.target_binding) not in descriptor.supported_targets:
         return Judgment("MALFORMED", ("DESCRIPTOR_TARGET",))
     return Judgment("WELL_FORMED")
 
@@ -2625,7 +2831,7 @@ def _environment(request: InvocationRequest, composition: Composition) -> tuple[
         return None
     if semantic.value.abi_version != request.requested_version and semantic.value.abi_version.components != (0,):
         return None
-    expected_syntax = frozenset({request.target})
+    expected_syntax = frozen_task_syntax_roots()
     expected_subjects = frozenset(
         identity for identity in semantic.value.bindings
         if (bound := _resolve(composition, identity, SemanticBinding)) is not None
@@ -2665,6 +2871,8 @@ _FROZEN_TASK_TYPE_NAMES = (
     "Format", "ObservationRelation", "ObservationResult", "ObservationSpec",
     "ObservationValue", "Path", "PathSegment", "PathSet",
     "RepositorySnapshot", "SubjectId", "TaskSpec", "VerificationSpec",
+    "CodingEvidenceEntry", "CodingEvidencePayload", "VerificationRecord",
+    "VerificationStatus", "SnapshotIdentity", "ImplementationEvidence",
 )
 
 
@@ -2679,7 +2887,7 @@ def _frozen_task_environment_value() -> SemanticEnvironment:
         for name in _FROZEN_TASK_TYPE_NAMES)
     return SemanticEnvironment(
         Version((0,)), tuple(sorted((declaration, *types))), (), (binding,),
-        mechanically_extracted_dependencies=frozenset({declaration, binding}))
+        mechanically_extracted_dependencies=frozen_task_syntax_roots())
 
 
 def _frozen_task_values() -> tuple[Any, Any, frozenset[Any]]:
@@ -2776,7 +2984,12 @@ def evaluate_invocation(request_identity: RecordIdentity, composition: Compositi
                 "CS(UNKNOWN_BEHAVIOR,task)",
                 "CS(EVALUATION_ERROR_BEHAVIOR,predicate)",
             ))
-        frozen_proper = frozenset({frozen_declaration}) | frozen_contracts
+        frozen_proper = frozenset({
+            frozen_declaration,
+            RecordIdentity(RecordKind.TYPE_DECLARATION, ExactKey(
+                "capknow.semantic", "coding.type", "T(CodingEvidenceEntry)",
+                Version((1,)))),
+        }) | frozen_contracts
         frozen_type_closure = frozenset(
             RecordIdentity(kind, ExactKey(
                 "capknow.semantic", namespace, local, Version((1,))))
@@ -2787,9 +3000,9 @@ def evaluate_invocation(request_identity: RecordIdentity, composition: Compositi
                  f"CS(TYPE_ADMISSION,type.{name})"),
             ))
         frozen_dependency = DependencyEnvironment(
-            frozenset({frozen_declaration}), frozenset({frozen_binding}),
+            frozen_task_syntax_roots(), frozenset({frozen_binding}),
             frozenset({(frozen_declaration, frozen_binding)}),
-            frozenset({frozen_declaration, frozen_binding}), frozen_proper,
+            frozen_task_syntax_roots() | frozenset({frozen_binding}), frozen_proper,
             frozen_proper | frozen_type_closure, frozenset())
         if (environment != frozen_environment
                 or dependency_environment != frozen_dependency
@@ -3553,12 +3766,12 @@ def evaluate_observation_graph(request: GraphEvaluationRequest, composition: Com
             or semantic.value.choice_bindings
             or semantic.value.chi_c
             or semantic.value.mechanically_extracted_dependencies
-                != expected_callable_bindings
+                != frozen_confluence_syntax_roots()
             or semantic.value.authority_facts != (
             authority_fact_one_id, authority_fact_two_id)
             ):
         raise ValueError("malformed confluence semantic environment")
-    expected_syntax = frozenset(semantic.value.declarations + semantic.value.pair_declarations)
+    expected_syntax = frozen_confluence_syntax_roots()
     expected_subjects = frozenset(semantic.value.bindings + semantic.value.profile_bindings + semantic.value.pair_bindings)
     expected_associations = frozenset(
         (declaration, binding_identity)
@@ -3582,18 +3795,19 @@ def evaluate_observation_graph(request: GraphEvaluationRequest, composition: Com
             or any(composition.at(identity) is None for identity in expected_closure)
             or dependencies.value.validation_references):
         raise ValueError("malformed confluence dependency environment")
-    descriptor_expected = frozenset({
-        capability.value.service,
-        capability.value.sound_fragment,
-        capability.value.required_evidence,
-        capability.value.failure_contract,
-    })
     required_evidence = _resolve(composition, capability.value.required_evidence, ContractSpec)
     failure_contract = _resolve(composition, capability.value.failure_contract, ContractSpec)
     exact_lower_scope = frozenset().union(*(
         record.value.dependency_closure
         for identity in request.nodes
         if (record := _resolve(composition, identity, SemanticBinding)) is not None))
+    descriptor_expected = frozenset({
+        capability.value.service,
+        capability.value.sound_fragment,
+        capability.value.required_evidence,
+        capability.value.failure_contract,
+        *capability.value.required_trust_roots,
+    }) | _capability_target_roots(expected_target, composition)
     if (capability.value.dependency_scope != exact_lower_scope
             or capability.value.proper_semantic_dependencies != descriptor_expected
             or capability.value.dependency_closure != _reachable_closure(descriptor_expected, composition)

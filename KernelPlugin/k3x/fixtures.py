@@ -91,6 +91,10 @@ from .reference import (
     LookupRequest,
     ModelContract,
     ModelCapabilitySummary,
+    BindingTarget,
+    ProfileBinding,
+    ProfileDimensionKey,
+    ProfileTarget,
     NamedCarrier,
     ConfluenceSubject,
     AttributedClause,
@@ -165,6 +169,8 @@ from .reference import (
     Universe,
     Version,
     compose_records,
+    frozen_confluence_syntax_roots,
+    frozen_task_syntax_roots,
 )
 
 
@@ -519,20 +525,10 @@ def _core_construction_local(
     )
     profile = LogicalRecord(
         profile_id,
-        SemanticBinding(
-            profile_id.key,
-            declaration_id,
-            "PROFILE",
-            sigma_spec_id,
-            declaration.value.facet_positions,
-            frozenset({declaration_id, sigma_spec_id, evidence_id, access_id, unknown_id, error_id}),
-            frozenset({declaration_id, sigma_spec_id, evidence_id, access_id, unknown_id, error_id, task_type_id, snapshot_type_id, task_admission_id, snapshot_admission_id}),
-            evidence_id,
-            access_id,
-            unknown_id,
-            error_id,
-            "SAME_SEMANTIC_INPUTS_SAME_COMPLETE_RESULT",
-        ),
+        ProfileBinding(
+            key("PK(implementation_evidence)", namespace="coding.profile"),
+            frozenset(), sigma_spec_id, evidence_id,
+            frozenset(), frozenset(), unknown_id, error_id, error_id),
     )
     service_id = rid(
         RecordKind.SERVICE, "SK(predicates)", namespace="coding.service"
@@ -755,7 +751,7 @@ def _core_construction_local(
     environment_id = rid(
         RecordKind.SEMANTIC_ENVIRONMENT, "E_t", namespace="environment"
     )
-    required = frozenset({declaration_id, binding_id})
+    required = frozen_task_syntax_roots()
     environment = LogicalRecord(
         environment_id,
         SemanticEnvironment(
@@ -772,7 +768,7 @@ def _core_construction_local(
     dependency = LogicalRecord(
         dependency_id,
         DependencyEnvironment(
-            frozenset({declaration_id}),
+            required,
             frozenset({binding_id}),
             frozenset({(declaration_id, binding_id)}),
             frozenset({declaration_id, binding_id}),
@@ -4251,7 +4247,11 @@ def _confluence_construction_local(order: OrderTag) -> ConfluenceConstruction:
         confluence_service_id.key, ABI0, key("coding-minimal", namespace="plugin")))
     confluence_proper = binding_one.value.proper_semantic_dependencies | binding_two.value.proper_semantic_dependencies
     confluence_closure = binding_one.value.dependency_closure | binding_two.value.dependency_closure
-    descriptor_proper = frozenset({confluence_service_id, csound_id, creq_id, cfail_id})
+    confluence_root_id = rid(
+        RecordKind.TRUST_ROOT, "ROOT_TR_c", namespace="confluence.trust")
+    descriptor_proper = frozenset({
+        confluence_service_id, csound_id, creq_id, cfail_id,
+        confluence_root_id, semantic_id, contract_id}) | confluence_closure
     descriptor_closure = descriptor_proper | confluence_closure | frozenset({
         node_one_id, node_two_id,
     })
@@ -4315,9 +4315,7 @@ def _confluence_construction_local(order: OrderTag) -> ConfluenceConstruction:
             (),
             (binding_one.identity, binding_two.identity),
             authority_facts=(authority_fact_one.identity, authority_fact_two.identity),
-            mechanically_extracted_dependencies=frozenset(
-                {binding_one.identity, binding_two.identity}
-            ),
+            mechanically_extracted_dependencies=frozen_confluence_syntax_roots(),
         ),
     )
     dependency_id = rid(
@@ -4331,7 +4329,7 @@ def _confluence_construction_local(order: OrderTag) -> ConfluenceConstruction:
     dependency = LogicalRecord(
         dependency_id,
         DependencyEnvironment(
-            frozenset({observe_declaration_id, changes_declaration_id}),
+            frozen_confluence_syntax_roots(),
             frozenset({binding_one.identity, binding_two.identity}),
             frozenset({
                 (observe_declaration_id, binding_one.identity),
@@ -5303,6 +5301,10 @@ def _retained_symbol_rows(
             if role is ContractRole.UNKNOWN_BEHAVIOR
             else frozenset({"TermResult"})
             if role is ContractRole.EVALUATION_ERROR_BEHAVIOR and local == "term"
+            else frozenset({"ProfileResult"})
+            if role in {ContractRole.EVALUATION_ERROR_BEHAVIOR,
+                        ContractRole.REASONING_ERROR_BEHAVIOR}
+            and local == "profile"
             else frozenset({"Eval"})
         )
         result = LogicalRecord(identity, ContractSpec(
@@ -5353,12 +5355,21 @@ def _retained_symbol_rows(
         meaning = contract(
             ContractRole.FUNCTION_MEANING if kind == "FUNCTION" else ContractRole.PREDICATE_MEANING,
             name, meaning_domain, name, meaning_support, queries)
+        evidence_support = (
+            frozenset({type_by_name["CodingEvidenceEntry"].identity})
+            if evidence_name == "verification" else frozenset())
+        evidence_queries = (() if not evidence_support else (
+            ObservationQuery(next(iter(evidence_support)),
+                             ObservationKind.TYPE_ADMISSION_FACT,
+                             ("evidence_entry",)),))
         evidence = contract(ContractRole.EVIDENCE_SCHEMA, evidence_name,
                             (("ExplicitInputs",) if evidence_name == "none"
                              else ("EvidenceStore",)),
-                            f"evidence_{evidence_name}")
+                            f"evidence_{evidence_name}", evidence_support,
+                            evidence_queries)
         access = contract(ContractRole.ACCESS_BOUNDARY, access_name,
-                          meaning_domain or ("Trace",), f"access_{access_name}")
+                          meaning_domain or ("Trace",), f"access_{access_name}",
+                          meaning_support, queries)
         unknown = contract(ContractRole.UNKNOWN_BEHAVIOR, unknown_name,
                            (("LiteralOrFunctionInput",)
                             if unknown_name == "not_applicable"
@@ -5373,8 +5384,10 @@ def _retained_symbol_rows(
                          namespace="coding.binding")
         proper = frozenset({declaration.identity, meaning.identity,
                             evidence.identity, access.identity,
-                            unknown.identity, error.identity}) | meaning_support
+                            unknown.identity, error.identity}) | meaning_support | evidence_support
         closure = proper | type_closure(*(item for item in argument_types if item in type_by_name))
+        if evidence_name == "verification":
+            closure |= type_closure("CodingEvidenceEntry")
         if name == "snapshot_of":
             closure |= type_closure("RepositorySnapshot")
         if name == "event_occurred":
@@ -5451,9 +5464,55 @@ def _retained_symbol_rows(
         frozenset(), IndependentCoherenceProof(
             occurrence_id, rid(RecordKind.CERTIFICATE, "NONE", namespace="pair"),
             rid(RecordKind.CAPABILITY, "NONE", namespace="pair"))))
+    profile_key = key("PK(implementation_evidence)", namespace="coding.profile")
+    profile_id = rid(
+        RecordKind.PROFILE_BINDING,
+        "PROFILE_BINDING(PK(implementation_evidence))",
+        namespace="coding.binding")
+    coverage = contract(
+        ContractRole.PROFILE_COVERAGE, "implementation_evidence",
+        ("ImplementationCoverageSubject",), "implementation_evidence_profile",
+        frozenset({binding_by_name["task_accepts"].identity}),
+        (ObservationQuery(binding_by_name["task_accepts"].identity,
+                          ObservationKind.EVAL_RESULT,
+                          ("task", "final_snapshot", "evidence_store")),))
+    profile_evidence = contract(
+        ContractRole.EVIDENCE_SCHEMA, "implementation_profile",
+        ("EvidenceStore",), "evidence_implementation_profile",
+        frozenset({type_by_name["CodingEvidenceEntry"].identity}),
+        (ObservationQuery(type_by_name["CodingEvidenceEntry"].identity,
+                          ObservationKind.TYPE_ADMISSION_FACT,
+                          ("evidence_entry",)),))
+    profile_unknown = contract(
+        ContractRole.UNKNOWN_BEHAVIOR, "evidence_pending",
+        ("ProfileInput",), "unknown_evidence_pending")
+    profile_evaluation_error = contract(
+        ContractRole.EVALUATION_ERROR_BEHAVIOR, "profile",
+        ("ProfileInput",), "error_profile")
+    profile_reasoning_error = contract(
+        ContractRole.REASONING_ERROR_BEHAVIOR, "profile",
+        ("ProfileRequest",), "reasoning_error_profile")
+    profile_proper = frozenset({
+        coverage.identity, profile_evidence.identity, profile_unknown.identity,
+        profile_evaluation_error.identity, profile_reasoning_error.identity,
+    })
+    profile_closure = (profile_proper
+                       | frozenset({binding_by_name["task_accepts"].identity})
+                       | binding_by_name["task_accepts"].value.dependency_closure
+                       | type_closure("CodingEvidenceEntry"))
+    profile = LogicalRecord(profile_id, ProfileBinding(
+        profile_key,
+        frozenset({
+            ProfileDimensionKey(profile_key, "abstract_acceptance_evidence"),
+            ProfileDimensionKey(profile_key,
+                                "concrete_implementation_evidence"),
+        }),
+        coverage.identity, profile_evidence.identity, profile_proper,
+        profile_closure, profile_unknown.identity,
+        profile_evaluation_error.identity, profile_reasoning_error.identity))
     models.append(occurrence_model)
     return (tuple(declarations), tuple(bindings), tuple(models),
-            tuple(specs.values()), (pair,), (occurrence, pair_binding, core_profile))
+            tuple(specs.values()), (pair,), (occurrence, pair_binding, profile))
 
 
 def _retained_ck() -> tuple[LogicalRecord, tuple[LogicalRecord, ...]]:
@@ -5512,11 +5571,15 @@ def _retained_ck() -> tuple[LogicalRecord, tuple[LogicalRecord, ...]]:
     confluence_nodes = (retained_observe.identity, retained_changes.identity)
     confluence_scope = (retained_observe.value.dependency_closure
                         | retained_changes.value.dependency_closure)
+    confluence_target = next(iter(confluence_capability.value.supported_targets))
     confluence_descriptor_proper = frozenset({
         confluence_capability.value.service,
         confluence_capability.value.sound_fragment,
         confluence_capability.value.required_evidence,
         confluence_capability.value.failure_contract,
+        *confluence_capability.value.required_trust_roots,
+        confluence_target.semantic_environment,
+        confluence_target.subjects[0].contract_identity,
     })
     confluence_capability = replace(
         confluence_capability,
@@ -5537,21 +5600,19 @@ def _retained_ck() -> tuple[LogicalRecord, tuple[LogicalRecord, ...]]:
         item.identity for item in symbols
         if item.identity.key.local == "DP(refresh_occurred)")
     predicate_targets = frozenset(
-        item.value.declaration for item in predicate_bindings
-        if isinstance(item.value, SemanticBinding)) | frozenset({
-            occurrence_declaration})
+        BindingTarget(item.identity) for item in predicate_bindings)
     predicate_scope = frozenset().union(*(
         item.value.dependency_closure for item in predicate_bindings))
+    predicate_roots = predicate_capability.value.required_trust_roots
+    predicate_target_roots = frozenset(
+        target.binding for target in predicate_targets)
     predicate_proper = frozenset({
         predicate_capability.value.service,
-        *predicate_targets,
         predicate_capability.value.sound_fragment,
         predicate_capability.value.required_evidence,
         predicate_capability.value.failure_contract,
-    })
-    predicate_descriptor_closure = predicate_proper | frozenset().union(*(
-        declaration_dependency_closure(target)
-        for target in predicate_targets))
+    }) | predicate_roots | predicate_target_roots
+    predicate_descriptor_closure = predicate_proper | predicate_scope
     predicate_capability = replace(
         predicate_capability,
         value=replace(
@@ -5598,7 +5659,7 @@ def _retained_ck() -> tuple[LogicalRecord, tuple[LogicalRecord, ...]]:
             service_role = "FUNCTION_EVALUATION"
             capability_class = "CONCRETE_EVALUATION_ONLY"
             judgments = frozenset({"FUNCTION_EVALUATION"})
-            targets = frozenset(item.value.declaration for item in targeted)
+            targets = frozenset(BindingTarget(item.identity) for item in targeted)
             dependency_scope = frozenset().union(
                 *(item.value.dependency_closure for item in targeted))
             roots = frozenset({rid(RecordKind.TRUST_ROOT, "TR", namespace="trust")})
@@ -5606,7 +5667,7 @@ def _retained_ck() -> tuple[LogicalRecord, tuple[LogicalRecord, ...]]:
             service_role = "PROFILE_CONCRETE"
             capability_class = "CONCRETE_EVALUATION_ONLY"
             judgments = frozenset({"PROFILE_COVERAGE"})
-            targets = frozenset({profile.identity})
+            targets = frozenset({ProfileTarget(profile.value.profile_key)})
             dependency_scope = profile.value.dependency_closure
             roots = frozenset({rid(RecordKind.TRUST_ROOT, "TR", namespace="trust")})
         else:
@@ -5632,14 +5693,17 @@ def _retained_ck() -> tuple[LogicalRecord, tuple[LogicalRecord, ...]]:
                 item.value.dependency_closure for item in bounds_subjects))
             roots = frozenset({rid(RecordKind.TRUST_ROOT, "TRB",
                                    namespace="bounds.trust")})
-        descriptor_proper = proper | frozenset(
-            target for target in targets if isinstance(target, RecordIdentity))
-        descriptor_closure = descriptor_proper | frozenset().union(*(
-            declaration_dependency_closure(target)
-            for target in targets if isinstance(target, RecordIdentity)
-            and target.kind is RecordKind.DECLARATION))
-        if name == "profile":
-            descriptor_closure |= profile.value.dependency_closure
+        target_roots = (frozenset(target.binding for target in targets)
+                        if name == "functions"
+                        else frozenset({profile.identity})
+                        if name == "profile"
+                        else frozenset({
+                            next(iter(targets)).semantic_environment,
+                            *next(iter(targets)).subjects,
+                        }))
+        descriptor_proper = proper | roots | target_roots
+        descriptor_closure = (descriptor_proper | dependency_scope
+                              if name != "bounds" else descriptor_proper)
         service_capabilities.append(LogicalRecord(capability_id, CapabilityDescriptor(
             capability_id.key, service_id, ABI0, package.value.plugin_key,
             service_role, capability_class, judgments,
@@ -5658,18 +5722,22 @@ def _retained_ck() -> tuple[LogicalRecord, tuple[LogicalRecord, ...]]:
     lexical_spec_ids = tuple(
         rid(RecordKind.CONTRACT_SPEC, local, namespace="coding.service.contract")
         for local in ("LEX_SOUND", "LEX_REQ", "LEX_FAIL"))
-    lexical_proper = frozenset({lexical_service_id, *lexical_spec_ids})
+    lexical_root = rid(RecordKind.TRUST_ROOT, "TR", namespace="trust")
+    lexical_target = ReasoningTarget(
+        "FORMULA_ENTAILMENT", ("f_lex", "g_lex"),
+        rid(RecordKind.SEMANTIC_ENVIRONMENT, "E_lex",
+            namespace="lexical.environment"))
+    lexical_scope = canonical_task_binding.value.dependency_closure
+    lexical_proper = frozenset({
+        lexical_service_id, *lexical_spec_ids, lexical_root,
+        lexical_target.semantic_environment})
     lexical = LogicalRecord(lexical_capability_id, CapabilityDescriptor(
         lexical_capability_id.key, lexical_service_id, ABI0, package.value.plugin_key,
         "REASONING", "PARTIAL_SYMBOLIC_REASONING",
-        frozenset({"FORMULA_ENTAILMENT"}), frozenset({ReasoningTarget(
-            "FORMULA_ENTAILMENT", ("f_lex", "g_lex"),
-            rid(RecordKind.SEMANTIC_ENVIRONMENT, "E_lex",
-                namespace="lexical.environment"))}), lexical_spec_ids[0],
-        None, canonical_task_binding.value.dependency_closure,
+        frozenset({"FORMULA_ENTAILMENT"}), frozenset({lexical_target}), lexical_spec_ids[0],
+        None, lexical_scope,
         lexical_proper, lexical_proper,
-        lexical_spec_ids[1], frozenset({rid(
-            RecordKind.TRUST_ROOT, "TR", namespace="trust")}),
+        lexical_spec_ids[1], frozenset({lexical_root}),
         lexical_spec_ids[2]))
     service_support.append(LogicalRecord(
         lexical_service_id, ServiceIdentity(lexical_service_id.key, ABI0, package.value.plugin_key)))
@@ -5856,7 +5924,8 @@ def core_construction(
     declaration_record = next(
         item for item in package.value.declarations
         if item.identity.key.local == "DP(task_accepts)")
-    required_type_names = {"TaskSpec", "RepositorySnapshot"}
+    required_type_names = {
+        "TaskSpec", "RepositorySnapshot", "CodingEvidenceEntry"}
     pending = list(required_type_names)
     while pending:
         for name in _RETAINED_TYPE_DEPENDENCIES[pending.pop()]:
@@ -5869,14 +5938,13 @@ def core_construction(
           and item.identity.key.local[2:-1] in required_type_names),
         declaration_record.identity,
     )))
-    frozen_required = frozenset({declaration_record.identity,
-                                 binding_record.identity})
+    frozen_required = frozen_task_syntax_roots()
     rebuilt_semantic = replace(
         semantic_record,
         value=SemanticEnvironment(
             ABI0, delta_declarations, (), (binding_record.identity,),
             mechanically_extracted_dependencies=frozen_required))
-    syntax = frozenset({declaration_record.identity})
+    syntax = frozen_task_syntax_roots()
     subjects = frozenset({binding_record.identity})
     associations = frozenset({(declaration_record.identity,
                                 binding_record.identity)})
@@ -6008,7 +6076,7 @@ def confluence_construction(order: OrderTag) -> ConfluenceConstruction:
         value=SemanticEnvironment(
             ABI0, selected_declarations, (), selected_binding_ids,
             authority_facts=semantic_value.authority_facts,
-            mechanically_extracted_dependencies=frozenset(retained_subjects)))
+            mechanically_extracted_dependencies=frozen_confluence_syntax_roots()))
     associations = frozenset(
         (item.value.declaration, item.identity) for item in selected_bindings)
     proper = frozenset().union(*(
@@ -6017,9 +6085,9 @@ def confluence_construction(order: OrderTag) -> ConfluenceConstruction:
     rebuilt_dependency = replace(
         dependency_record,
         value=DependencyEnvironment(
-            frozenset(selected_declarations), frozenset(selected_binding_ids),
+            frozen_confluence_syntax_roots(), frozenset(selected_binding_ids),
             associations,
-            frozenset(selected_declarations) | frozenset(selected_binding_ids),
+            frozen_confluence_syntax_roots() | frozenset(selected_binding_ids),
             proper, _reachable_closure(proper, composition), frozenset()))
     observation_values = dict(observation_record.value.values)
     rebuilt_observation = replace(
@@ -6038,6 +6106,32 @@ def confluence_construction(order: OrderTag) -> ConfluenceConstruction:
             "confluence.binding", "confluence.declaration", "confluence.model"}
             or (isinstance(item.value, ContractSpec)
                 and item.identity.key.namespace == "confluence.contract")))
+    preliminary = replace(universe, records=rewritten_records)
+    preliminary_composition = compose_records(preliminary.records)
+    package_record = next(
+        item for item in preliminary.records
+        if isinstance(item.value, PluginPackage))
+    confluence_descriptor = next(
+        item for item in package_record.value.services
+        if item.identity.key.local == "CAP(confluence)")
+    exact_descriptor = replace(
+        confluence_descriptor,
+        value=replace(
+            confluence_descriptor.value,
+            dependency_closure=_reachable_closure(
+                confluence_descriptor.value.proper_semantic_dependencies,
+                preliminary_composition)))
+    exact_package = replace(
+        package_record,
+        value=replace(
+            package_record.value,
+            services=tuple(
+                exact_descriptor if item.identity == exact_descriptor.identity
+                else item
+                for item in package_record.value.services)))
+    rewritten_records = tuple(
+        exact_package if item.identity == exact_package.identity else item
+        for item in rewritten_records)
     observation_inputs = tuple(
         (new, arguments) for (old, arguments), new in zip(
             graph_request.observation_inputs, retained_nodes, strict=True))
@@ -6072,6 +6166,17 @@ def cycle_universe(cyclic: bool = True) -> Universe:
             (ObservationQuery(occurred.identity, ObservationKind.EVAL_RESULT,
                               ("pattern", "singleton_trace(event)")),),
             frozenset({occurred.identity}), "event_matches_cycle"))
+        cycle_access = next(
+            item for item in retained_support
+            if item.identity == matches.value.access_boundary)
+        cycle_access = replace(
+            cycle_access,
+            value=replace(
+                cycle_access.value,
+                observation_queries=(ObservationQuery(
+                    occurred.identity, ObservationKind.EVAL_RESULT,
+                    ("pattern", "singleton_trace(event)")),),
+                support=frozenset({occurred.identity})))
         direct = ((matches.value.proper_semantic_dependencies
                    - frozenset({matches.value.meaning_contract}))
                   | frozenset({cycle_spec_id, occurred.identity}))
@@ -6109,7 +6214,9 @@ def cycle_universe(cyclic: bool = True) -> Universe:
                 model_contracts=changed_models, services=(), certificates=()))
         support = tuple(
             item for item in retained_support
-            if item.identity != matches.value.meaning_contract) + (cycle_spec,)
+            if item.identity not in {
+                matches.value.meaning_contract, matches.value.access_boundary
+            }) + (cycle_spec, cycle_access)
     environment = record(
         RecordKind.SEMANTIC_ENVIRONMENT,
         "E_PROPER_CYCLE",
@@ -7120,10 +7227,19 @@ _EXPECTED_RETAINED_SERVICE_MEMBERS: tuple[IdentityLiteral, ...] = tuple(
 _EXPECTED_RETAINED_CONFLUENCE_MEMBERS = (
     _EXPECTED_RETAINED_SYMBOL_IDENTITIES + _EXPECTED_RETAINED_SERVICE_MEMBERS)
 _EXPECTED_RETAINED_CYCLE_MEMBERS: tuple[IdentityLiteral, ...] = ()
+_EXPECTED_PROFILE_IMPL_SPECS: tuple[IdentityLiteral, ...] = tuple(
+    ("CONTRACT_SPEC_RECORD", "capknow.semantic", "coding.contract", local, (1,))
+    for local in (
+        "CS(PROFILE_COVERAGE,implementation_evidence)",
+        "CS(EVIDENCE_SCHEMA,implementation_profile)",
+        "CS(EVALUATION_ERROR_BEHAVIOR,profile)",
+        "CS(REASONING_ERROR_BEHAVIOR,profile)",
+    ))
 _EXPECTED_RETAINED_CORE_UNIVERSE_ADDITIONS = (
     _EXPECTED_RETAINED_TYPE_IDENTITIES
     + _EXPECTED_RETAINED_LITERAL_IDENTITIES
     + _EXPECTED_RETAINED_CONFLUENCE_MEMBERS
+    + _EXPECTED_PROFILE_IMPL_SPECS
 )
 _EXPECTED_RETAINED_CORE_WITHOUT_MODELS = tuple(
     identity for identity in _EXPECTED_RETAINED_CORE_UNIVERSE_ADDITIONS
@@ -7134,6 +7250,7 @@ _EXPECTED_RETAINED_CYCLE_UNIVERSE_ADDITIONS = (
     + _EXPECTED_RETAINED_LITERAL_IDENTITIES
     + tuple(identity for identity in _EXPECTED_RETAINED_CONFLUENCE_MEMBERS
             if identity[0] != "CAPABILITY_RECORD" and identity[0] != "SERVICE_RECORD")
+    + _EXPECTED_PROFILE_IMPL_SPECS
 )
 _EXPECTED_CONFLUENCE_REPAIR6_ADDITIONS: tuple[IdentityLiteral, ...] = (
     *_EXPECTED_RETAINED_CORE_ADDITIONS,
@@ -7147,6 +7264,19 @@ _EVOLUTION_MISSING_ROWS = frozenset({
     MissingRowId.EXTENSION_OPTIONAL, MissingRowId.EXTENSION_REQUIRED,
     MissingRowId.ALIAS_OPTIONAL, MissingRowId.ALIAS_REQUIRED,
 })
+_EXPECTED_EVOLUTION_REPAIR10_ADDITIONS: tuple[IdentityLiteral, ...] = tuple(
+    identity
+    for name in (
+        "CodingEvidenceEntry", "CodingEvidencePayload",
+        "ImplementationEvidence", "SnapshotIdentity",
+        "VerificationRecord", "VerificationStatus",
+    )
+    for identity in (
+        ("TYPE_DECLARATION_RECORD", "capknow.semantic", "coding.type",
+         f"T({name})", (1,)),
+        ("CONTRACT_SPEC_RECORD", "capknow.semantic", "coding.type-admission",
+         f"CS(TYPE_ADMISSION,type.{name})", (1,)),
+    ))
 
 _EXPECTED_REPLAY_ASSERTIONS_LITERAL: dict[FixtureId, ReplayAssertion] = {
     FixtureId(FixtureFamily.CORE_DEFINITIONAL): ReplayAssertion(
@@ -7753,6 +7883,10 @@ def _build_expected_assertions() -> dict[FixtureId, ReplayAssertion]:
                    and identifier.parameters[0] in _EVOLUTION_MISSING_ROWS
                    else ())
                 + (_EXPECTED_EVOLUTION_REPAIR7_ADDITIONS
+                   if identifier.family in {FixtureFamily.MISSING_BASE, FixtureFamily.MISSING_VARIANT}
+                   and identifier.parameters[0] in _EVOLUTION_MISSING_ROWS
+                   else ())
+                + (_EXPECTED_EVOLUTION_REPAIR10_ADDITIONS
                    if identifier.family in {FixtureFamily.MISSING_BASE, FixtureFamily.MISSING_VARIANT}
                    and identifier.parameters[0] in _EVOLUTION_MISSING_ROWS
                    else ())
