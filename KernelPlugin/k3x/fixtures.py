@@ -101,6 +101,9 @@ from .reference import (
     ClauseAdoption,
     ConfluenceContract,
     EnvironmentUse,
+    ContractSubject,
+    FormulaSubject,
+    LexicalFormula,
     ReasoningTarget,
     ReasoningUnknown,
     ReasoningResultValue,
@@ -169,8 +172,15 @@ from .reference import (
     Universe,
     Version,
     compose_records,
+    derive_dependency_environment,
+    dependency_identity,
     frozen_confluence_syntax_roots,
+    frozen_lexical_syntax_roots,
     frozen_task_syntax_roots,
+    reasoning_target_roots,
+    syntax_keys_from_identities,
+    typed_dependency_environment,
+    _reachable_closure,
 )
 
 
@@ -767,7 +777,7 @@ def _core_construction_local(
     )
     dependency = LogicalRecord(
         dependency_id,
-        DependencyEnvironment(
+        typed_dependency_environment(
             required,
             frozenset({binding_id}),
             frozenset({(declaration_id, binding_id)}),
@@ -1403,9 +1413,8 @@ def pair_construction() -> PairConstruction:
             (pair_id,),
             (left_id, *tuple(item.identity for item in literal_bindings)),
             pair_bindings=(pair_binding_id,),
-            mechanically_extracted_dependencies=frozenset(
-                {pair_id}
-            ),
+            mechanically_extracted_dependencies=syntax_keys_from_identities(
+                {pair_id}),
         ),
     )
     dependency_environment_id = rid(
@@ -1415,8 +1424,8 @@ def pair_construction() -> PairConstruction:
     )
     dependency_environment = LogicalRecord(
         dependency_environment_id,
-        DependencyEnvironment(
-            frozenset(semantic_environment.value.declarations + semantic_environment.value.pair_declarations),
+        typed_dependency_environment(
+            syntax_keys_from_identities(semantic_environment.value.declarations + semantic_environment.value.pair_declarations),
             frozenset(semantic_environment.value.bindings + semantic_environment.value.pair_bindings),
             frozenset({(left_decl_id, left_id), *(
                 (declaration.identity, binding.identity)
@@ -1963,8 +1972,8 @@ def _literal_missing_rows() -> tuple[LiteralMissingRow, ...]:
     )
     lexical_dependency = LogicalRecord(
         lexical_dependency_id,
-        DependencyEnvironment(
-            frozenset({declaration.identity}),
+        typed_dependency_environment(
+            syntax_keys_from_identities({declaration.identity}),
             frozenset({binding.identity}),
             frozenset({(declaration.identity, binding.identity)}),
             frozenset({declaration.identity, binding.identity}),
@@ -1975,8 +1984,8 @@ def _literal_missing_rows() -> tuple[LiteralMissingRow, ...]:
     )
     lexical_dependency_no_binding = replace(
         lexical_dependency,
-        value=DependencyEnvironment(
-            frozenset({declaration.identity}),
+        value=typed_dependency_environment(
+            syntax_keys_from_identities({declaration.identity}),
             frozenset({binding.identity}),
             frozenset({(declaration.identity, binding.identity)}),
             frozenset({declaration.identity, binding.identity}),
@@ -2022,9 +2031,8 @@ def _literal_missing_rows() -> tuple[LiteralMissingRow, ...]:
             (),
             (binding.identity,),
             lexical_bindings=(extra_lexical_id,),
-            mechanically_extracted_dependencies=frozenset(
-                {declaration.identity, binding.identity}
-            ),
+            mechanically_extracted_dependencies=syntax_keys_from_identities(
+                {declaration.identity}),
         ),
     )
     extra_dependency_id = rid(
@@ -2034,8 +2042,8 @@ def _literal_missing_rows() -> tuple[LiteralMissingRow, ...]:
     )
     extra_dependency = LogicalRecord(
         extra_dependency_id,
-        DependencyEnvironment(
-            frozenset({declaration.identity}),
+        typed_dependency_environment(
+            syntax_keys_from_identities({declaration.identity}),
             frozenset({binding.identity}),
             frozenset({(declaration.identity, binding.identity)}),
             frozenset({declaration.identity, binding.identity}),
@@ -2310,8 +2318,8 @@ def _literal_missing_rows() -> tuple[LiteralMissingRow, ...]:
                           if isinstance(candidate.value, CompatibilityClaim)
                           else proper)
         validation_refs = frozenset({certificate_identity, validator_identity, evolution_root_id})
-        dependency_record = LogicalRecord(dependency_id, DependencyEnvironment(
-            frozenset({candidate_identity}), frozenset({candidate_identity}), frozenset(),
+        dependency_record = LogicalRecord(dependency_id, typed_dependency_environment(
+            frozenset(), frozenset({candidate_identity}), frozenset(),
             frozenset({candidate_identity}), proper, proper_closure, validation_refs,
         ))
         descriptor_proper = frozenset({service_id, candidate_identity, *spec_ids.values()})
@@ -2559,7 +2567,7 @@ def _literal_missing_rows() -> tuple[LiteralMissingRow, ...]:
     )
     empty_dependency = LogicalRecord(
         empty_dependency_id,
-        DependencyEnvironment(frozenset(), frozenset(), frozenset(), frozenset(), frozenset(), frozenset(), frozenset()),
+        typed_dependency_environment(frozenset(), frozenset(), frozenset(), frozenset(), frozenset(), frozenset(), frozenset()),
     )
     empty_request = replace(
         request,
@@ -2586,8 +2594,8 @@ def _literal_missing_rows() -> tuple[LiteralMissingRow, ...]:
     )
     incomplete_dependency = LogicalRecord(
         incomplete_dependency_id,
-        DependencyEnvironment(
-            frozenset({declaration.identity}),
+        typed_dependency_environment(
+            syntax_keys_from_identities({declaration.identity}),
             frozenset({binding.identity}),
             frozenset({(declaration.identity, binding.identity)}),
             frozenset({declaration.identity, binding.identity}),
@@ -4249,9 +4257,13 @@ def _confluence_construction_local(order: OrderTag) -> ConfluenceConstruction:
     confluence_closure = binding_one.value.dependency_closure | binding_two.value.dependency_closure
     confluence_root_id = rid(
         RecordKind.TRUST_ROOT, "ROOT_TR_c", namespace="confluence.trust")
+    exact_target = ReasoningTarget(
+        "CONSISTENCY", (ContractSubject(contract_id),), semantic_id)
     descriptor_proper = frozenset({
         confluence_service_id, csound_id, creq_id, cfail_id,
-        confluence_root_id, semantic_id, contract_id}) | confluence_closure
+        confluence_root_id,
+        *(dependency_identity(root)
+          for root in reasoning_target_roots(exact_target))})
     descriptor_closure = descriptor_proper | confluence_closure | frozenset({
         node_one_id, node_two_id,
     })
@@ -4259,7 +4271,7 @@ def _confluence_construction_local(order: OrderTag) -> ConfluenceConstruction:
         confluence_capability_id.key, confluence_service_id, ABI0,
         key("coding-minimal", namespace="plugin"), "REASONING",
         "PARTIAL_SYMBOLIC_REASONING", frozenset({"CONSISTENCY"}),
-        frozenset({ReasoningTarget("CONSISTENCY", (confluence_subject,), semantic_id)}), csound_id, None,
+        frozenset({exact_target}), csound_id, None,
         confluence_closure,
         descriptor_proper,
         descriptor_closure,
@@ -4291,7 +4303,7 @@ def _confluence_construction_local(order: OrderTag) -> ConfluenceConstruction:
             frozenset({"CONTRADICTION_PROOF"}),
             frozenset({ServiceUseTrustTarget(
                 confluence_capability_id, "CONSISTENCY",
-                EnvironmentUse("CONSISTENCY", (confluence_subject,)),
+                EnvironmentUse("CONSISTENCY", (ContractSubject(contract_id),)),
                 semantic_id,
             )}),
             "V0_EXTERNAL_TRUST_PREMISE",
@@ -4328,7 +4340,7 @@ def _confluence_construction_local(order: OrderTag) -> ConfluenceConstruction:
     )
     dependency = LogicalRecord(
         dependency_id,
-        DependencyEnvironment(
+        typed_dependency_environment(
             frozen_confluence_syntax_roots(),
             frozenset({binding_one.identity, binding_two.identity}),
             frozenset({
@@ -4349,7 +4361,8 @@ def _confluence_construction_local(order: OrderTag) -> ConfluenceConstruction:
         ReasoningRequest(
             ABI0, "CONSISTENCY", (confluence_subject,), semantic_id, trust_id,
             csound_id, dependency_id,
-            ReasoningTarget("CONSISTENCY", (confluence_subject,), semantic_id),
+            ReasoningTarget(
+                "CONSISTENCY", (ContractSubject(contract_id),), semantic_id),
             confluence_capability_id,
         ),
     )
@@ -5578,8 +5591,8 @@ def _retained_ck() -> tuple[LogicalRecord, tuple[LogicalRecord, ...]]:
         confluence_capability.value.required_evidence,
         confluence_capability.value.failure_contract,
         *confluence_capability.value.required_trust_roots,
-        confluence_target.semantic_environment,
-        confluence_target.subjects[0].contract_identity,
+        *(dependency_identity(root)
+          for root in reasoning_target_roots(confluence_target)),
     })
     confluence_capability = replace(
         confluence_capability,
@@ -5676,7 +5689,8 @@ def _retained_ck() -> tuple[LogicalRecord, tuple[LogicalRecord, ...]]:
             judgments = frozenset({"CONSISTENCY"})
             targets = frozenset({ReasoningTarget(
                 "CONSISTENCY",
-                (rid(RecordKind.OUTCOME, "C_b", namespace="bounds.contract"),),
+                (ContractSubject(rid(
+                    RecordKind.OUTCOME, "C_b", namespace="bounds.contract")),),
                 rid(RecordKind.SEMANTIC_ENVIRONMENT, "E_b",
                     namespace="bounds.environment"))})
             bounds_subjects = tuple(
@@ -5697,10 +5711,9 @@ def _retained_ck() -> tuple[LogicalRecord, tuple[LogicalRecord, ...]]:
                         if name == "functions"
                         else frozenset({profile.identity})
                         if name == "profile"
-                        else frozenset({
-                            next(iter(targets)).semantic_environment,
-                            *next(iter(targets)).subjects,
-                        }))
+                        else frozenset(
+                            dependency_identity(root) for root in
+                            reasoning_target_roots(next(iter(targets)))))
         descriptor_proper = proper | roots | target_roots
         descriptor_closure = (descriptor_proper | dependency_scope
                               if name != "bounds" else descriptor_proper)
@@ -5724,13 +5737,16 @@ def _retained_ck() -> tuple[LogicalRecord, tuple[LogicalRecord, ...]]:
         for local in ("LEX_SOUND", "LEX_REQ", "LEX_FAIL"))
     lexical_root = rid(RecordKind.TRUST_ROOT, "TR", namespace="trust")
     lexical_target = ReasoningTarget(
-        "FORMULA_ENTAILMENT", ("f_lex", "g_lex"),
+        "FORMULA_ENTAILMENT", (
+            FormulaSubject(LexicalFormula.TASK_ACCEPTS_FINAL, "scope_lex"),
+            FormulaSubject(LexicalFormula.EMPTY_ALL, "scope_lex")),
         rid(RecordKind.SEMANTIC_ENVIRONMENT, "E_lex",
             namespace="lexical.environment"))
     lexical_scope = canonical_task_binding.value.dependency_closure
     lexical_proper = frozenset({
         lexical_service_id, *lexical_spec_ids, lexical_root,
-        lexical_target.semantic_environment})
+        *(dependency_identity(root)
+          for root in reasoning_target_roots(lexical_target))})
     lexical = LogicalRecord(lexical_capability_id, CapabilityDescriptor(
         lexical_capability_id.key, lexical_service_id, ABI0, package.value.plugin_key,
         "REASONING", "PARTIAL_SYMBOLIC_REASONING",
@@ -5944,17 +5960,11 @@ def core_construction(
         value=SemanticEnvironment(
             ABI0, delta_declarations, (), (binding_record.identity,),
             mechanically_extracted_dependencies=frozen_required))
-    syntax = frozen_task_syntax_roots()
-    subjects = frozenset({binding_record.identity})
-    associations = frozenset({(declaration_record.identity,
-                                binding_record.identity)})
-    proper = binding_record.value.proper_semantic_dependencies
-    from .reference import _reachable_closure
     rebuilt_dependency = replace(
         dependency_record,
-        value=DependencyEnvironment(
-            syntax, subjects, associations, syntax | subjects, proper,
-            _reachable_closure(proper, composition),
+        value=derive_dependency_environment(
+            frozen_task_syntax_roots(), frozenset({binding_record.identity}),
+            composition,
             dependency_record.value.validation_references))
     request_record = composition.at(local.request)
     assert request_record is not None and isinstance(request_record.value, InvocationRequest)
@@ -6077,18 +6087,10 @@ def confluence_construction(order: OrderTag) -> ConfluenceConstruction:
             ABI0, selected_declarations, (), selected_binding_ids,
             authority_facts=semantic_value.authority_facts,
             mechanically_extracted_dependencies=frozen_confluence_syntax_roots()))
-    associations = frozenset(
-        (item.value.declaration, item.identity) for item in selected_bindings)
-    proper = frozenset().union(*(
-        item.value.proper_semantic_dependencies for item in selected_bindings))
-    from .reference import _reachable_closure
     rebuilt_dependency = replace(
         dependency_record,
-        value=DependencyEnvironment(
-            frozen_confluence_syntax_roots(), frozenset(selected_binding_ids),
-            associations,
-            frozen_confluence_syntax_roots() | frozenset(selected_binding_ids),
-            proper, _reachable_closure(proper, composition), frozenset()))
+        value=derive_dependency_environment(
+            frozen_confluence_syntax_roots(), frozenset(), composition))
     observation_values = dict(observation_record.value.values)
     rebuilt_observation = replace(
         observation_record,

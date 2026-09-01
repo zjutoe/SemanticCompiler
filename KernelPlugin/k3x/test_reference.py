@@ -10,6 +10,178 @@ from . import fixtures as fx
 from . import reference as ref
 
 
+_ASSERTED_TASK_TYPES = frozenset({
+    "ArtifactBodyKind", "ArtifactContent", "ArtifactProjection",
+    "ArtifactRole", "ArtifactSelector", "BehaviorValue", "ByteSize",
+    "ContentIdentity", "Coverage", "Criterion", "FieldId", "FieldValue",
+    "Format", "ObservationRelation", "ObservationResult", "ObservationSpec",
+    "ObservationValue", "Path", "PathSegment", "PathSet",
+    "RepositorySnapshot", "SubjectId", "TaskSpec", "VerificationSpec",
+})
+_ASSERTED_CONFLUENCE_TYPES = frozenset({
+    "ArtifactBodyKind", "ArtifactContent", "ArtifactProjection",
+    "ArtifactRole", "ArtifactSelector", "BehaviorValue", "ByteSize",
+    "ChangeEntry", "ChangeSet", "ContentIdentity", "Coverage", "FieldId",
+    "FieldValue", "Format", "ObservationResult", "ObservationSpec",
+    "ObservationValue", "Path", "PathSegment", "PathSet",
+    "RepositorySnapshot", "SubjectId",
+})
+
+
+def _asserted_syntax_keys(kind: str) -> frozenset[ref.K1SyntaxKey]:
+    type_names = (_ASSERTED_CONFLUENCE_TYPES
+                  if kind == "confluence" else _ASSERTED_TASK_TYPES)
+    symbols = {
+        "task": {"SP(task_accepts)"},
+        "bounds": {"SP(task_accepts)", "SF(snapshot_of)"},
+        "lexical": {"SP(task_accepts)", "SF(snapshot_of)"},
+        "confluence": {"SF(observe)", "SF(changes_between)",
+                        "SP(observations_equal)",
+                        "SP(dependency_metadata_changed)"},
+    }[kind]
+    return frozenset({
+        ref.K1SyntaxKey(ref.K1SyntaxTag.PLUGIN,
+                        fx.key("coding-minimal", namespace="plugin")),
+        *(ref.K1SyntaxKey(ref.K1SyntaxTag.SYMBOL,
+                          fx.key(local, namespace="coding.symbol"))
+          for local in symbols),
+        *(ref.K1SyntaxKey(ref.K1SyntaxTag.DECLARATION,
+                          fx.key(f"T({name})", namespace="coding.type"))
+          for name in type_names),
+    })
+
+
+def _asserted_reasoning_roots(
+    target: ref.ReasoningTarget,
+) -> frozenset[ref.RecordIdentity]:
+    if all(isinstance(item, ref.ContractSubject)
+           and item.contract_identity.key.local == "C_b"
+           for item in target.subjects):
+        syntax = _asserted_syntax_keys("bounds")
+    elif all(isinstance(item, ref.ContractSubject)
+             and item.contract_identity.key.local == "C_c"
+             for item in target.subjects):
+        syntax = _asserted_syntax_keys("confluence")
+    elif target.subjects in {(
+            ref.FormulaSubject(ref.LexicalFormula.TASK_ACCEPTS_FINAL,
+                               "scope_lex"),), (
+            ref.FormulaSubject(ref.LexicalFormula.TASK_ACCEPTS_FINAL,
+                               "scope_lex"),
+            ref.FormulaSubject(ref.LexicalFormula.EMPTY_ALL, "scope_lex"))}:
+        syntax = _asserted_syntax_keys("lexical")
+    else:
+        raise AssertionError(f"unexpected exact reasoning subjects: {target.subjects!r}")
+    record_kinds = {
+        ref.K1SyntaxTag.PLUGIN: ref.RecordKind.PACKAGE,
+        ref.K1SyntaxTag.DECLARATION: ref.RecordKind.DECLARATION,
+        ref.K1SyntaxTag.SYMBOL: ref.RecordKind.SYMBOL,
+    }
+    return frozenset({target.semantic_environment}) | frozenset(
+        ref.RecordIdentity(record_kinds[item.tag], item.exact_key)
+        for item in syntax)
+
+
+def _asserted_dependency_key(identity: ref.RecordIdentity) -> ref.DependencyKey:
+    tags = {
+        ref.RecordKind.PACKAGE: ref.DependencyTag.PLUGIN,
+        ref.RecordKind.TYPE_DECLARATION: ref.DependencyTag.DECLARATION,
+        ref.RecordKind.DECLARATION: ref.DependencyTag.DECLARATION,
+        ref.RecordKind.BINDING: ref.DependencyTag.BINDING,
+        ref.RecordKind.CONTRACT_SPEC: ref.DependencyTag.CONTRACT_SPEC,
+        ref.RecordKind.SEMANTIC_ENVIRONMENT: ref.DependencyTag.CARRIER,
+    }
+    tag = tags.get(identity.kind, ref.DependencyTag.CARRIER)
+    return ref.DependencyKey(
+        tag, identity.key,
+        identity.kind if tag is ref.DependencyTag.CARRIER else None)
+
+
+def _asserted_lift(key: ref.K1SyntaxKey) -> ref.DependencyKey:
+    tags = {
+        ref.K1SyntaxTag.PLUGIN: (ref.DependencyTag.PLUGIN,
+                                 ref.RecordKind.PACKAGE),
+        ref.K1SyntaxTag.DECLARATION: (ref.DependencyTag.DECLARATION,
+                                      ref.RecordKind.DECLARATION),
+        ref.K1SyntaxTag.SYMBOL: (ref.DependencyTag.SYMBOL,
+                                 ref.RecordKind.SYMBOL),
+        ref.K1SyntaxTag.EVENT: (ref.DependencyTag.EVENT,
+                                ref.RecordKind.EVENT),
+        ref.K1SyntaxTag.PROFILE: (ref.DependencyTag.PROFILE,
+                                  ref.RecordKind.PROFILE_BINDING),
+        ref.K1SyntaxTag.PAIR: (ref.DependencyTag.PAIR,
+                               ref.RecordKind.PAIR_DECLARATION),
+    }
+    tag, _ = tags[key.tag]
+    return ref.DependencyKey(tag, key.exact_key)
+
+
+def _asserted_dependency_environment(
+    syntax: frozenset[ref.K1SyntaxKey],
+    semantic_roots: frozenset[ref.RecordIdentity],
+    composition: ref.Composition,
+) -> ref.DependencyEnvironment:
+    associations: set[tuple[ref.DependencyKey, ref.DependencyKey]] = set()
+    for root in syntax:
+        if root.tag is not ref.K1SyntaxTag.SYMBOL:
+            continue
+        declarations = tuple(
+            item for item in composition.records
+            if isinstance(item.value, ref.DeclarationShape)
+            and item.value.symbol_key == root.exact_key)
+        if len(declarations) != 1:
+            raise AssertionError("independent symbol declaration is not unique")
+        declaration = declarations[0]
+        bindings = tuple(
+            item for item in composition.records
+            if isinstance(item.value, ref.SemanticBinding)
+            and item.value.declaration == declaration.identity)
+        if len(bindings) != 1:
+            raise AssertionError("independent symbol binding is not unique")
+        source = _asserted_lift(root)
+        associations.update({
+            (source, _asserted_dependency_key(declaration.identity)),
+            (source, _asserted_dependency_key(bindings[0].identity)),
+        })
+    roots = frozenset(_asserted_lift(item) for item in syntax) | frozenset(
+        _asserted_dependency_key(item) for item in semantic_roots)
+    association_map: dict[ref.DependencyKey, set[ref.DependencyKey]] = {}
+    for source, target in associations:
+        association_map.setdefault(source, set()).add(target)
+    reached = set(roots)
+    pending = list(roots)
+    proper: set[ref.DependencyKey] = set()
+    while pending:
+        current = pending.pop()
+        candidates = tuple(
+            item for item in composition.records
+            if item.identity.key == current.exact_key
+            and (item.identity.kind == current.record_kind
+                 or current.tag is ref.DependencyTag.DECLARATION
+                 and item.identity.kind is ref.RecordKind.TYPE_DECLARATION))
+        value = candidates[0].value if len(candidates) == 1 else None
+        direct = (
+            value.proper_declaration_dependencies
+            if isinstance(value, ref.TypeDeclaration)
+            else value.proper_type_dependencies
+            if isinstance(value, ref.DeclarationShape)
+            else value.support
+            if isinstance(value, ref.ContractSpec)
+            else value.proper_semantic_dependencies
+            if isinstance(value, (ref.SemanticBinding, ref.ProfileBinding,
+                                  ref.OccurrenceSemanticContractBundle))
+            else frozenset())
+        direct_keys = {_asserted_dependency_key(item) for item in direct}
+        proper.update(direct_keys)
+        for target in association_map.get(current, set()) | direct_keys:
+            if target not in reached:
+                reached.add(target)
+                pending.append(target)
+    expanded = roots | frozenset(target for _, target in associations)
+    return ref.DependencyEnvironment(
+        syntax, roots, frozenset(associations), expanded, frozenset(proper),
+        frozenset(reached - roots), frozenset())
+
+
 def _rewrite(universe: ref.Universe, replacements: dict[ref.RecordIdentity, ref.LogicalRecord | None]) -> ref.Universe:
     def one(record: ref.LogicalRecord) -> ref.LogicalRecord | None:
         if record.identity in replacements:
@@ -386,13 +558,7 @@ class K3XReferenceTests(unittest.TestCase):
                     item.identity for item in package.profile_bindings
                     if item.value.profile_key == target.profile_key)
             if isinstance(target, ref.ReasoningTarget):
-                roots = {target.semantic_environment}
-                for subject in target.subjects:
-                    if isinstance(subject, ref.RecordIdentity):
-                        roots.add(subject)
-                    elif isinstance(subject, ref.ConfluenceSubject):
-                        roots.add(subject.contract_identity)
-                return frozenset(roots)
+                return _asserted_reasoning_roots(target)
             self.fail(f"unexpected typed capability target: {target!r}")
         for descriptor_record in package.services:
             with self.subTest(exact_descriptor=descriptor_record.identity.key.local):
@@ -457,11 +623,36 @@ class K3XReferenceTests(unittest.TestCase):
             self.assertEqual(target.semantic_environment.key.local, environment)
             self.assertEqual(tuple(
                 subject.contract_identity.key.local
-                if isinstance(subject, ref.ConfluenceSubject)
-                else subject.key.local
-                if isinstance(subject, ref.RecordIdentity)
-                else subject
+                if isinstance(subject, ref.ContractSubject)
+                else subject.formula.value
+                if isinstance(subject, ref.FormulaSubject)
+                else self.fail("bare reasoning subject")
                 for subject in target.subjects), subjects)
+        with self.assertRaises(TypeError):
+            ref.ReasoningTarget(
+                "FORMULA_ENTAILMENT", ("f_lex", "g_lex"),  # type: ignore[arg-type]
+                fx.rid(ref.RecordKind.SEMANTIC_ENVIRONMENT, "E_lex",
+                       namespace="lexical.environment"))
+        lexical_target = next(iter(descriptors["LEX_CAP"].supported_targets))
+        assert isinstance(lexical_target, ref.ReasoningTarget)
+        omitted_subject = replace(
+            lexical_target, subjects=lexical_target.subjects[:1])
+        lexical_descriptor_record = next(
+            item for item in package.services
+            if item.identity.key.local == "LEX_CAP")
+        omitted_descriptor = replace(
+            lexical_descriptor_record,
+            value=replace(lexical_descriptor_record.value,
+                          supported_targets=frozenset({omitted_subject})))
+        omitted_replay = ref.replay(_rewrite(
+            construction.universe,
+            {lexical_descriptor_record.identity: omitted_descriptor}))
+        self.assertIsInstance(omitted_replay, ref.CompositionReplay)
+        self.assertEqual(omitted_replay.formation, ref.Formation.MALFORMED)
+        with self.assertRaises(TypeError):
+            replace(lexical_target, semantic_environment=fx.rid(
+                ref.RecordKind.TRUST_ENVIRONMENT, "E_lex",
+                namespace="lexical.environment"))
         self.assertEqual(
             {local: (descriptor.service.key.local,
                      {root.key.local for root in descriptor.required_trust_roots})
@@ -554,21 +745,7 @@ class K3XReferenceTests(unittest.TestCase):
             {item.key.local for item in verification_schema.support},
             {"T(CodingEvidenceEntry)"})
 
-        expected_task_syntax = frozenset({
-            ref.K1SyntaxRoot("K1_PLUGIN", "CK@1"),
-            ref.K1SyntaxRoot("K1_SYMBOL", "SP(task_accepts)@1"),
-            ref.K1SyntaxRoot("K1_DECLARATION", "DP(task_accepts)@1"),
-            ref.K1SyntaxRoot(
-                "K1_SIGNATURE",
-                "(T(TaskSpec),T(RepositorySnapshot),EvidenceStore)->Bool"),
-            ref.K1SyntaxRoot("K1_FACETS", "({}, {final}, {evidence})"),
-            ref.K1SyntaxRoot("K1_DECLARATION", "T(TaskSpec)@1"),
-            ref.K1SyntaxRoot(
-                "K1_DECLARATION", "T(RepositorySnapshot)@1"),
-            ref.K1SyntaxRoot("K1_LITERAL", "t_t:T(TaskSpec)"),
-            ref.K1SyntaxRoot(
-                "K1_LITERAL", "F_t:T(RepositorySnapshot)"),
-        })
+        expected_task_syntax = _asserted_syntax_keys("task")
         task_environment = _at(
             construction.universe, construction.semantic_environment).value
         task_dependencies = _at(
@@ -578,7 +755,14 @@ class K3XReferenceTests(unittest.TestCase):
             expected_task_syntax)
         self.assertEqual(task_dependencies.syntax_root_keys,
                          expected_task_syntax)
-        rogue_syntax = ref.K1SyntaxRoot("K1_LITERAL", "rogue")
+        self.assertEqual(
+            task_dependencies,
+            _asserted_dependency_environment(
+                expected_task_syntax, frozenset({construction.binding}),
+                composition))
+        rogue_syntax = ref.K1SyntaxKey(
+            ref.K1SyntaxTag.DECLARATION,
+            fx.key("T(rogue)", namespace="coding.type"))
         changed_environment = replace(
             _at(construction.universe, construction.semantic_environment),
             value=replace(task_environment,
@@ -589,7 +773,8 @@ class K3XReferenceTests(unittest.TestCase):
             value=replace(task_dependencies,
                           syntax_root_keys=expected_task_syntax | {rogue_syntax},
                           expanded_root_keys=(task_dependencies.expanded_root_keys
-                                              | {rogue_syntax})))
+                                              | {ref.lift_syntax_key(
+                                                  rogue_syntax)})))
         changed_syntax = _rewrite(construction.universe, {
             construction.semantic_environment: changed_environment,
             construction.dependency_environment: changed_dependencies})
@@ -1046,14 +1231,22 @@ class K3XReferenceTests(unittest.TestCase):
         environment_record = _at(construction.universe, construction.semantic_environment)
         dependency_record = _at(construction.universe, construction.dependency_environment)
 
-        no_declaration_env = replace(environment_record, value=replace(environment_record.value, declarations=(), mechanically_extracted_dependencies=frozenset({construction.binding})))
-        no_declaration_dep = replace(dependency_record, value=replace(dependency_record.value, syntax_root_keys=frozenset(), expanded_root_keys=frozenset({construction.binding})))
+        no_declaration_env = replace(environment_record, value=replace(environment_record.value, declarations=(), mechanically_extracted_dependencies=frozenset()))
+        no_declaration_dep = replace(dependency_record, value=replace(
+            dependency_record.value, syntax_root_keys=frozenset(),
+            expanded_root_keys=frozenset({ref.dependency_key(
+                construction.binding)})))
         no_declaration = _rewrite(construction.universe, {construction.declaration: None, construction.semantic_environment: no_declaration_env, construction.dependency_environment: no_declaration_dep})
         declaration_result = ref.replay(no_declaration)
         self.assertEqual(declaration_result.formation, ref.Formation.MALFORMED)
 
-        no_binding_env = replace(environment_record, value=replace(environment_record.value, bindings=(), mechanically_extracted_dependencies=frozenset({construction.declaration})))
-        no_binding_dep = replace(dependency_record, value=replace(dependency_record.value, subject_root_keys=frozenset(), expanded_root_keys=frozenset({construction.declaration})))
+        no_binding_env = replace(environment_record, value=replace(
+            environment_record.value, bindings=(),
+            mechanically_extracted_dependencies=_asserted_syntax_keys("task")))
+        no_binding_dep = replace(dependency_record, value=replace(
+            dependency_record.value, subject_root_keys=frozenset(),
+            expanded_root_keys=frozenset({ref.dependency_key(
+                construction.declaration)})))
         no_binding = _rewrite(construction.universe, {construction.binding: None, construction.semantic_environment: no_binding_env, construction.dependency_environment: no_binding_dep})
         binding_result = ref.replay(no_binding)
         self.assertEqual(binding_result.formation, ref.Formation.MALFORMED)
@@ -1568,45 +1761,25 @@ class K3XReferenceTests(unittest.TestCase):
         duplicate_query = replace(service_bad_kind, observation_queries=service_bad_kind.observation_queries * 2)
         self.assertEqual(ref.validate_contract_spec(duplicate_query).details[0], "DUPLICATE_OBSERVATION_QUERY")
         dependency = _at(forward.universe, forward.universe.request.dependency_environment)
-        expected_confluence_syntax = {
-            ("K1_PLUGIN", "CK@1"),
-            ("K1_FORMULA", "f_c_o"), ("K1_FORMULA", "f_c_d"),
-            ("K1_LITERAL", "s_c:T(ObservationSpec)"),
-            ("K1_LITERAL", "P_c:T(RepositorySnapshot)"),
-            ("K1_LITERAL", "F_c:T(RepositorySnapshot)"),
-            ("K1_LITERAL", "O_c:T(ObservationResult)"),
-            ("K1_AUTHORITY", "SRC(c,1)/AUTH(c,1)/AF(c,1)"),
-            ("K1_AUTHORITY", "SRC(c,2)/AUTH(c,2)/AF(c,2)"),
-            ("K1_SYMBOL", "SF(observe)@1"),
-            ("K1_DECLARATION", "DF(observe)@1"),
-            ("K1_SIGNATURE",
-             "(T(ObservationSpec),T(RepositorySnapshot))->T(ObservationResult)"),
-            ("K1_FACETS", "({}, {pre,final})"),
-            ("K1_SYMBOL", "SF(changes_between)@1"),
-            ("K1_DECLARATION", "DF(changes_between)@1"),
-            ("K1_SIGNATURE",
-             "(T(RepositorySnapshot),T(RepositorySnapshot))->T(ChangeSet)"),
-            ("K1_FACETS", "({pre}, {final})"),
-            ("K1_SYMBOL", "SP(observations_equal)@1"),
-            ("K1_DECLARATION", "DP(observations_equal)@1"),
-            ("K1_SIGNATURE",
-             "(T(ObservationResult),T(ObservationResult))->Bool"),
-            ("K1_FACETS", "({pre}, {final})"),
-            ("K1_SYMBOL", "SP(dependency_metadata_changed)@1"),
-            ("K1_DECLARATION", "DP(dependency_metadata_changed)@1"),
-            ("K1_SIGNATURE", "(T(ChangeSet))->Bool"),
-            ("K1_FACETS", "({pre,final})"),
-        }
-        self.assertEqual(
-            {(item.tag, item.local) for item in dependency.value.syntax_root_keys},
-            expected_confluence_syntax)
+        expected_confluence_syntax = _asserted_syntax_keys("confluence")
+        self.assertEqual(dependency.value.syntax_root_keys,
+                         expected_confluence_syntax)
         semantic = _at(
             forward.universe, forward.universe.request.semantic_environment)
+        self.assertEqual(semantic.value.mechanically_extracted_dependencies,
+                         expected_confluence_syntax)
         self.assertEqual(
-            {(item.tag, item.local)
-             for item in semantic.value.mechanically_extracted_dependencies},
-            expected_confluence_syntax)
-        rogue_root = ref.K1SyntaxRoot("K1_FORMULA", "rogue")
+            dependency.value,
+            _asserted_dependency_environment(
+                expected_confluence_syntax, frozenset(),
+                ref.compose_records(forward.universe.records)))
+        with self.assertRaises(ValueError):
+            ref.K1SyntaxKey(  # type: ignore[arg-type]
+                "K1_FORMULA", fx.key("rogue", namespace="confluence"))
+        rogue_root = ref.K1SyntaxKey(
+            ref.K1SyntaxTag.DECLARATION,
+            fx.key("T(rogue)", namespace="coding.type"))
+        rogue_dependency = ref.lift_syntax_key(rogue_root)
         coherent_semantic = replace(
             semantic, value=replace(
                 semantic.value,
@@ -1618,17 +1791,21 @@ class K3XReferenceTests(unittest.TestCase):
                 dependency.value,
                 syntax_root_keys=dependency.value.syntax_root_keys | {rogue_root},
                 expanded_root_keys=dependency.value.expanded_root_keys
-                | {rogue_root}))
+                | {rogue_dependency}))
         with self.assertRaises(ValueError):
             ref.replay(_rewrite(forward.universe, {
                 semantic.identity: coherent_semantic,
                 dependency.identity: coherent_dependency}))
         foreign = fx.rid(ref.RecordKind.DECLARATION, "foreign", namespace="confluence")
+        foreign_dependency = ref.dependency_key(foreign)
+        with self.assertRaises(TypeError):
+            replace(dependency.value, expanded_root_keys=
+                    dependency.value.expanded_root_keys | {foreign})
         dependency_mutations = {
-            "syntax_root_keys": dependency.value.syntax_root_keys | frozenset({foreign}),
+            "syntax_root_keys": dependency.value.syntax_root_keys | frozenset({rogue_root}),
             "subject_root_keys": frozenset(),
-            "binding_association_edges": frozenset({(foreign, foreign)}),
-            "expanded_root_keys": dependency.value.expanded_root_keys | frozenset({foreign}),
+            "binding_association_edges": frozenset({(foreign_dependency, foreign_dependency)}),
+            "expanded_root_keys": dependency.value.expanded_root_keys | frozenset({foreign_dependency}),
             "proper_dependencies": frozenset(),
             "transitive_dependency_closure": frozenset(),
             "validation_references": frozenset({foreign}),
@@ -2076,6 +2253,7 @@ class K3XReferenceTests(unittest.TestCase):
                 replace(migration_record, value=mutation))
         dangling_dependency = fx.rid(
             ref.RecordKind.BINDING, "dangling", namespace="evolution")
+        dangling_dependency_key = ref.dependency_key(dangling_dependency)
         evolution_dependency = next(
             item for item in evolution_composition.records
             if isinstance(item.value, ref.DependencyEnvironment)
@@ -2086,10 +2264,10 @@ class K3XReferenceTests(unittest.TestCase):
                 evolution_dependency.value,
                 proper_dependencies=(
                     evolution_dependency.value.proper_dependencies
-                    | frozenset({dangling_dependency})),
+                    | frozenset({dangling_dependency_key})),
                 transitive_dependency_closure=(
                     evolution_dependency.value.transitive_dependency_closure
-                    | frozenset({dangling_dependency})))))
+                    | frozenset({dangling_dependency_key})))))
         for index, producer_record in enumerate(evolution_producers):
             rogue = fx.record(
                 ref.RecordKind.PRODUCER, f"rogue.evolution.{index}",
