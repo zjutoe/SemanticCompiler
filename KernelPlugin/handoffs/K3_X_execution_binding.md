@@ -1,8 +1,11 @@
 # K3-X finite executable spike: exact execution binding
 
 Status: `REVIEW_CANDIDATE`. This document grants no execution authority until
-its exact committed version is independently accepted and main separately
-dispatches that accepted binding.
+its exact committed version and the execution-command amendment are
+independently accepted and main separately dispatches that accepted binding.
+
+The normative command isolation and early-failure rules are amended by
+`KernelPlugin/handoffs/K3_X_execution_command_amendment.md`.
 
 ## 1. Bound accepted implementation
 
@@ -39,8 +42,9 @@ binding.
 - version: `3.13.9 | packaged by Anaconda, Inc. | (main, Oct 21 2025, 19:16:10) [GCC 11.2.0]`
 - working directory: `/home/mye/src/llm/SemanticCompiler`
 
-The run must start from the clean committed state containing this accepted
-binding. The pre-existing ignored repository-root `.ruff_cache/` is explicitly
+Main's later dispatch must name one exact execution `HEAD` containing the
+accepted binding and amendment. Preflight must require that exact `HEAD`; an
+arbitrary descendant is forbidden. The pre-existing ignored repository-root `.ruff_cache/` is explicitly
 excluded from all inputs and must not be read, changed, copied, hashed, or
 reported as evidence. Its presence does not authorize an isolated checkout or
 another output root.
@@ -70,18 +74,19 @@ tracked/untracked status, and absence of K3-X cache files, execute each command
 exactly once and in this order:
 
 ```text
-/opt/anaconda3/bin/python -B -m unittest KernelPlugin.k3x.test_reference -v
-/opt/anaconda3/bin/python -B -c "import ast, pathlib; paths = ('KernelPlugin/k3x/__init__.py', 'KernelPlugin/k3x/reference.py', 'KernelPlugin/k3x/coding_plugin.py', 'KernelPlugin/k3x/fixtures.py', 'KernelPlugin/k3x/test_reference.py'); [ast.parse(pathlib.Path(path).read_text(encoding='utf-8'), filename=path) for path in paths]"
+/opt/anaconda3/bin/python -E -S -B -m unittest KernelPlugin.k3x.test_reference -v
+/opt/anaconda3/bin/python -E -S -B -c "import ast, pathlib; paths = ('KernelPlugin/k3x/__init__.py', 'KernelPlugin/k3x/reference.py', 'KernelPlugin/k3x/coding_plugin.py', 'KernelPlugin/k3x/fixtures.py', 'KernelPlugin/k3x/test_reference.py'); [ast.parse(pathlib.Path(path).read_text(encoding='utf-8'), filename=path) for path in paths]"
 ```
 
-`-B` is mandatory. The syntax command parses the five exact Python files in
-memory and writes nothing. Neither command may be retried, filtered, wrapped by
-another launcher, or replaced after failure. A nonzero exit is evidence and a
-stop condition, not repair authority.
+`-E -S -B` is mandatory. The syntax command parses the five exact Python files
+in memory and writes nothing. Neither command may be retried, filtered, wrapped
+by another launcher, or replaced after failure. A nonzero exit is evidence and
+a stop condition, not repair authority.
 
 ## 5. Sole output and report content
 
-The sole authorized write is:
+The sole authorized write, whether preflight/command execution succeeds or
+fails, is:
 
 `docs/reports/kernel_plugin/K3_X_Executable_Spike_Report.md`
 
@@ -89,7 +94,8 @@ The report must record:
 
 - this binding commit and the accepted implementation commit;
 - all six source blobs and the Python executable identity/hash/version;
-- each exact command, one execution, exit status, and concise result;
+- each exact command reached, one execution, exit status, and concise result;
+- every later command not reached after failure, recorded as `NOT_RUN`;
 - all thirteen named checks and their pass/fail status;
 - the exact 102/102, 42/42, and 3,740-node counts;
 - confirmation that the tracked worktree was clean before execution and only
@@ -112,10 +118,11 @@ filesystem/process/network semantics, model call, benchmark, serialization,
 external artifact, held-out access, K4 work, additional report, or commit by the
 operator. It does not authorize changing this binding.
 
-Stop without executing if any bound commit, blob, executable, hash, command,
-path, constructor, domain, clean-state condition, or side-effect boundary does
-not match. Stop after the first command if it fails or creates any output other
-than the sole report (which is written only after both commands finish).
+If any bound commit, blob, executable, hash, command, path, constructor, domain,
+clean-state condition, or side-effect boundary does not match, run no evidence
+command and write only the failure report. Stop after the first command that
+fails or creates an unauthorized output, and write only the report with later
+commands marked `NOT_RUN`.
 
 ## 7. Result gate
 
