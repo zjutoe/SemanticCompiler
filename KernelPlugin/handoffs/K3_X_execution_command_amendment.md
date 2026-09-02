@@ -20,7 +20,8 @@ locale values, and the exact bound interpreter followed by `-E -S -B`:
   processing;
 - `-B` disables bytecode/cache writes.
 
-The bound environment launcher is `/usr/bin/env`, SHA-256
+The bound environment launcher is `/usr/bin/env`, version
+`env (GNU coreutils) 9.5`, SHA-256
 `190c360452d515eac29236055581587f162d5b53f56104df169fc51d5c4661c9`.
 It supplies exactly `LC_ALL=C.UTF-8` and `LANG=C.UTF-8`; no other environment
 variable reaches Python. Before `/usr/bin/env` is executed, the operator process
@@ -38,12 +39,14 @@ changed.
 
 The operator shell is `/usr/bin/zsh` 5.9, SHA-256
 `288d795a07cd3d2fbbd8f7ead127a5428153a02203f83bd19cda3b50b03cc697`,
-started by the execution substrate exactly as shell `/usr/bin/zsh -f`,
-non-interactively with repository working directory and no login mode. `-f`
-sets `NO_RCS`, excluding user and later startup files regardless of `ZDOTDIR`.
+started by the execution substrate exactly as shell binary `/usr/bin/zsh`,
+non-interactively with repository working directory and no login mode. In this
+mode zsh reads `zshenv` but no later startup file. The execution substrate must
+provide no `ZDOTDIR`; its absence is a pre-start condition.
 The unavoidable global `/etc/zshenv` is bound at 510 bytes with SHA-256
 `69ed780cdba8e32191af71649c8b7529f0aa1e83c28325dbfcd45d139eb3fbc2`;
-`/home/mye/.zshenv` must be absent. Any mismatch is a preflight failure.
+`/home/mye/.zshenv` must be absent. Any mismatch is a preflight failure. These
+conditions bind the only startup files read before the builtin prelude.
 The exact amended commands include a builtin-only prelude: remove every
 exported variable, make `SHLVL` and `_` non-exported, export the two locale
 values, assert the complete exported-name set, then use zsh `exec -c` so the
@@ -61,8 +64,8 @@ Before dispatch, main must bind an exact execution `HEAD`. Preflight requires
 that exact `HEAD`, the accepted implementation blobs, the independently
 accepted binding and amendment blobs at their exact paths, the exact zsh, env,
 and Python paths/hashes/versions, the bound global zshenv
-size/hash, absence of the user zshenv, and the non-interactive/non-login `-f`
-operator mode, exact equality of the operator's complete exported environment to the two fixed
+size/hash, absence of the user zshenv and `ZDOTDIR`, and the
+non-interactive/non-login operator mode, exact equality of the operator's complete exported environment to the two fixed
 locale entries, clean tracked/untracked status, an absent sole report
 path, and no K3-X caches. Ancestry alone is insufficient.
 
