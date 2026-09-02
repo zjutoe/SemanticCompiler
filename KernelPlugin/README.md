@@ -1,6 +1,6 @@
 # Contract IR kernel and plugin design process
 
-> Status: K0 through K3-S are accepted and complete. K3-X is eligible for just-in-time handoff design but has no handoff or mutation authority yet; K4 remains roadmap-only.
+> Status: K0 through K3-S and K3-X are accepted and complete. K4 remains roadmap-only and has no handoff or execution authority.
 
 The accepted semantic authority is the [Contract IR Minimal Kernel and Coding Plugin Research Plan](../docs/plans/Contract_IR_Kernel_and_Coding_Plugin_Research_Plan.md), exact blob `01f959bc55f644a376f8ffa6059e9e77936be77c`, plus the [K3-S/K3-X plan amendment](../docs/plans/K3_Semantics_and_Executable_Spike_Amendment.md), exact blob `7f1c3627245ec0c0fc86df64f77e374d104649a0`. Their acceptance records are the [original plan review](../docs/reviews/kernel_plugin/Contract_IR_Kernel_Plugin_Plan_3f7fc69_review.md) and [amendment review](../docs/reviews/kernel_plugin/K3_SX_Plan_19379b3_review.md).
 
@@ -30,7 +30,7 @@ The [K3-S minimal coding-plugin semantics](K3_S_Minimal_Coding_Plugin_Semantics_
 | K1 | Kernel calculus and denotational semantics | Accepted and complete |
 | K2 | Versioned plugin ABI and reasoning interface | [Accepted and complete](../docs/reviews/kernel_plugin/K2_Plugin_ABI_5b6f157_review.md) |
 | K3-S | Minimal coding-plugin semantics | [Accepted and complete](../docs/reviews/kernel_plugin/K3_S_Semantics_ced9082_review.md) |
-| K3-X | Finite in-memory toy kernel and accepted toy coding plugin | Eligible for just-in-time handoff design; no handoff yet |
-| K4 | Held-out semantic closure and manual binding assessment | Roadmap only |
+| K3-X | Finite in-memory toy kernel and accepted toy coding plugin | Accepted and complete; [final executable report](../docs/reports/kernel_plugin/K3_X_Executable_Spike_Report.md) |
+| K4 | Held-out semantic closure and manual binding assessment | Roadmap only; no handoff or authority |
 
 Execution requires an accepted handoff plus a separate main-thread binding of the exact clean source commit, handoff blob, allowed mutation path, verification commands, and output roots. Only one writer may hold the mutation lease, and the writer does not commit. K2 completion and the plan amendment grant no K3-S or K3-X mutation authority; each stage requires its own just-in-time handoff and independent review.
