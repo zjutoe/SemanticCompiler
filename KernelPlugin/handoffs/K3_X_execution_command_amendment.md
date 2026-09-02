@@ -42,11 +42,13 @@ The operator shell is `/usr/bin/zsh` 5.9, SHA-256
 started by the execution substrate exactly as shell binary `/usr/bin/zsh`,
 non-interactively with repository working directory and no login mode. In this
 mode zsh reads `zshenv` but no later startup file. The execution substrate must
-provide no `ZDOTDIR`; its absence is a pre-start condition.
+provide pre-start `HOME=/home/mye` and no `ZDOTDIR`; both are exact pre-start
+conditions checked and recorded before shell creation.
 The unavoidable global `/etc/zshenv` is bound at 510 bytes with SHA-256
 `69ed780cdba8e32191af71649c8b7529f0aa1e83c28325dbfcd45d139eb3fbc2`;
-`/home/mye/.zshenv` must be absent. Any mismatch is a preflight failure. These
-conditions bind the only startup files read before the builtin prelude.
+`/home/mye/.zshenv` and `/etc/zshenv.zwc` must be absent. Any mismatch is a
+preflight failure. These conditions bind the only startup content selectable
+before the builtin prelude.
 The exact amended commands include a builtin-only prelude: remove every
 exported variable, make `SHLVL` and `_` non-exported, export the two locale
 values, assert the complete exported-name set, then use zsh `exec -c` so the
@@ -64,7 +66,8 @@ Before dispatch, main must bind an exact execution `HEAD`. Preflight requires
 that exact `HEAD`, the accepted implementation blobs, the independently
 accepted binding and amendment blobs at their exact paths, the exact zsh, env,
 and Python paths/hashes/versions, the bound global zshenv
-size/hash, absence of the user zshenv and `ZDOTDIR`, and the
+size/hash, absence of `/etc/zshenv.zwc` and the user zshenv, exact pre-start
+`HOME=/home/mye`, absence of `ZDOTDIR`, and the
 non-interactive/non-login operator mode, exact equality of the operator's complete exported environment to the two fixed
 locale entries, clean tracked/untracked status, an absent sole report
 path, and no K3-X caches. Ancestry alone is insufficient.

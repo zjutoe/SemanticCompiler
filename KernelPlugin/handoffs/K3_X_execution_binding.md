@@ -52,8 +52,10 @@ binding.
   non-interactive and non-login
 - unavoidable startup input: `/etc/zshenv`, 510 bytes, SHA-256
   `69ed780cdba8e32191af71649c8b7529f0aa1e83c28325dbfcd45d139eb3fbc2`
-- excluded startup inputs: `/home/mye/.zshenv` and the pre-start `ZDOTDIR`
-  variable must be absent; non-interactive/non-login mode reads no later RC
+- excluded startup inputs: `/etc/zshenv.zwc`, `/home/mye/.zshenv`, and the
+  pre-start `ZDOTDIR` variable must be absent
+- pre-start home: exactly `HOME=/home/mye`, fixing the user-zshenv lookup path;
+  non-interactive/non-login mode reads no later RC
 - `/usr/bin/env` loader environment: empty through zsh builtin `exec -c`
 - launcher/Python environment: exactly the two fixed locale entries
 
@@ -112,8 +114,9 @@ On success, the report must record:
 - this binding commit and the accepted implementation commit;
 - the accepted binding and amendment blob IDs at the dispatched `HEAD`;
 - all six source blobs and the zsh/env/Python identities, hashes and versions;
-- exact `/usr/bin/zsh` non-interactive/non-login mode, global zshenv
-  size/hash, and user-zshenv/`ZDOTDIR` absence;
+- exact `/usr/bin/zsh` non-interactive/non-login mode, pre-start
+  `HOME=/home/mye`, global zshenv size/hash, and
+  `/etc/zshenv.zwc`/user-zshenv/`ZDOTDIR` absence;
 - each exact command reached, one execution, exit status, and concise result;
 - every later command not reached after failure, recorded as `NOT_RUN`;
 - all thirteen named checks and their pass/fail status;
