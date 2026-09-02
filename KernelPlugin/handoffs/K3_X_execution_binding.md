@@ -45,8 +45,10 @@ binding.
 - launcher SHA-256:
   `190c360452d515eac29236055581587f162d5b53f56104df169fc51d5c4661c9`
 - Python-visible environment: exactly `LC_ALL=C.UTF-8`, `LANG=C.UTF-8`
-- launcher-inherited environment: exactly the same two entries, established by
-  complete exported-environment equality in the operator before launcher exec
+- operator shell: `/usr/bin/zsh` 5.9, SHA-256
+  `288d795a07cd3d2fbbd8f7ead127a5428153a02203f83bd19cda3b50b03cc697`
+- `/usr/bin/env` loader environment: empty through zsh builtin `exec -c`
+- launcher/Python environment: exactly the two fixed locale entries
 
 Main's later dispatch must name one exact execution `HEAD` containing the
 accepted binding and amendment. Preflight must require that exact `HEAD`; an
@@ -80,11 +82,12 @@ tracked/untracked status, and absence of K3-X cache files, execute each command
 exactly once and in this order:
 
 ```text
-/usr/bin/env -i LC_ALL=C.UTF-8 LANG=C.UTF-8 /opt/anaconda3/bin/python -E -S -B -m unittest KernelPlugin.k3x.test_reference -v
-/usr/bin/env -i LC_ALL=C.UTF-8 LANG=C.UTF-8 /opt/anaconda3/bin/python -E -S -B -c "import ast, pathlib; paths = ('KernelPlugin/k3x/__init__.py', 'KernelPlugin/k3x/reference.py', 'KernelPlugin/k3x/coding_plugin.py', 'KernelPlugin/k3x/fixtures.py', 'KernelPlugin/k3x/test_reference.py'); [ast.parse(pathlib.Path(path).read_text(encoding='utf-8'), filename=path) for path in paths]"
+unset ${(k)parameters[(R)*-export*]}; typeset +x SHLVL _; export LC_ALL=C.UTF-8 LANG=C.UTF-8; exported_names=(${(k)parameters[(R)*-export*]}); [[ ${(j: :)${(on)exported_names}} == 'LANG LC_ALL' ]] || exit 125; exec -c /usr/bin/env -i LC_ALL=C.UTF-8 LANG=C.UTF-8 /opt/anaconda3/bin/python -E -S -B -m unittest KernelPlugin.k3x.test_reference -v
+unset ${(k)parameters[(R)*-export*]}; typeset +x SHLVL _; export LC_ALL=C.UTF-8 LANG=C.UTF-8; exported_names=(${(k)parameters[(R)*-export*]}); [[ ${(j: :)${(on)exported_names}} == 'LANG LC_ALL' ]] || exit 125; exec -c /usr/bin/env -i LC_ALL=C.UTF-8 LANG=C.UTF-8 /opt/anaconda3/bin/python -E -S -B -c "import ast, pathlib; paths = ('KernelPlugin/k3x/__init__.py', 'KernelPlugin/k3x/reference.py', 'KernelPlugin/k3x/coding_plugin.py', 'KernelPlugin/k3x/fixtures.py', 'KernelPlugin/k3x/test_reference.py'); [ast.parse(pathlib.Path(path).read_text(encoding='utf-8'), filename=path) for path in paths]"
 ```
 
-The exact launcher, fixed environment, and `-E -S -B` are mandatory. The syntax command parses the five exact Python files
+The exact operator shell, builtin prelude, `exec -c`, launcher, fixed
+environment, and `-E -S -B` are mandatory. The syntax command parses the five exact Python files
 in memory and writes nothing. Neither command may be retried, filtered, wrapped
 by another launcher, or replaced after failure. A nonzero exit is evidence and
 a stop condition, not repair authority.

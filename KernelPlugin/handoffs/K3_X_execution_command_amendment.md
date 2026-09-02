@@ -36,11 +36,20 @@ The working directory remains the exact repository root, so the committed
 No other command, semantic check, fixture, expected result, or conclusion is
 changed.
 
+The operator shell is `/usr/bin/zsh` 5.9, SHA-256
+`288d795a07cd3d2fbbd8f7ead127a5428153a02203f83bd19cda3b50b03cc697`,
+started non-interactively with repository working directory and no login mode.
+The exact amended commands include a builtin-only prelude: remove every
+exported variable, make `SHLVL` and `_` non-exported, export the two locale
+values, assert the complete exported-name set, then use zsh `exec -c` so the
+`/usr/bin/env` dynamic loader inherits an empty environment. `env -i` injects
+only the two fixed locale values into Python.
+
 The exact amended commands are:
 
 ```text
-/usr/bin/env -i LC_ALL=C.UTF-8 LANG=C.UTF-8 /opt/anaconda3/bin/python -E -S -B -m unittest KernelPlugin.k3x.test_reference -v
-/usr/bin/env -i LC_ALL=C.UTF-8 LANG=C.UTF-8 /opt/anaconda3/bin/python -E -S -B -c "import ast, pathlib; paths = ('KernelPlugin/k3x/__init__.py', 'KernelPlugin/k3x/reference.py', 'KernelPlugin/k3x/coding_plugin.py', 'KernelPlugin/k3x/fixtures.py', 'KernelPlugin/k3x/test_reference.py'); [ast.parse(pathlib.Path(path).read_text(encoding='utf-8'), filename=path) for path in paths]"
+unset ${(k)parameters[(R)*-export*]}; typeset +x SHLVL _; export LC_ALL=C.UTF-8 LANG=C.UTF-8; exported_names=(${(k)parameters[(R)*-export*]}); [[ ${(j: :)${(on)exported_names}} == 'LANG LC_ALL' ]] || exit 125; exec -c /usr/bin/env -i LC_ALL=C.UTF-8 LANG=C.UTF-8 /opt/anaconda3/bin/python -E -S -B -m unittest KernelPlugin.k3x.test_reference -v
+unset ${(k)parameters[(R)*-export*]}; typeset +x SHLVL _; export LC_ALL=C.UTF-8 LANG=C.UTF-8; exported_names=(${(k)parameters[(R)*-export*]}); [[ ${(j: :)${(on)exported_names}} == 'LANG LC_ALL' ]] || exit 125; exec -c /usr/bin/env -i LC_ALL=C.UTF-8 LANG=C.UTF-8 /opt/anaconda3/bin/python -E -S -B -c "import ast, pathlib; paths = ('KernelPlugin/k3x/__init__.py', 'KernelPlugin/k3x/reference.py', 'KernelPlugin/k3x/coding_plugin.py', 'KernelPlugin/k3x/fixtures.py', 'KernelPlugin/k3x/test_reference.py'); [ast.parse(pathlib.Path(path).read_text(encoding='utf-8'), filename=path) for path in paths]"
 ```
 
 Before dispatch, main must bind an exact execution `HEAD`. Preflight requires
