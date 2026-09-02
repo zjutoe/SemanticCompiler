@@ -47,6 +47,12 @@ binding.
 - Python-visible environment: exactly `LC_ALL=C.UTF-8`, `LANG=C.UTF-8`
 - operator shell: `/usr/bin/zsh` 5.9, SHA-256
   `288d795a07cd3d2fbbd8f7ead127a5428153a02203f83bd19cda3b50b03cc697`
+- operator invocation: execution-substrate shell `/usr/bin/zsh -f`,
+  non-interactive and non-login
+- unavoidable startup input: `/etc/zshenv`, 510 bytes, SHA-256
+  `69ed780cdba8e32191af71649c8b7529f0aa1e83c28325dbfcd45d139eb3fbc2`
+- excluded startup input: `/home/mye/.zshenv` must be absent; `-f` disables
+  user and later RC processing independently of `ZDOTDIR`
 - `/usr/bin/env` loader environment: empty through zsh builtin `exec -c`
 - launcher/Python environment: exactly the two fixed locale entries
 
@@ -77,7 +83,8 @@ artifact, or held-out content outside these committed records is an input.
 
 ## 4. Exact evidence commands
 
-After verifying the source commit, six blobs, runtime path, runtime hash, clean
+After verifying the source commit, six blobs, all three executable paths,
+hashes/versions, exact zsh invocation and startup-file boundary, clean
 tracked/untracked status, and absence of K3-X cache files, execute each command
 exactly once and in this order:
 
@@ -102,7 +109,10 @@ fails, is:
 On success, the report must record:
 
 - this binding commit and the accepted implementation commit;
-- all six source blobs and the Python executable identity/hash/version;
+- the accepted binding and amendment blob IDs at the dispatched `HEAD`;
+- all six source blobs and the zsh/env/Python identities, hashes and versions;
+- exact `/usr/bin/zsh -f` non-interactive/non-login mode, global zshenv
+  size/hash, and user-zshenv absence;
 - each exact command reached, one execution, exit status, and concise result;
 - every later command not reached after failure, recorded as `NOT_RUN`;
 - all thirteen named checks and their pass/fail status;
