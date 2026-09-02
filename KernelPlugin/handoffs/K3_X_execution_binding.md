@@ -45,6 +45,8 @@ binding.
 - launcher SHA-256:
   `190c360452d515eac29236055581587f162d5b53f56104df169fc51d5c4661c9`
 - Python-visible environment: exactly `LC_ALL=C.UTF-8`, `LANG=C.UTF-8`
+- launcher-inherited environment: exactly the same two entries, established by
+  complete exported-environment equality in the operator before launcher exec
 
 Main's later dispatch must name one exact execution `HEAD` containing the
 accepted binding and amendment. Preflight must require that exact `HEAD`; an

@@ -23,9 +23,13 @@ locale values, and the exact bound interpreter followed by `-E -S -B`:
 The bound environment launcher is `/usr/bin/env`, SHA-256
 `190c360452d515eac29236055581587f162d5b53f56104df169fc51d5c4661c9`.
 It supplies exactly `LC_ALL=C.UTF-8` and `LANG=C.UTF-8`; no other environment
-variable reaches Python. Preflight additionally requires `LD_PRELOAD`,
-`LD_LIBRARY_PATH`, `PYTHONHOME`, and `PYTHONPATH` to be absent in the operator
-process before the launcher is invoked.
+variable reaches Python. Before `/usr/bin/env` is executed, the operator process
+must itself expose exactly those same two exported variables and no others.
+This complete equality check occurs in the already-running operator process,
+before launcher `exec`; checking a denylist is insufficient. Any additional or
+missing exported variable is a reportable preflight failure, so loader,
+auditing, debugging, tuning, Python, user, shell, and locale inputs cannot reach
+the launcher implicitly.
 
 The working directory remains the exact repository root, so the committed
 `KernelPlugin` package remains importable without `PYTHONPATH` or site startup.
@@ -42,7 +46,8 @@ The exact amended commands are:
 Before dispatch, main must bind an exact execution `HEAD`. Preflight requires
 that exact `HEAD`, the accepted implementation blobs, the independently
 accepted binding and amendment blobs at their exact paths, both runtime hashes,
-the fixed environment, clean tracked/untracked status, an absent sole report
+exact equality of the operator's complete exported environment to the two fixed
+locale entries, clean tracked/untracked status, an absent sole report
 path, and no K3-X caches. Ancestry alone is insufficient.
 
 If preflight fails and the report path is absent, no evidence command runs and
