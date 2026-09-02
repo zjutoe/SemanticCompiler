@@ -117,25 +117,27 @@ content access occurred.
 
 ## Intentionally unimplemented
 
-The finite implementation fails loudly outside the enumerated packet and does
+The implementation fails loudly outside these finite constructors. It does
 not implement:
 
-- K1/K2 declaration, binding, ContractSpec, model, descriptor, service, trust,
-  certificate, authority, evolution, observation, evidence, event, profile, or
-  request constructors not instantiated by the packet and adversarial tests;
+- any K1/K2 declaration, binding, ContractSpec role, model, descriptor,
+  service, trust, certificate, authority, evolution, observation, evidence,
+  event, profile, or request constructor not instantiated by the packet and
+  adversarial subtests;
 - general cross-plugin joint reasoning, public relation services, arbitrary
-  dependency graphs or executable relations, proof checking, or discovery
-  beyond the five closed trust projections;
-- authority admission beyond the six frozen attestations, evolution beyond the
-  four missing-matrix requirement families, certificate judgments beyond the
-  enumerated bounds/evolution/pair cases, or profiles beyond the retained
-  implementation-evidence coordinate;
+  dependency graphs, arbitrary executable relations, proof checking, or
+  discovery beyond the five closed trust projections;
+- authority admission beyond the six frozen fixture attestations (only the two
+  confluence bindings are evaluated as a graph), evolution beyond the four
+  missing-matrix requirement families, certificate judgments beyond the core
+  bounds envelope, evolution chains, and independent pair case, or profiles
+  beyond the retained implementation-evidence coordinate;
 - serialization/loading, natural-language parsing, source binding, prompting,
   model inference/training, planning, search, patch generation, benchmark
   evaluation, or a general Contract IR;
-- real filesystem/repository mutation, command/process semantics,
-  environment/network/service/database access, clock, randomness, concurrency,
-  retry, deployment, external artifacts, held-out content, or K4 work.
+- filesystem/repository mutation, command/process execution, environment,
+  network/service/database access, clock, randomness, concurrency, retry,
+  deployment, external artifacts, held-out content, or downstream/K4 work.
 
 Passing K3-X does not establish complete K2 implementability, universal coding
 semantics, natural-language translation correctness, real-repository safety,
