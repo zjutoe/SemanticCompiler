@@ -1,5 +1,7 @@
 # Semantic Compiler
 
+English | [简体中文](README_CN.md)
+
 Natural-language agents are capable, but their instructions are an unstable
 interface: equivalent requests can produce different behavior, important
 constraints can remain implicit, and uncertainty can be silently replaced by a
